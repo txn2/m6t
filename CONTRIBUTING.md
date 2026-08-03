@@ -47,14 +47,48 @@ build):
   tagging a release).
 - gosec, govulncheck, and semgrep clean; CodeQL gated against a baseline.
 
-Structural ratchets (see the
-[structural gates issue](https://github.com/txn2/m6t/issues/19)) are plain Go
-tests that fail on architectural decay: package-size budgets, an import
-ratchet, exported-surface budgets, a god-object budget on the backend
-coordinator struct (AST field/method ceilings pinned to actuals), dead-package
-and noop-interface detection, and an integration guard proving integration
-tests actually ran. **Ceilings carry zero slack and only move down.** Raising
-one is a regression that must be explicitly justified in the PR.
+### Structural ratchets
+
+The per-function linters all evaluate code *inside* one function, so a
+god-package assembled from a hundred small, tidy functions passes every one of
+them. The structural gates bound what those linters cannot see. They are plain
+Go tests in the repository root — no external tooling — so `make test` runs
+them and `make verify` gates on them.
+
+| Gate | What it bounds | Where |
+|---|---|---|
+| Package size | Lines and files per package | `package_budget_test.go` |
+| Package pin | Every package has a ratchet entry | `package_budget_test.go` |
+| Exported surface | Package-scope exported identifiers | `surface_budget_test.go` |
+| God-object | Fields and methods on the `App` coordinator | `godobject_budget_test.go` |
+| Dead package | Every package is reachable from `main` | `package_graph_test.go` |
+| Import graph | What is allowed to depend on what | `package_graph_test.go` |
+| No-op interface | Interfaces implemented only by stubs | `noop_interface_test.go` |
+| Integration guard | Tagged tests are actually executed | `integration_guard_test.go` |
+| Frontend ratchet | ESLint suppressions only shrink | `frontend_ratchet_test.go` |
+| Wiring guard | The gates above still run | `structural_gates_test.go` |
+
+**Ceilings carry zero slack and only move down.** Every ceiling is pinned at
+the measured actual, next to the gate that enforces it, with a comment saying
+what it is for. Raising one is a regression: it belongs in the PR that needs
+it, on that line, with the reason. There is no suppression comment and no
+escape hatch — the justification in review *is* the mechanism.
+
+Two deliberate exceptions, both documented at the constant:
+
+- **LOC ceilings carry headroom.** A line-count ceiling pinned to the exact
+  current count is a freeze, not a ratchet — one more line of doc comment would
+  fail the build. They are seeded as policy and re-pinned against real
+  measurements once the backend services land
+  ([#2](https://github.com/txn2/m6t/issues/2),
+  [#5](https://github.com/txn2/m6t/issues/5)).
+- **The `App` coordinator's ceilings will rise as services land**, one composed
+  handle at a time, each in the PR that adds it. What the gate stops is the
+  accumulation nobody decided on.
+
+The ESLint suppressions ceiling is **0** — the frontend baseline starts empty
+and stays empty. (That figure is checked against the gate by the agreement test,
+like every other floor on this page.)
 
 Hard rules:
 
