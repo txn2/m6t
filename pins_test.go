@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"testing"
 )
 
@@ -156,6 +157,11 @@ func TestGateFiguresAgree(t *testing.T) {
 		{
 			"CONTRIBUTING.md mutation-efficacy floor", contributing,
 			`Mutation-testing efficacy ≥ \*\*([0-9]+)%\*\*`, efficacy,
+		},
+		{
+			"CONTRIBUTING.md ESLint suppressions ceiling", contributing,
+			`ESLint suppressions ceiling is \*\*([0-9]+)\*\*`,
+			strconv.Itoa(maxFrontendSuppressions),
 		},
 	})
 }
