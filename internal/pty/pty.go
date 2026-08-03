@@ -133,6 +133,17 @@ type Attachment struct {
 	// Attaching to an already-exited session yields a channel that already
 	// holds the status, so a late consumer never blocks here.
 	Exited <-chan Exit
+
+	// Detach unregisters the consumer. Both channels close and nothing further
+	// is delivered; a consumer ranging over Chunks sees the range end and
+	// Exited yield nothing, which is how it tells a detach from a real exit.
+	//
+	// Calling it is not optional for a consumer that goes away before its
+	// session does. A consumer left registered keeps its queue — up to
+	// consumerQueue chunks of scrollback — alive for the rest of the session's
+	// life, so one terminal that reconnects repeatedly would accumulate them.
+	// Detach is idempotent and safe to call on an already-exited session.
+	Detach func()
 }
 
 // shellFor returns the argv of the user's login shell for the named platform.

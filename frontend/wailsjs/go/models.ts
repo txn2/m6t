@@ -19,3 +19,22 @@ export namespace buildinfo {
 
 }
 
+export namespace stream {
+	
+	export class Endpoint {
+	    port: number;
+	    token: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Endpoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.port = source["port"];
+	        this.token = source["token"];
+	    }
+	}
+
+}
+

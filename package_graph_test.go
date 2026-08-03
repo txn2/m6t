@@ -59,11 +59,21 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// nothing else is positioned to do. The edge runs one way only — pty
 	// imports no first-party package at all, which is what keeps it usable
 	// from the stream server (#3) without dragging the Wails layer in.
+	//
+	// internal/app -> internal/stream is #3's edge, and the shape of the two
+	// together is the point. The stream server carries PTY bytes, but there is
+	// no stream -> pty edge: stream declares a Terminals seam, pty knows nothing
+	// about transports, and internal/app holds the adapter that joins them. That
+	// is why this table has two service edges out of the binding layer and none
+	// between the services — either service can be replaced without the other
+	// being touched, and a future stream -> pty import would fail here as well
+	// as at lint time.
 	want := map[string][]string{
 		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo", "internal/pty"},
+		"internal/app":       {"internal/buildinfo", "internal/pty", "internal/stream"},
 		"internal/buildinfo": {},
 		"internal/pty":       {},
+		"internal/stream":    {},
 	}
 
 	graph := firstPartyImports(t)

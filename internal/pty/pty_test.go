@@ -681,3 +681,139 @@ func TestDefaultShellIsUsedWhenNoCommandIsGiven(t *testing.T) {
 
 	readUntil(t, attached, "42")
 }
+
+// Detaching is what stops a consumer that has gone away from costing the session
+// anything. Without it every reconnect — a webview reload, a project-tab switch —
+// would leave a queue behind holding up to consumerQueue chunks of scrollback for
+// a reader that is never coming back.
+func TestDetachReleasesTheConsumerWithoutEndingTheSession(t *testing.T) {
+	m := New()
+	t.Cleanup(m.Shutdown)
+
+	id, err := m.Create(Options{Command: interactiveShell()})
+	if err != nil {
+		t.Fatalf("creating a session: %v", err)
+	}
+	s := requireSession(t, m, id)
+
+	// Three consumers, and the MIDDLE one detaches: a release that removed the
+	// wrong entry, or the first entry regardless, would pass a two-consumer test.
+	first, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching: %v", err)
+	}
+	middle, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching a second consumer: %v", err)
+	}
+	last, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching a third consumer: %v", err)
+	}
+
+	middle.Detach()
+
+	// Both channels close, and Exited yields nothing — that absence is how a
+	// consumer tells a detach from a real exit.
+	if _, open := <-middle.Chunks; open {
+		t.Error("Chunks delivered a value after Detach")
+	}
+	if status, open := <-middle.Exited; open {
+		t.Errorf("Exited yielded %+v after Detach; a detach is not an exit", status)
+	}
+
+	// The session dropped exactly the one consumer.
+	s.mu.Lock()
+	remaining := len(s.consumers)
+	s.mu.Unlock()
+	if remaining != 2 {
+		t.Errorf("session holds %d consumers after one detached, want 2", remaining)
+	}
+
+	// And it is still live for both of the others, which is what proves the right
+	// entry was removed.
+	if err := m.Write(id, []byte("echo still-attached\r")); err != nil {
+		t.Fatalf("writing after a detach: %v", err)
+	}
+	readUntil(t, first, "still-attached")
+	readUntil(t, last, "still-attached")
+}
+
+// A session that ends closes its consumers' channels; a detach afterwards must
+// find nothing to close rather than closing them twice.
+func TestDetachAfterTheSessionEndsIsSafe(t *testing.T) {
+	m := New()
+	t.Cleanup(m.Shutdown)
+
+	id, err := m.Create(Options{Command: shell("exit 0", "exit 0")})
+	if err != nil {
+		t.Fatalf("creating a session: %v", err)
+	}
+	a, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching: %v", err)
+	}
+
+	waitForExit(t, requireSession(t, m, id))
+	awaitExit(t, a)
+
+	a.Detach()
+	a.Detach()
+}
+
+// Detaching twice is what a consumer with both a deferred release and an error
+// path does, so it has to be harmless.
+func TestDetachIsIdempotentOnALiveSession(t *testing.T) {
+	m := New()
+	t.Cleanup(m.Shutdown)
+
+	id, err := m.Create(Options{Command: interactiveShell()})
+	if err != nil {
+		t.Fatalf("creating a session: %v", err)
+	}
+	a, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching: %v", err)
+	}
+
+	a.Detach()
+	a.Detach()
+
+	s := requireSession(t, m, id)
+	s.mu.Lock()
+	remaining := len(s.consumers)
+	s.mu.Unlock()
+	if remaining != 0 {
+		t.Errorf("session holds %d consumers, want 0", remaining)
+	}
+}
+
+// A session that keeps producing after everyone has detached must not panic on a
+// closed channel — the broadcast path has to be looking at the live consumer list,
+// not a stale copy of it.
+func TestOutputAfterEveryConsumerDetachedIsHarmless(t *testing.T) {
+	m := New()
+	t.Cleanup(m.Shutdown)
+
+	id, err := m.Create(Options{Command: interactiveShell()})
+	if err != nil {
+		t.Fatalf("creating a session: %v", err)
+	}
+	a, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching: %v", err)
+	}
+	a.Detach()
+
+	if err := m.Write(id, []byte("echo after-detach\r")); err != nil {
+		t.Fatalf("writing after every consumer detached: %v", err)
+	}
+
+	// A fresh consumer sees the output in the scrollback, which proves the session
+	// kept producing rather than merely failing quietly.
+	next, err := m.Attach(id)
+	if err != nil {
+		t.Fatalf("attaching after a detach: %v", err)
+	}
+	readUntil(t, next, "after-detach")
+}

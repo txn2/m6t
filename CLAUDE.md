@@ -23,6 +23,12 @@ internal/app/             the Wails binding layer — the object bound to the
                           services below it; they never import it.
 internal/buildinfo/       link-time build identity. A dependency root: it
                           imports nothing first-party.
+internal/pty/             PTY service: the sessions behind the embedded
+                          terminal. Imports nothing first-party.
+internal/stream/          loopback WebSocket transport (DESIGN.md §3.3) for PTY
+                          I/O and backend-push events. Declares its own seam for
+                          the PTY service rather than importing it. The wire
+                          contract is internal/stream/PROTOCOL.md.
 frontend/src/             React + TypeScript UI (Vite)
 frontend/wailsjs/         GENERATED bindings — never hand-edit; run
                           `make bindings`
