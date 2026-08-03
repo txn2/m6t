@@ -108,7 +108,7 @@ func measurePackages(t *testing.T) map[string]packageSize {
 // countGoFile reports whether the named file is generated and, if not, how
 // many lines it holds. The marker conventionally precedes the package clause,
 // but scanning the whole file is cheap and does not miss one placed after a
-// build constraint or licence header.
+// build constraint or license header.
 func countGoFile(t *testing.T, fsys fs.FS, file string) (generated bool, loc int) {
 	t.Helper()
 	f, err := fsys.Open(file)

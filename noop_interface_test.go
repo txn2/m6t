@@ -15,7 +15,7 @@ import (
 // be "injected" and a test can assert the no-op was called — coverage goes up,
 // nothing is verified. It is the structural form of the tautological test that
 // CLAUDE.md bans, and mutation testing cannot catch it because there is no
-// behaviour to mutate.
+// behavior to mutate.
 //
 // Detection is by method-name set rather than full type checking: a type
 // implements an interface here if its method names are a superset of the
@@ -45,7 +45,7 @@ func TestNoNoopOnlyInterfaces(t *testing.T) {
 		}
 		sort.Strings(implementers)
 		violations = append(violations, fmt.Sprintf(
-			"interface %s is satisfied only by no-op implementations (%s) — either give it a real implementation or delete it; an interface whose only implementation does nothing launders coverage without verifying behaviour",
+			"interface %s is satisfied only by no-op implementations (%s) — either give it a real implementation or delete it; an interface whose only implementation does nothing launders coverage without verifying behavior",
 			name, strings.Join(implementers, ", ")))
 	}
 	sort.Strings(violations)
@@ -58,10 +58,10 @@ func TestNoNoopOnlyInterfaces(t *testing.T) {
 // collectInterfacesAndImplementations scans first-party non-test source for
 // interface declarations (name to its method-name set) and for named types
 // with methods (name to those methods).
-func collectInterfacesAndImplementations(t *testing.T) (map[string][]string, map[string][]methodBody) {
+func collectInterfacesAndImplementations(t *testing.T) (interfaces map[string][]string, implementations map[string][]methodBody) {
 	t.Helper()
-	interfaces := map[string][]string{}
-	implementations := map[string][]methodBody{}
+	interfaces = map[string][]string{}
+	implementations = map[string][]methodBody{}
 
 	for _, dir := range packageDirs(t) {
 		for _, file := range parsePackage(t, dir) {
@@ -190,11 +190,11 @@ func isZeroValueExpr(e ast.Expr) bool {
 	}
 }
 
-// TestNoopDetectionDistinguishesStubsFromBehaviour pins the classifier. A
+// TestNoopDetectionDistinguishesStubsFromBehavior pins the classifier. A
 // detector that called everything a no-op would fail every honest interface;
 // one that called nothing a no-op would never fire. Both look like a working
 // gate from the outside, which is why the classifier is tested directly.
-func TestNoopDetectionDistinguishesStubsFromBehaviour(t *testing.T) {
+func TestNoopDetectionDistinguishesStubsFromBehavior(t *testing.T) {
 	const src = `package sample
 
 type T struct{}

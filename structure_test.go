@@ -134,7 +134,7 @@ func parsePackage(t *testing.T, dir string) []*ast.File {
 }
 
 // parseSource parses a Go source literal. The gates' metrics are unit-tested
-// against literals so their behaviour is pinned without adding fixture
+// against literals so their behavior is pinned without adding fixture
 // packages to the module — which the dead-package gate would rightly reject.
 func parseSource(t *testing.T, src string) *ast.File {
 	t.Helper()

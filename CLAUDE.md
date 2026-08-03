@@ -32,7 +32,7 @@ scripts/                  gate implementations (patch coverage, CodeQL gate)
 
 Backend services from later issues (git, pty, kube exec, kube watch, helm, fs
 watcher — DESIGN.md §3.2) go in `internal/<service>/`. They are siblings: a
-service that needs another's behaviour takes an interface in its constructor
+service that needs another's behavior takes an interface in its constructor
 and lets `internal/app` wire the two together. `depguard` enforces this; it is
 not a style preference, it is what keeps the service graph from becoming a
 ball of mud.

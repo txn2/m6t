@@ -34,7 +34,7 @@ const (
 	//
 	// Every exported method here is also Wails-bound API — it crosses the
 	// bridge into TypeScript — so this ceiling doubles as the budget on the
-	// backend's public surface. Behaviour belongs on the service that owns it,
+	// backend's public surface. Behavior belongs on the service that owns it,
 	// reached through a handle, not on the coordinator.
 	maxAppMethods = 1
 
@@ -48,7 +48,7 @@ const (
 // TestAppGodObjectBudget fails when the coordinator gains fields or methods
 // beyond the pinned ceilings. Unlike a line-count budget these numbers cannot
 // be satisfied by shuffling code between files: they only come down through
-// real decomposition — moving state and behaviour onto the service that owns
+// real decomposition — moving state and behavior onto the service that owns
 // it.
 func TestAppGodObjectBudget(t *testing.T) {
 	fields, methods := countCoordinator(t)
@@ -60,7 +60,7 @@ func TestAppGodObjectBudget(t *testing.T) {
 			appCoordinatorType, fields, maxAppFields)
 	}
 	if methods > maxAppMethods {
-		t.Errorf("%s has %d methods, exceeding the ceiling of %d — move behaviour onto the service that owns it (and remember every exported method here is also Wails-bound API), or justify the raise on maxAppMethods in this PR",
+		t.Errorf("%s has %d methods, exceeding the ceiling of %d — move behavior onto the service that owns it (and remember every exported method here is also Wails-bound API), or justify the raise on maxAppMethods in this PR",
 			appCoordinatorType, methods, maxAppMethods)
 	}
 }

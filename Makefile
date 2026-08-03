@@ -177,6 +177,7 @@ fmt-fix:
 ## `make lint-full` scans everything; it is housekeeping, not part of verify.
 lint:
 	@echo "Running patch-scoped lint (CI parity: only new issues, incl. uncommitted)..."
+	@./scripts/require-tracked.sh lint '*.go'
 	@git fetch --quiet origin main 2>/dev/null || true
 	@if git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then \
 		BASE=origin/main; \
@@ -367,6 +368,10 @@ bindings:
 ## last. core.fileMode=false is scoped to this one command over the generated
 ## tree; a binding whose API actually drifted still fails.
 bindings-check: bindings
+	@# A newly bound package produces a NEW binding file, which is untracked and
+	@# therefore invisible to the comparison below — the gate would report the
+	@# bindings current while a whole module was missing from them.
+	@./scripts/require-tracked.sh bindings-check '$(FRONTEND_DIR)/wailsjs'
 	@if git -c core.fileMode=false diff --quiet -- $(FRONTEND_DIR)/wailsjs; then \
 		echo "Wails bindings are up to date."; \
 	else \

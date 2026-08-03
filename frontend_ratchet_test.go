@@ -51,7 +51,7 @@ func TestFrontendSuppressionsOnlyShrink(t *testing.T) {
 }
 
 // countSuppressions totals the suppressed violations in an ESLint
-// bulk-suppressions document and summarises them per rule.
+// bulk-suppressions document and summarizes them per rule.
 //
 // The format is {file: {rule: {count: n}}}, so the total is the sum of every
 // count — a file-level or rule-level tally would undercount a single file that

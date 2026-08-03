@@ -53,22 +53,9 @@ if [ "$MERGE_BASE" = "$(git rev-parse HEAD)" ] && [ -z "$HAS_UNCOMMITTED" ] && [
     exit 0
 fi
 
-# `git diff` does not see untracked files, so a brand-new package would sail
-# through this gate reporting "no Go source changes". Refuse to run instead:
-# a silent skip is indistinguishable from a pass, and that is precisely the
-# parity hole the gate exists to close.
-UNTRACKED_GO=$(git ls-files --others --exclude-standard -- '*.go' \
-    | grep -v '_test\.go$' \
-    | grep -v '^frontend/node_modules/' || true)
-if [ -n "$UNTRACKED_GO" ]; then
-    echo "ERROR: these Go files are untracked, so 'git diff' cannot see them and"
-    echo "       this gate would skip them silently:"
-    echo "$UNTRACKED_GO" | sed 's/^/  /'
-    echo ""
-    echo "Run 'git add -N' on them (intent to add) so the diff includes them:"
-    echo "  git add -N \$(git ls-files --others --exclude-standard -- '*.go')"
-    exit 1
-fi
+# A brand-new package is untracked, so `git diff` below would not see it and
+# this gate would report "no Go source changes" — a pass on code it never read.
+"$(dirname "$0")/require-tracked.sh" patch-coverage '*.go'
 
 # ── Extract changed lines and coverage into flat files, then join with awk ───
 

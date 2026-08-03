@@ -35,6 +35,9 @@ var structuralGateFiles = map[string]string{
 	"integration_guard_test.go": "integration-tagged tests actually execute",
 	"frontend_ratchet_test.go":  "ESLint suppressions only shrink",
 	"pins_test.go":              "gate figures agree across Makefile, CI, codecov and docs",
+	// This file guards the others, so it guards itself too: excluded from the
+	// test run it would take every gate above with it and report nothing.
+	"structural_gates_test.go": "the gates above are wired into the test run",
 }
 
 // rootTestPackage is the package every root gate file must declare so that the
@@ -92,6 +95,83 @@ func TestVerifyRunsTheStructuralGates(t *testing.T) {
 	}
 	if !strings.Contains(recipe, "-count=1") {
 		t.Errorf("the `test` target does not pass -count=1, so a cached pass could stand in for a gate that was never re-run:\n%s", recipe)
+	}
+}
+
+// gitDiffRe matches a recipe line that compares against git.
+var gitDiffRe = regexp.MustCompile(`git\b[^\n]*\bdiff\b`)
+
+// requireTrackedRe matches a call to the untracked-files guard.
+var requireTrackedRe = regexp.MustCompile(`require-tracked\.sh`)
+
+// makeTargetRe splits the Makefile into targets and their recipes.
+var makeTargetRe = regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+):[^\n]*\n((?:(?:\t[^\n]*)?\n)*)`)
+
+// TestGitDiffGatesRequireTrackedFiles fails when a gate compares against git
+// without first refusing to run on untracked files.
+//
+// `git diff` cannot see untracked files, so a gate built on it skips every NEW
+// file silently — and a silent skip is indistinguishable from a pass. This is
+// not a theoretical failure mode: `make lint` had exactly this hole and
+// reported green on ten unlinted files that CI then rejected (PR #21). The
+// guard was added to one gate and not its neighbors, which is why the rule is
+// mechanical now instead of remembered.
+func TestGitDiffGatesRequireTrackedFiles(t *testing.T) {
+	makefile := readRepoFile(t, "Makefile")
+
+	var unguarded []string
+	for _, m := range makeTargetRe.FindAllStringSubmatch(makefile, -1) {
+		target, recipe := m[1], m[2]
+		if !gitDiffRe.MatchString(recipe) {
+			continue
+		}
+		if !requireTrackedRe.MatchString(recipe) {
+			unguarded = append(unguarded, target)
+		}
+	}
+	sort.Strings(unguarded)
+
+	if len(unguarded) > 0 {
+		t.Errorf("these targets compare against git without calling scripts/require-tracked.sh first, "+
+			"so they would silently skip untracked files and report a pass:\n  %s",
+			strings.Join(unguarded, "\n  "))
+	}
+
+	// The scripts do the same thing outside a Makefile recipe, so they are
+	// checked directly rather than through the target scan above.
+	for _, script := range []string{"scripts/patch-coverage.sh"} {
+		src := readRepoFile(t, script)
+		if gitDiffRe.MatchString(src) && !requireTrackedRe.MatchString(src) {
+			t.Errorf("%s compares against git without calling require-tracked.sh", script)
+		}
+	}
+}
+
+// TestGitDiffGateDetectorFires pins the scan. A detector that matched nothing
+// would let every gate through unguarded while looking green.
+func TestGitDiffGateDetectorFires(t *testing.T) {
+	guarded := "safe:\n\t@./scripts/require-tracked.sh safe '*.go'\n\tgit diff HEAD\n\n"
+	unguarded := "unsafe:\n\tgit diff HEAD\n\n"
+	unrelated := "plain:\n\tgo test ./...\n\n"
+
+	scan := func(makefile string) []string {
+		var found []string
+		for _, m := range makeTargetRe.FindAllStringSubmatch(makefile, -1) {
+			if gitDiffRe.MatchString(m[2]) && !requireTrackedRe.MatchString(m[2]) {
+				found = append(found, m[1])
+			}
+		}
+		return found
+	}
+
+	if got := scan(guarded); len(got) != 0 {
+		t.Errorf("a guarded target was reported as unguarded: %v", got)
+	}
+	if got := scan(unguarded); len(got) != 1 || got[0] != "unsafe" {
+		t.Errorf("an unguarded target was not reported: %v", got)
+	}
+	if got := scan(unrelated); len(got) != 0 {
+		t.Errorf("a target that does not use git diff was reported: %v", got)
 	}
 }
 

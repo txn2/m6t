@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"fmt"
 	"go/build/constraint"
 	"io/fs"
 	"regexp"
@@ -77,7 +78,7 @@ func taggedTestFiles(t *testing.T) []string {
 		}
 		content, readErr := fs.ReadFile(repoFS, p)
 		if readErr != nil {
-			return readErr
+			return fmt.Errorf("reading %s: %w", p, readErr)
 		}
 		if requiresIntegrationTag(string(content)) {
 			tagged = append(tagged, p)
@@ -94,7 +95,7 @@ func taggedTestFiles(t *testing.T) []string {
 // build with the integration tag set and not without it. Constraints precede
 // the package clause, so the scan stops there.
 func requiresIntegrationTag(src string) bool {
-	for _, line := range strings.Split(src, "\n") {
+	for line := range strings.SplitSeq(src, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "package ") {
 			return false
