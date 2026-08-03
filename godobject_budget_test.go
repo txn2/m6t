@@ -27,7 +27,13 @@ const (
 	// loose fields where one owner struct belonged. If raising it by more than
 	// one per service, the question to answer in review is why the service is
 	// not one handle.
-	maxAppFields = 1
+	//
+	// 1 -> 2 in #2: the PTY service arrives as a single *pty.Manager handle.
+	// Every terminal behavior — create, write, resize, kill, scrollback —
+	// lives in internal/pty and is reached through that one field, so this is
+	// the one-handle-per-service case the paragraph above describes, not
+	// state accumulating on the coordinator.
+	maxAppFields = 2
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.

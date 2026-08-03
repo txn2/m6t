@@ -5,12 +5,14 @@
 package app
 
 import (
+	"context"
 	"embed"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"github.com/txn2/m6t/internal/buildinfo"
+	"github.com/txn2/m6t/internal/pty"
 )
 
 // Window geometry. m6t is a single-window app: the three-pane project
@@ -34,13 +36,19 @@ var windowBackground = &options.RGBA{R: 22, G: 24, B: 29, A: 1}
 // asset server) out of it.
 type App struct {
 	info buildinfo.Info
+
+	// terminals owns the PTY sessions behind the embedded terminal. It is one
+	// handle rather than loose state because the app composes services, it
+	// does not implement them: everything the terminal does lives in
+	// internal/pty and is reached through here.
+	terminals *pty.Manager
 }
 
 // newApp builds the binding. It is unexported because Options is the only
 // supported way to construct the application: an App that is not bound into
 // the window options is unreachable from the frontend.
 func newApp() *App {
-	return &App{info: buildinfo.Get()}
+	return &App{info: buildinfo.Get(), terminals: pty.New()}
 }
 
 // Version reports the build identity to the frontend, which shows it in the
@@ -54,6 +62,8 @@ func (a *App) Version() buildinfo.Info {
 // bound methods, embedded assets — is covered by tests rather than asserted in
 // a comment.
 func Options(assets embed.FS) *options.App {
+	application := newApp()
+
 	return &options.App{
 		Title:            windowTitle,
 		Width:            windowWidth,
@@ -62,6 +72,14 @@ func Options(assets embed.FS) *options.App {
 		MinHeight:        windowMinHeight,
 		AssetServer:      &assetserver.Options{Assets: assets},
 		BackgroundColour: windowBackground,
-		Bind:             []any{newApp()},
+		Bind:             []any{application},
+
+		// PTYs are backend-owned and outlive every window in the app, so the
+		// only thing that ends them is the app ending. Without this hook,
+		// quitting m6t would leave the user's shells — and whatever they were
+		// running — orphaned behind it.
+		OnShutdown: func(context.Context) {
+			application.terminals.Shutdown()
+		},
 	}
 }

@@ -176,6 +176,15 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      # The PTY service is the one package whose behaviour is genuinely
+      # per-platform: creack/pty on Unix, ConPTY on Windows, and a termination
+      # path that has no SIGHUP to send on Windows at all. The Test job above
+      # only ever exercises the Linux half, so a ConPTY regression would reach
+      # a release having passed every gate. This runs the same tests `make
+      # test` runs, on each OS in the matrix.
+      - name: Smoke-test the PTY service on this platform
+        run: go test -race -shuffle=on -count=1 ./internal/pty/...
+
       - name: Install the Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 
