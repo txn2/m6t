@@ -43,8 +43,8 @@ var structuralPins = map[string]packagePin{
 		why: "composition root: embeds the frontend, hands options to the Wails runtime",
 	},
 	"internal/app": {
-		loc: 200, exported: 2,
-		why: "Wails binding layer: the bound object plus the window options",
+		loc: 260, exported: 2,
+		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,
@@ -53,6 +53,10 @@ var structuralPins = map[string]packagePin{
 	"internal/pty": {
 		loc: 750, exported: 7,
 		why: "PTY service: session lifecycle, scrollback and platform termination for the embedded terminal",
+	},
+	"internal/stream": {
+		loc: 900, exported: 5,
+		why: "loopback stream server: token-authenticated WebSocket transport for PTY I/O and backend-push events",
 	},
 }
 
@@ -64,24 +68,40 @@ var structuralPins = map[string]packagePin{
 // build. The number has to represent the size at which a package stops being
 // readable in one sitting.
 //
-// internal/pty is the first ceiling here set from a real measurement rather
-// than policy. It landed with #2 at 644 lines across six files, and 750 is
-// that plus room for the follow-up fixes a new service attracts — not enough
-// room for a second service to move in alongside it. The stream server that
-// consumes it (#3) is its own package, so this number should hold.
+// internal/pty and internal/stream are measured rather than policy-seeded.
+//
+//   - internal/pty landed with #2 at 644 lines across six files, and 750 is that
+//     plus room for the follow-up fixes a new service attracts — not enough room
+//     for a second service to move in alongside it. #3 added the detach seam and
+//     took it to 705, inside the ceiling set for exactly that kind of follow-up.
+//   - internal/stream landed with #3 at 838 lines across six files: a wire
+//     protocol server — auth, framing, backpressure, two endpoints — with the
+//     protocol itself specified in PROTOCOL.md rather than inferred from the
+//     handlers. 900 is that plus the same kind of headroom, and the services
+//     that will push events onto its /events channel (#5) plug into the existing
+//     envelope rather than adding endpoints, so this number should hold.
+//
+// internal/app's ceiling moved from 200 to 260 in #3. The reason is a shape
+// this repo will see again: sibling services must not import each other, so the
+// binding layer is where a service is adapted onto another's declared seam, and
+// #3 put the first such adapter (pty.Manager -> stream.Terminals) in
+// terminals.go. The ceiling is today's 201 plus room for one more adapter of the
+// same size. What it still refuses is behavior: an adapter that grows past
+// translation, or a service implemented here instead of composed here, is what
+// this number exists to bring to review.
 //
 // The rest are still seeded as policy, because the services that would let
 // them be measured (git, kube, helm; DESIGN.md §3.2) land in #5:
 //
-//   - 200 for internal/app and 150 for buildinfo — roughly 3x and 2x today's
-//     size, so ordinary work does not trip the gate while a package that
-//     doubles again arrives in review as a decomposition question.
+//   - 150 for buildinfo — roughly 2x today's size, so ordinary work does not
+//     trip the gate while a package that doubles again arrives in review as a
+//     decomposition question.
 //   - 60 for the root: main.go does one thing and must keep doing only that.
 //
 // Re-pin those against real measurements once #5 lands. No other ceiling here
 // needs the caveat: counts of packages, files and exported names do not grow
 // through ordinary editing.
-const locCeilingNote = "internal/pty is measured; the other LOC ceilings are policy-seeded pending #5 (see locCeilingNote)"
+const locCeilingNote = "internal/pty, internal/stream and internal/app are measured; buildinfo and the root are policy-seeded pending #5 (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.

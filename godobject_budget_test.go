@@ -33,7 +33,13 @@ const (
 	// lives in internal/pty and is reached through that one field, so this is
 	// the one-handle-per-service case the paragraph above describes, not
 	// state accumulating on the coordinator.
-	maxAppFields = 2
+	//
+	// 2 -> 3 in #3: the loopback stream server arrives as a single
+	// *stream.Server handle. It is a second service rather than terminal state
+	// spread across the App — the port, the token, the live connections and the
+	// event subscribers all live behind that field in internal/stream, and the
+	// App holds it only to start it, stop it, and report its endpoint.
+	maxAppFields = 3
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.
@@ -42,7 +48,15 @@ const (
 	// bridge into TypeScript — so this ceiling doubles as the budget on the
 	// backend's public surface. Behavior belongs on the service that owns it,
 	// reached through a handle, not on the coordinator.
-	maxAppMethods = 1
+	//
+	// 1 -> 2 in #3: StreamEndpoint. The whole design of the transport is that
+	// terminal I/O does NOT cross this bridge (DESIGN.md §3.3), so the one
+	// method the stream server needs here is the one that tells the frontend
+	// where to open a socket and with what token. Every subsequent terminal
+	// operation — write, resize, close — is a WebSocket frame and adds nothing
+	// to this number. A future PR that adds a per-operation binding is not
+	// raising a ceiling, it is bypassing the transport.
+	maxAppMethods = 2
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

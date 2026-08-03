@@ -184,7 +184,34 @@ func (s *session) attach() Attachment {
 		s.consumers = append(s.consumers, c)
 	}
 
-	return Attachment{Replay: s.scrollback.snapshot(), Chunks: c.chunks, Exited: c.exited}
+	return Attachment{
+		Replay: s.scrollback.snapshot(),
+		Chunks: c.chunks,
+		Exited: c.exited,
+		Detach: func() { s.detach(c) },
+	}
+}
+
+// detach unregisters a consumer and closes its channels, so a reader that has
+// gone away stops costing the session a queue.
+//
+// Closing is safe exactly once, and which of detach or finish gets there first
+// is decided by the same lock: finish empties s.consumers, so a detach after it
+// finds nothing and closes nothing, and a detach before it removes the consumer
+// finish would otherwise have closed.
+func (s *session) detach(c *consumer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, other := range s.consumers {
+		if other != c {
+			continue
+		}
+		s.consumers = append(s.consumers[:i], s.consumers[i+1:]...)
+		close(c.chunks)
+		close(c.exited)
+		return
+	}
 }
 
 // write sends input to the child.
