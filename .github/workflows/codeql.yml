@@ -1,0 +1,65 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly, Monday 06:00 UTC
+
+permissions: read-all
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      # Required to upload SARIF from a PRIVATE repository: the upload step
+      # calls the workflow-runs API, and a job-level `permissions:` block
+      # replaces the top-level `read-all` rather than adding to it. Without
+      # this the analysis succeeds and the upload fails with "Resource not
+      # accessible by integration".
+      actions: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.5"
+          cache: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: go
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          category: "/language:go"
+          output: codeql-results
+          # Uploading to code scanning requires GitHub Advanced Security, which
+          # a private repository does not have — the analysis succeeds and the
+          # upload fails with "Advanced Security must be enabled". The analysis
+          # is the part that finds bugs, so it still runs and the gate below
+          # still blocks the merge; only the Security-tab UI is lost.
+          # Flip this back to `always` when the repo goes public or GHAS is
+          # enabled, and drop this comment.
+          upload: never
+
+      # The same gate `make codeql` runs locally: blocking alerts are those at
+      # level=error or security-severity >= 7.0 that are not in
+      # scripts/codeql-baseline.txt. Running it here as well means a local run
+      # and CI reach the same verdict on the same SARIF.
+      - name: Gate against the baseline
+        run: python3 scripts/codeql-gate.py codeql-results/go.sarif

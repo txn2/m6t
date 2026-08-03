@@ -1,0 +1,113 @@
+rules:
+  # m6t drives the user's own binaries — git, kubectl, helm — with arguments
+  # built from project settings, file paths and branch names. Handing any of
+  # that to a shell is how a repo path containing `;` becomes command
+  # execution. DESIGN.md and CONTRIBUTING.md state the rule ("never via a
+  # shell"); this makes it mechanical.
+  - id: no-shell-invocation-for-external-tools
+    patterns:
+      - pattern-either:
+          - pattern: exec.Command("sh", ...)
+          - pattern: exec.Command("bash", ...)
+          - pattern: exec.Command("zsh", ...)
+          - pattern: exec.Command("cmd", ...)
+          - pattern: exec.Command("cmd.exe", ...)
+          - pattern: exec.Command("powershell", ...)
+          - pattern: exec.Command("powershell.exe", ...)
+          - pattern: exec.CommandContext($CTX, "sh", ...)
+          - pattern: exec.CommandContext($CTX, "bash", ...)
+          - pattern: exec.CommandContext($CTX, "zsh", ...)
+          - pattern: exec.CommandContext($CTX, "cmd", ...)
+          - pattern: exec.CommandContext($CTX, "cmd.exe", ...)
+          - pattern: exec.CommandContext($CTX, "powershell", ...)
+          - pattern: exec.CommandContext($CTX, "powershell.exe", ...)
+    message: >-
+      External tools must be invoked directly with an argv slice, never through
+      a shell: a project path, branch name or values-file name containing shell
+      metacharacters would otherwise be executed. Call exec.CommandContext with
+      the binary and its arguments as separate strings.
+      (The PTY service is the one legitimate place a shell is spawned; it runs
+      the user's login shell interactively and does not build a command line.)
+    languages: [go]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      confidence: HIGH
+      impact: HIGH
+      technology:
+        - go
+
+  # Every kubectl invocation must name its target explicitly. m6t never uses
+  # the kubeconfig current-context (DESIGN.md §4) — a command that omits
+  # --context inherits whatever cluster the user's shell last pointed at, which
+  # is precisely the accident the app exists to prevent.
+  #
+  # Scope: hand-written literal argument lists. An invocation whose argv is a
+  # built slice (`kubectl`, args...) is the kube exec service's own path and is
+  # checked by that service's tests instead — matching it here would fire on
+  # the correct pattern and train people to suppress the rule.
+  - id: kubectl-literal-args-without-explicit-context
+    patterns:
+      - pattern-either:
+          - pattern: exec.Command("kubectl", "$ARG", ...)
+          - pattern: exec.CommandContext($CTX, "kubectl", "$ARG", ...)
+      - pattern-not: exec.Command("kubectl", ..., "--context", ...)
+      - pattern-not: exec.CommandContext($CTX, "kubectl", ..., "--context", ...)
+    message: >-
+      kubectl is invoked with a literal argument list that has no --context.
+      m6t binds a context per project and never relies on the kubeconfig
+      current-context, so this command would run against whatever cluster the
+      user last selected. Build the argument list through the kube exec service
+      so the project's bound --context and --namespace are always applied.
+    languages: [go]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe:
+        - "CWE-668: Exposure of Resource to Wrong Sphere"
+      confidence: HIGH
+      impact: HIGH
+      technology:
+        - go
+
+  # Unbounded allocation sized from a struct field or parameter: if the value
+  # is attacker- or repo-controlled (a manifest's declared item count, a
+  # length read off a WebSocket frame), it is an OOM trigger.
+  - id: unbounded-make-slice-capacity
+    patterns:
+      - pattern: make($TYPE, $LEN, $CAP)
+      - pattern-not-inside: |
+          if $CAP > $MAX {
+            ...
+          }
+          ...
+          make($TYPE, $LEN, $CAP)
+      - pattern-not-inside: |
+          if $CAP >= $MAX {
+            ...
+          }
+          ...
+          make($TYPE, $LEN, $CAP)
+      - pattern-not-inside: |
+          $CAP = min($CAP, $MAX)
+          ...
+          make($TYPE, $LEN, $CAP)
+      - metavariable-regex:
+          metavariable: $CAP
+          regex: '^[a-zA-Z_]\w*\.[a-zA-Z_]\w*$'
+    message: >-
+      Slice allocation uses a potentially unbounded capacity `$CAP`. If that
+      value comes from a manifest, a subprocess or a WebSocket frame, a large
+      number triggers an OOM. Bound it: `if $CAP > maxAllowed { $CAP = maxAllowed }`.
+    languages: [go]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe:
+        - "CWE-770: Allocation of Resources Without Limits or Throttling"
+      confidence: MEDIUM
+      impact: HIGH
+      technology:
+        - go

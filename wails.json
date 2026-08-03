@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "m6t",
+  "outputfilename": "m6t",
+  "frontend:install": "npm ci --no-audit --no-fund",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "txn2",
+    "email": "cj@imti.co"
+  },
+  "info": {
+    "companyName": "txn2",
+    "productName": "m6t",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright © 2026 txn2",
+    "comments": "Desktop workbench for Kubernetes manifest repositories"
+  }
+}

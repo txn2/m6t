@@ -40,19 +40,55 @@ build):
 - Total coverage must be at least **80%**.
 - Coverage of the lines your change touches must be at least **85%** — new
   code is held above the total floor so the total only ratchets upward.
-- Cyclomatic complexity ≤ 10 and cognitive complexity ≤ 15 per function.
-- Mutation-testing efficacy ≥ 60% (`make verify-release`, required before
+- Cyclomatic complexity ≤ **10** and cognitive complexity ≤ **15** per
+  function. The frontend carries the same two numbers as eslint `complexity`
+  and `sonarjs/cognitive-complexity`, so one budget governs both languages.
+- Mutation-testing efficacy ≥ **60%** (`make verify-release`, required before
   tagging a release).
 - gosec, govulncheck, and semgrep clean; CodeQL gated against a baseline.
 
-Structural ratchets (see the
-[structural gates issue](https://github.com/txn2/m6t/issues/19)) are plain Go
-tests that fail on architectural decay: package-size budgets, an import
-ratchet, exported-surface budgets, a god-object budget on the backend
-coordinator struct (AST field/method ceilings pinned to actuals), dead-package
-and noop-interface detection, and an integration guard proving integration
-tests actually ran. **Ceilings carry zero slack and only move down.** Raising
-one is a regression that must be explicitly justified in the PR.
+### Structural ratchets
+
+The per-function linters all evaluate code *inside* one function, so a
+god-package assembled from a hundred small, tidy functions passes every one of
+them. The structural gates bound what those linters cannot see. They are plain
+Go tests in the repository root — no external tooling — so `make test` runs
+them and `make verify` gates on them.
+
+| Gate | What it bounds | Where |
+|---|---|---|
+| Package size | Lines and files per package | `package_budget_test.go` |
+| Package pin | Every package has a ratchet entry | `package_budget_test.go` |
+| Exported surface | Package-scope exported identifiers | `surface_budget_test.go` |
+| God-object | Fields and methods on the `App` coordinator | `godobject_budget_test.go` |
+| Dead package | Every package is reachable from `main` | `package_graph_test.go` |
+| Import graph | What is allowed to depend on what | `package_graph_test.go` |
+| No-op interface | Interfaces implemented only by stubs | `noop_interface_test.go` |
+| Integration guard | Tagged tests are actually executed | `integration_guard_test.go` |
+| Frontend ratchet | ESLint suppressions only shrink | `frontend_ratchet_test.go` |
+| Wiring guard | The gates above still run | `structural_gates_test.go` |
+
+**Ceilings carry zero slack and only move down.** Every ceiling is pinned at
+the measured actual, next to the gate that enforces it, with a comment saying
+what it is for. Raising one is a regression: it belongs in the PR that needs
+it, on that line, with the reason. There is no suppression comment and no
+escape hatch — the justification in review *is* the mechanism.
+
+Two deliberate exceptions, both documented at the constant:
+
+- **LOC ceilings carry headroom.** A line-count ceiling pinned to the exact
+  current count is a freeze, not a ratchet — one more line of doc comment would
+  fail the build. They are seeded as policy and re-pinned against real
+  measurements once the backend services land
+  ([#2](https://github.com/txn2/m6t/issues/2),
+  [#5](https://github.com/txn2/m6t/issues/5)).
+- **The `App` coordinator's ceilings will rise as services land**, one composed
+  handle at a time, each in the PR that adds it. What the gate stops is the
+  accumulation nobody decided on.
+
+The ESLint suppressions ceiling is **0** — the frontend baseline starts empty
+and stays empty. (That figure is checked against the gate by the agreement test,
+like every other floor on this page.)
 
 Hard rules:
 
@@ -68,10 +104,48 @@ Hard rules:
 
 ## Development
 
-Prerequisites, pinned tool versions, and build instructions land with
-[#1](https://github.com/txn2/m6t/issues/1) (Wails v2, Go, Node, and the
-verification toolchain — `make tools-check` tells you exactly what's missing).
-Until then: `git clone`, read DESIGN.md, pick an unclaimed issue.
+### Prerequisites
+
+- **Go 1.26.5** and **Node.js 22+**.
+- Platform webview toolchain: Xcode command line tools on macOS;
+  `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` on Debian/Ubuntu; WebView2 (which
+  the Wails installer provides) on Windows.
+
+### The toolchain
+
+`make verify` runs pinned tools, and `make tools-check` refuses to proceed when
+a local version differs from the one CI uses — a gosec that silently drops a
+rule CI enforces is how a real vulnerability reaches a PR. Install exactly
+these (currently golangci-lint v2.11.4 / gosec v2.28.0):
+
+```sh
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+go install golang.org/x/vuln/cmd/govulncheck@latest
+go install golang.org/x/tools/cmd/deadcode@latest
+go install github.com/google/go-licenses@latest
+pip3 install semgrep
+```
+
+`make tools-check` names anything still missing or mismatched, with the command
+to fix it.
+
+### Everyday commands
+
+```sh
+make dev          # run the app with hot reload
+make verify       # the full gate — run before proposing a commit
+make test         # Go tests with -race -shuffle=on
+make frontend-test
+make build        # build the desktop app for this platform
+make bindings     # regenerate frontend/wailsjs after changing bound methods
+make help         # every target
+```
+
+`make verify` takes a few minutes on a cold cache. Run it anyway: it is the
+difference between finding a problem locally and finding it in review.
 
 ## Code conventions
 
