@@ -17,6 +17,13 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      # Required to upload SARIF from a PRIVATE repository: the upload step
+      # calls the workflow-runs API, and a job-level `permissions:` block
+      # replaces the top-level `read-all` rather than adding to it. Without
+      # this the analysis succeeds and the upload fails with "Resource not
+      # accessible by integration".
+      actions: read
+      packages: read
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
