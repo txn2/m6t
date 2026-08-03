@@ -48,6 +48,14 @@ jobs:
         with:
           category: "/language:go"
           output: codeql-results
+          # Uploading to code scanning requires GitHub Advanced Security, which
+          # a private repository does not have — the analysis succeeds and the
+          # upload fails with "Advanced Security must be enabled". The analysis
+          # is the part that finds bugs, so it still runs and the gate below
+          # still blocks the merge; only the Security-tab UI is lost.
+          # Flip this back to `always` when the repo goes public or GHAS is
+          # enabled, and drop this comment.
+          upload: never
 
       # The same gate `make codeql` runs locally: blocking alerts are those at
       # level=error or security-severity >= 7.0 that are not in
