@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"sync"
 	"time"
@@ -55,7 +56,19 @@ func start(opts Options) (*session, error) {
 		argv = shellFor(runtime.GOOS, os.Getenv)
 	}
 
-	cmd := terminal.Command(argv[0], argv[1:]...)
+	// Resolve against PATH before handing the name over. go-pty resolves a
+	// bare name relative to Cmd.Dir on Windows, so a session started with a
+	// Cwd — which every project terminal is — would look for powershell.exe
+	// inside the project directory and fail. Resolving here also turns "the
+	// shell is not installed" into an error at Create rather than a session
+	// that exists and immediately dies.
+	binary, err := exec.LookPath(argv[0])
+	if err != nil {
+		_ = terminal.Close()
+		return nil, fmt.Errorf("locating %q: %w", argv[0], err)
+	}
+
+	cmd := terminal.Command(binary, argv[1:]...)
 	cmd.Dir = opts.Cwd
 	cmd.Env = environ(opts.Env)
 	if err := cmd.Start(); err != nil {

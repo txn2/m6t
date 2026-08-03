@@ -331,6 +331,45 @@ func TestCreateRunsTheChildInTheRequestedDirectory(t *testing.T) {
 	readUntil(t, attached, filepath.Base(resolved))
 }
 
+// A bare command name must resolve against PATH even when the session has a
+// working directory, because every project terminal has one and the Windows
+// default shell is the bare name "powershell.exe".
+//
+// This is a regression test. go-pty resolves a bare name relative to Cmd.Dir
+// on Windows, so before start() called exec.LookPath, creating a session with
+// a Cwd looked for the shell inside the project directory and failed with
+// "file does not exist" — meaning no terminal could ever open on Windows.
+func TestCreateResolvesABareCommandNameAgainstPathNotTheWorkingDirectory(t *testing.T) {
+	bare := "sh"
+	if runtime.GOOS == windowsGOOS {
+		bare = "cmd.exe"
+	}
+
+	m := New()
+	// An empty directory: anything resolved relative to it cannot exist.
+	id, err := m.Create(Options{Cwd: t.TempDir(), Command: []string{bare}})
+	if err != nil {
+		t.Fatalf("Create with a bare command name and a Cwd: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Kill(id) })
+
+	if _, err := m.Attach(id); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+}
+
+func TestCreateReportsAShellThatIsNotOnPath(t *testing.T) {
+	m := New()
+
+	_, err := m.Create(Options{Command: []string{"m6t-definitely-not-on-path"}})
+	if err == nil {
+		t.Fatal("Create succeeded for a binary that is not on PATH")
+	}
+	if !strings.Contains(err.Error(), "m6t-definitely-not-on-path") {
+		t.Errorf("error %q does not name the binary that could not be found", err)
+	}
+}
+
 func TestCreateExportsTheCallersEnvironment(t *testing.T) {
 	m := New()
 	id, err := m.Create(Options{
