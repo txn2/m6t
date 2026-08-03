@@ -1,0 +1,22 @@
+# Codecov targets. These figures are the same ones the Makefile enforces
+# locally (COVERAGE_MIN / PATCH_COVERAGE_MIN) and CI enforces in the test job;
+# TestGateFiguresAgree fails the build when any copy drifts.
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 1%
+    patch:
+      default:
+        target: 85%
+        threshold: 0%
+        informational: false
+
+ignore:
+  - "**/*_test.go"
+  - "**/testdata/**"
+  # npm dependencies ship Go source (flatted/golang and friends). go.mod's
+  # `ignore` directive keeps them out of the build; this keeps them out of the
+  # coverage denominator if a tool ever walks the tree directly.
+  - "frontend/node_modules/**"

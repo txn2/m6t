@@ -1,0 +1,2 @@
+Fixture for TestOptionsServeTheEmbeddedAssets: proves Options passes the
+caller's embed.FS through to the Wails asset server untouched.

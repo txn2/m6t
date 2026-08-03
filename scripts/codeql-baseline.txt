@@ -1,0 +1,8 @@
+# CodeQL baseline — alerts scripts/codeql-gate.py ignores.
+#
+# Format: one `<rule_id> <path>:<line>` per line. An entry here is a claim that
+# the finding is a false positive or is mitigated at runtime, and it carries
+# the same burden as a lint suppression: maintainer sign-off, with the
+# reasoning in the PR that adds it.
+#
+# The scaffold starts with an empty baseline. Keep it that way.

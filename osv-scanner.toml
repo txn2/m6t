@@ -1,0 +1,12 @@
+# osv-scanner suppressions, for OpenSSF Scorecard's Vulnerabilities check.
+#
+# osv-scanner reports against the whole dependency graph with no reachability
+# analysis, so it flags packages that never enter the binary. govulncheck (part
+# of `make security`) is the reachability-aware gate and is the one that
+# blocks; `make osv` is informational.
+#
+# Every entry needs a reason and an ignoreUntil date. The expiry forces a
+# re-review rather than a permanent silence: on expiry, re-run `make osv` and
+# confirm the finding is still unreachable before extending the date.
+#
+# The scaffold has no suppressions. Keep it that way.

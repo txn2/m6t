@@ -1,0 +1,407 @@
+version: "2"
+
+run:
+  timeout: 10m
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    # ===== Bug Detection =====
+    - errcheck           # Error returns are handled
+    - govet              # Official Go vet checks
+    - staticcheck        # Comprehensive static analysis
+    - ineffassign        # Ineffective assignments
+    - unused             # Unused code
+    - bodyclose          # HTTP response bodies are closed
+    - noctx              # Context usage in HTTP requests
+    - nilerr             # nil returned after a non-nil error
+    - nilnil             # nil value with a nil error
+    - durationcheck      # Duration multiplication bugs
+    - makezero           # Slice append after make with length
+    - nosprintfhostport  # Sprintf host:port bugs
+    - wastedassign       # Wasted assignments
+
+    # ===== Code Style =====
+    - misspell           # Spelling
+    - unconvert          # Unnecessary type conversions
+    - whitespace         # Leading/trailing whitespace in blocks
+    - godot              # Comment punctuation
+    - perfsprint         # errors.New over verb-less fmt.Errorf
+
+    # ===== Code Quality =====
+    - gocritic           # Broad diagnostic/style/performance checks
+    - revive             # AI guardrails (see the rule list below)
+    - gocyclo            # Cyclomatic complexity
+    - gocognit           # Cognitive complexity
+    - dupl               # Cross-file copy-paste duplication
+    - nakedret           # Naked returns in long functions
+    - prealloc           # Slice preallocation
+    - predeclared        # Shadowing predeclared identifiers
+    - nestif             # Deeply nested ifs
+    - goconst            # Repeated strings that should be constants
+    - unparam            # Unused parameters
+    - errname            # Error naming conventions
+    - errorlint          # Error wrapping/comparison bugs
+    - wrapcheck          # Errors from other packages are wrapped
+    - thelper            # Test helpers call t.Helper()
+
+    # ===== Architecture =====
+    - depguard           # Import-boundary / layering enforcement
+
+    # ===== Security =====
+    - gosec              # OWASP-style security checks
+
+    # ===== Performance / Modern Go =====
+    - copyloopvar
+    - modernize
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+
+    govet:
+      disable:
+        - fieldalignment
+        - shadow
+
+    misspell:
+      locale: US
+
+    nakedret:
+      max-func-lines: 30
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+
+    # These two numbers are the Go half of a pair: the frontend's eslint config
+    # sets `complexity` and `sonarjs/cognitive-complexity` to the same values,
+    # so one budget governs both languages.
+    gocyclo:
+      min-complexity: 10
+
+    gocognit:
+      min-complexity: 15
+
+    nestif:
+      min-complexity: 5
+
+    # Threshold is in tokens; 150 is upstream's default. CI and `make lint` are
+    # patch-scoped, so this gates NEW duplication.
+    dupl:
+      threshold: 150
+
+    # depguard enforces the layering the Go compiler does not — it only forbids
+    # cycles, never direction. The rules below describe m6t's intended shape
+    # (DESIGN.md §3.2): main is the composition root, internal/app is the Wails
+    # binding leaf that composes the backend services, the services are
+    # siblings that talk through declared seams rather than to each other, and
+    # buildinfo is a dependency root. list-mode lax = allow everything except
+    # what is denied.
+    depguard:
+      rules:
+        # internal/app is the binding layer: it is wired by main and composes
+        # the services below it. A service importing it would invert that
+        # direction and turn the binding into a shared bus.
+        binding-layer-is-not-imported-by-services:
+          list-mode: lax
+          files:
+            - "**/internal/**"
+            - "!**/internal/app/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/txn2/m6t/internal/app
+              desc: "internal/app is the Wails binding layer; it composes services, never the reverse. Invert the dependency behind an interface (see CONTRIBUTING.md)."
+        # Backend services (git, pty, kube, helm, …) are siblings. Sibling
+        # imports are how a service graph becomes a ball of mud; a service that
+        # needs another's behaviour takes an interface from its constructor and
+        # lets internal/app wire the two together. buildinfo is the one
+        # exception: it is a pinned leaf, so depending on it cannot create a
+        # cycle or a hidden layer.
+        services-do-not-import-each-other:
+          list-mode: lax
+          files:
+            - "**/internal/**"
+            - "!**/internal/app/**"
+            - "!**/internal/buildinfo/**"
+            - "!**/*_test.go"
+          allow:
+            - github.com/txn2/m6t/internal/buildinfo
+          deny:
+            - pkg: github.com/txn2/m6t/internal
+              desc: "backend services must not import each other; accept an interface and let internal/app wire it (see CONTRIBUTING.md)."
+        # buildinfo is a dependency root: link-time identity that any layer can
+        # read. One convenience import of a config or service type is all it
+        # takes to erode that, so it is pinned here rather than by convention.
+        buildinfo-is-a-dependency-root:
+          list-mode: lax
+          files:
+            - "**/internal/buildinfo/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/txn2/m6t
+              desc: "internal/buildinfo is a leaf with no first-party imports so any layer can use it; keep it that way (see CONTRIBUTING.md)."
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - opinionated
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+
+    revive:
+      severity: error
+      confidence: 0.8
+      enable-all-rules: false
+      rules:
+        # ===== Mandatory Style =====
+        - name: exported
+          severity: error
+          arguments: [checkPrivateReceivers, sayRepetitiveInsteadOfStutters]
+        - name: package-comments
+          severity: error
+        - name: var-naming
+          severity: error
+        - name: receiver-naming
+          severity: error
+        - name: error-naming
+          severity: error
+        - name: time-naming
+          severity: error
+        - name: unexported-naming
+          severity: error
+
+        # ===== Error Handling =====
+        - name: error-return
+          severity: error
+        - name: error-strings
+          severity: error
+        - name: errorf
+          severity: error
+        - name: unhandled-error
+          severity: error
+          arguments: ["fmt.Printf", "fmt.Println", "fmt.Print"]
+
+        # ===== Context =====
+        - name: context-as-argument
+          severity: error
+        - name: context-keys-type
+          severity: error
+
+        # ===== Imports =====
+        - name: blank-imports
+          severity: error
+        - name: dot-imports
+          severity: error
+        - name: import-shadowing
+          severity: error
+        - name: import-alias-naming
+          severity: warning
+          arguments: ["^[a-z][a-z0-9]*$"]
+
+        # ===== Control Flow =====
+        - name: if-return
+          severity: warning
+        - name: indent-error-flow
+          severity: error
+        - name: superfluous-else
+          severity: warning
+        - name: early-return
+          severity: warning
+        - name: empty-block
+          severity: error
+        - name: unreachable-code
+          severity: error
+        - name: unconditional-recursion
+          severity: error
+
+        # ===== Function Design (the AI guardrails) =====
+        - name: function-result-limit
+          severity: warning
+          arguments: [3]
+        - name: argument-limit
+          severity: warning
+          arguments: [5]
+        - name: cognitive-complexity
+          severity: warning
+          arguments: [15]
+        - name: cyclomatic
+          severity: warning
+          arguments: [10]
+        - name: function-length
+          severity: warning
+          arguments: [80, 0]
+        - name: max-public-structs
+          severity: warning
+          arguments: [5]
+
+        # ===== Variables =====
+        - name: var-declaration
+          severity: warning
+        - name: increment-decrement
+          severity: warning
+        - name: range
+          severity: warning
+        - name: range-val-in-closure
+          severity: error
+        - name: range-val-address
+          severity: error
+        - name: redefines-builtin-id
+          severity: error
+        - name: unused-parameter
+          severity: warning
+        - name: unused-receiver
+          severity: warning
+        - name: confusing-naming
+          severity: warning
+        - name: confusing-results
+          severity: warning
+
+        # ===== Safety =====
+        - name: bare-return
+          severity: warning
+        - name: get-return
+          severity: warning
+        - name: modifies-parameter
+          severity: warning
+        - name: modifies-value-receiver
+          severity: error
+        - name: deep-exit
+          severity: warning
+        - name: defer
+          severity: warning
+          arguments: [["call-chain", "loop", "method-call", "recover", "immediate-recover", "return"]]
+
+        # ===== Strings =====
+        - name: string-of-int
+          severity: error
+        - name: string-format
+          severity: warning
+          arguments:
+            - - 'fmt.Errorf[0]'
+              - '/^[a-z].*[^.]$/'
+              - 'error strings should not be capitalized or end with punctuation'
+
+        # ===== Booleans / Types =====
+        - name: bool-literal-in-expr
+          severity: warning
+        - name: constant-logical-expr
+          severity: error
+        - name: identical-branches
+          severity: error
+        - name: datarace
+          severity: error
+        - name: waitgroup-by-value
+          severity: error
+        - name: atomic
+          severity: error
+
+        # ===== Comments =====
+        - name: comment-spacings
+          severity: warning
+          arguments: ["nolint", "TODO", "FIXME", "BUG", "HACK"]
+
+        # ===== Structs / misc =====
+        - name: struct-tag
+          severity: error
+        - name: unexported-return
+          severity: warning
+        - name: useless-break
+          severity: warning
+        - name: unnecessary-stmt
+          severity: warning
+        - name: duplicated-imports
+          severity: error
+
+        # ===== Magic values =====
+        - name: add-constant
+          severity: warning
+          arguments:
+            - maxLitCount: "3"
+              allowStrs: '""'
+              allowInts: "0,1,2"
+              ignoreFuncs: "make,len,cap"
+
+    gosec:
+      config:
+        G306: "0644"
+
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithStack(
+
+    errorlint:
+      errorf: true
+      errorf-multi: true
+      asserts: true
+      comparison: true
+
+    # Scoped to the errorf check: a verb-less fmt.Errorf must be errors.New.
+    # The other perfsprint nudges are off to keep the linter targeted.
+    perfsprint:
+      integer-format: false
+      int-conversion: false
+      error-format: true
+      err-error: false
+      errorf: true
+      string-format: false
+      sprintf1: false
+      strconcat: false
+      bool-format: false
+      hex-format: false
+
+  exclusions:
+    generated: lax
+    paths:
+      # npm dependencies ship Go source. go.mod's `ignore` directive keeps them
+      # out of the build; this keeps them out of lint reports too.
+      - frontend/node_modules
+    rules:
+      # Table-driven tests are naturally branchy, repeat fixture blocks, and use
+      # literal values — the budgets that keep production code honest punish the
+      # standard test shape instead.
+      - path: _test\.go
+        linters:
+          - gocognit
+          - gocyclo
+          - dupl
+          - goconst
+      - path: _test\.go
+        linters:
+          - revive
+        text: "cognitive-complexity|cyclomatic|add-constant"
+      # Test files legitimately contain hardcoded credentials-shaped fixtures.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G101"
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - gofumpt
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/txn2/m6t
+  exclusions:
+    generated: lax
+    paths:
+      - frontend/node_modules

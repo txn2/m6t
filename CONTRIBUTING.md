@@ -40,8 +40,10 @@ build):
 - Total coverage must be at least **80%**.
 - Coverage of the lines your change touches must be at least **85%** — new
   code is held above the total floor so the total only ratchets upward.
-- Cyclomatic complexity ≤ 10 and cognitive complexity ≤ 15 per function.
-- Mutation-testing efficacy ≥ 60% (`make verify-release`, required before
+- Cyclomatic complexity ≤ **10** and cognitive complexity ≤ **15** per
+  function. The frontend carries the same two numbers as eslint `complexity`
+  and `sonarjs/cognitive-complexity`, so one budget governs both languages.
+- Mutation-testing efficacy ≥ **60%** (`make verify-release`, required before
   tagging a release).
 - gosec, govulncheck, and semgrep clean; CodeQL gated against a baseline.
 
@@ -68,10 +70,48 @@ Hard rules:
 
 ## Development
 
-Prerequisites, pinned tool versions, and build instructions land with
-[#1](https://github.com/txn2/m6t/issues/1) (Wails v2, Go, Node, and the
-verification toolchain — `make tools-check` tells you exactly what's missing).
-Until then: `git clone`, read DESIGN.md, pick an unclaimed issue.
+### Prerequisites
+
+- **Go 1.26.5** and **Node.js 22+**.
+- Platform webview toolchain: Xcode command line tools on macOS;
+  `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` on Debian/Ubuntu; WebView2 (which
+  the Wails installer provides) on Windows.
+
+### The toolchain
+
+`make verify` runs pinned tools, and `make tools-check` refuses to proceed when
+a local version differs from the one CI uses — a gosec that silently drops a
+rule CI enforces is how a real vulnerability reaches a PR. Install exactly
+these (currently golangci-lint v2.11.4 / gosec v2.28.0):
+
+```sh
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+go install golang.org/x/vuln/cmd/govulncheck@latest
+go install golang.org/x/tools/cmd/deadcode@latest
+go install github.com/google/go-licenses@latest
+pip3 install semgrep
+```
+
+`make tools-check` names anything still missing or mismatched, with the command
+to fix it.
+
+### Everyday commands
+
+```sh
+make dev          # run the app with hot reload
+make verify       # the full gate — run before proposing a commit
+make test         # Go tests with -race -shuffle=on
+make frontend-test
+make build        # build the desktop app for this platform
+make bindings     # regenerate frontend/wailsjs after changing bound methods
+make help         # every target
+```
+
+`make verify` takes a few minutes on a cold cache. Run it anyway: it is the
+difference between finding a problem locally and finding it in review.
 
 ## Code conventions
 

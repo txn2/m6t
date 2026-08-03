@@ -1,16 +1,26 @@
 # Build output
 build/bin/
-dist/
 
 # Frontend
 frontend/node_modules/
-frontend/dist/
-frontend/wailsjs/
+frontend/*.tsbuildinfo
+# The built bundle is embedded into the Go binary at compile time, so the
+# directory must exist in a fresh clone or `//go:embed all:frontend/dist`
+# fails to compile — hence the tracked placeholder. Note there is deliberately
+# no bare `dist/` rule: it would exclude this directory outright and git would
+# never descend far enough to honour the negation below.
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# frontend/wailsjs is generated (`make bindings`) but committed: the frontend
+# builds and type-checks without a Go toolchain, and `make bindings-check`
+# fails when it goes stale.
 
 # Go
 *.test
 *.out
 coverage.*
+codeql-results.sarif
 
 # Editors / OS
 .idea/

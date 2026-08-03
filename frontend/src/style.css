@@ -1,0 +1,71 @@
+:root {
+  --m6t-bg: #16181d;
+  --m6t-fg: #e6e8ee;
+  --m6t-muted: #8b93a7;
+
+  color-scheme: dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  /* The window chrome is the app's; nothing here should scroll it. */
+  overflow: hidden;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 100%;
+  user-select: none;
+}
+
+.shell__title {
+  margin: 0;
+  font-size: 2.5rem;
+  letter-spacing: 0.15em;
+}
+
+.shell__subtitle {
+  margin: 0;
+  color: var(--m6t-muted);
+}
+
+.shell__build {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.15rem 0.75rem;
+  margin: 1.5rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.shell__build dt {
+  color: var(--m6t-muted);
+  text-align: right;
+}
+
+.shell__build dd {
+  margin: 0;
+}
+
+.shell__bridge {
+  margin: 0.75rem 0 0;
+  color: var(--m6t-muted);
+  font-size: 0.85rem;
+}

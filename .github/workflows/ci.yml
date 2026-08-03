@@ -1,0 +1,254 @@
+name: CI
+
+# Every job here has a `make verify` counterpart at the same threshold. When
+# you add a gate to one side, add it to the other — pins_test.go fails the
+# build when the figures drift apart, but only a human keeps the SET of checks
+# in step.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+env:
+  GO_VERSION: "1.26.5"
+  NODE_VERSION: "22"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history so --new-from-rev has a base commit to diff against.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.11.4
+          # Only NEW issues fail. We use golangci-lint's own git-based
+          # --new-from-rev rather than the action's only-new-issues: the latter
+          # fetches the PR diff from the GitHub API, which hard-fails above
+          # 20000 changed lines and then falls back to a full-repo scan.
+          # Base: the PR target tip on pull_request, the pre-push tip on push.
+          args: --timeout=5m --new-from-rev=${{ github.event.pull_request.base.sha || github.event.before }}
+
+      - name: Check formatting
+        run: make fmt
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Same flags as `make test`: -race catches concurrent misuse, -shuffle=on
+      # catches order-dependent tests, -count=1 defeats the test cache.
+      - name: Run tests with coverage
+        run: go test -race -shuffle=on -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+      # Threshold must equal COVERAGE_MIN in the Makefile and the Codecov
+      # project target; TestGateFiguresAgree enforces that.
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+          echo "Total coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage ${COVERAGE}% is below the 80% floor"
+            exit 1
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: cd frontend && npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: cd frontend && npm run typecheck
+
+      # Complexity/coupling gate — the frontend analog of golangci-lint.
+      # complexity <= 10 and sonarjs/cognitive-complexity <= 15 are the same
+      # numbers as gocyclo/gocognit; import cycles are errors. Existing
+      # violations are ratcheted through eslint-suppressions.json so only NEW
+      # ones fail, mirroring golangci-lint's only-new-issues.
+      - name: Lint
+        run: cd frontend && npm run lint
+
+      - name: Unit tests
+        run: cd frontend && npm test
+
+      - name: Build
+        run: cd frontend && npm run build
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # Wails renders through the system webview. On Linux that is WebKitGTK,
+      # which needs its development headers to link (DESIGN.md §9).
+      - name: Install Linux webview dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build Go packages
+        run: go build ./...
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Install the Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      # The Go binary embeds frontend/dist, which holds only its placeholder in
+      # a fresh checkout. Building the frontend first is what makes the smoke
+      # build exercise the real embed rather than an empty directory — the same
+      # order `make build-check` uses.
+      - name: Build the frontend
+        run: cd frontend && npm ci --no-audit --no-fund && npm run build
+
+      - name: Smoke-build the desktop app
+        run: wails build -s -o m6t
+
+      # `wails build` regenerates frontend/wailsjs from the bound Go methods.
+      # If the committed bindings differ, they were stale — the frontend was
+      # type-checking against an API the backend no longer has. This is the CI
+      # half of `make bindings-check`, and like it compares content only: Wails
+      # emits these files with an unstable exec bit (0755 from `generate
+      # module`, 0644 from `build`).
+      - name: Check the committed Wails bindings are current
+        if: matrix.os == 'ubuntu-latest'
+        run: git -c core.fileMode=false diff --exit-code -- frontend/wailsjs
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          gosec ./...
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-input: "1.26.5"
+          repo-checkout: false
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
+        with:
+          config: >-
+            p/golang
+            .semgrep/
+
+  licenses:
+    name: Licenses
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # m6t is Apache-2.0 and must stay linkable into a future commercial
+      # edition (DESIGN.md §9.1). A copyleft dependency is a merge blocker, not
+      # a warning. The allowlist lives in the Makefile.
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Check dependency licenses
+        run: make licenses
