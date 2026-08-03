@@ -1,10 +1,14 @@
 package app
 
 import (
+	"context"
 	"embed"
+	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/txn2/m6t/internal/buildinfo"
+	"github.com/txn2/m6t/internal/pty"
 )
 
 //go:embed testdata
@@ -73,6 +77,40 @@ func TestOptionsBindOnlyTheApp(t *testing.T) {
 	if bound.Version() != buildinfo.Get() {
 		t.Errorf("the bound App reports %+v, want %+v", bound.Version(), buildinfo.Get())
 	}
+}
+
+// PTYs are backend-owned and outlive every window, so the app quitting is the
+// only thing that ends them. Without the shutdown hook, closing m6t would
+// orphan the user's shells and whatever they were running.
+func TestShutdownTerminatesEveryTerminalSession(t *testing.T) {
+	opts := Options(testAssets)
+
+	application, ok := opts.Bind[0].(*App)
+	if !ok {
+		t.Fatalf("Bind[0] is %T, want *App", opts.Bind[0])
+	}
+	if opts.OnShutdown == nil {
+		t.Fatal("OnShutdown is nil; quitting the app would leave its PTY sessions running")
+	}
+
+	id, err := application.terminals.Create(pty.Options{Command: longRunningCommand()})
+	if err != nil {
+		t.Fatalf("creating a terminal session: %v", err)
+	}
+
+	opts.OnShutdown(context.Background())
+
+	if _, err := application.terminals.Attach(id); !errors.Is(err, pty.ErrNoSuchSession) {
+		t.Errorf("session %s survived shutdown: Attach error = %v, want ErrNoSuchSession", id, err)
+	}
+}
+
+// longRunningCommand returns an argv that stays alive until it is killed.
+func longRunningCommand() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd.exe", "/c", "ping -n 61 127.0.0.1 >NUL"}
+	}
+	return []string{"/bin/sh", "-c", "sleep 60"}
 }
 
 func TestEachCallBuildsItsOwnBinding(t *testing.T) {

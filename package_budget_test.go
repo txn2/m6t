@@ -50,6 +50,10 @@ var structuralPins = map[string]packagePin{
 		loc: 150, exported: 2,
 		why: "link-time build identity; a dependency root importing nothing first-party",
 	},
+	"internal/pty": {
+		loc: 750, exported: 7,
+		why: "PTY service: session lifecycle, scrollback and platform termination for the embedded terminal",
+	},
 }
 
 // locCeilingNote explains why the LOC ceilings carry headroom while every other
@@ -58,19 +62,26 @@ var structuralPins = map[string]packagePin{
 // A LOC ceiling set to a package's exact current line count is not a ratchet,
 // it is a freeze: one more line of doc comment in buildinfo.go would fail the
 // build. The number has to represent the size at which a package stops being
-// readable in one sitting, and m6t cannot measure that yet — the backend
-// services that will be the real packages (git, pty, kube, helm; DESIGN.md
-// §3.2) land in #2 and #5. So these figures are seeded as policy:
+// readable in one sitting.
+//
+// internal/pty is the first ceiling here set from a real measurement rather
+// than policy. It landed with #2 at 644 lines across six files, and 750 is
+// that plus room for the follow-up fixes a new service attracts — not enough
+// room for a second service to move in alongside it. The stream server that
+// consumes it (#3) is its own package, so this number should hold.
+//
+// The rest are still seeded as policy, because the services that would let
+// them be measured (git, kube, helm; DESIGN.md §3.2) land in #5:
 //
 //   - 200 for internal/app and 150 for buildinfo — roughly 3x and 2x today's
 //     size, so ordinary work does not trip the gate while a package that
 //     doubles again arrives in review as a decomposition question.
 //   - 60 for the root: main.go does one thing and must keep doing only that.
 //
-// Re-pin against real measurements once #2 and #5 land. No other ceiling here
+// Re-pin those against real measurements once #5 lands. No other ceiling here
 // needs the caveat: counts of packages, files and exported names do not grow
 // through ordinary editing.
-const locCeilingNote = "LOC ceilings are policy-seeded; re-pin after #2/#5 (see locCeilingNote)"
+const locCeilingNote = "internal/pty is measured; the other LOC ceilings are policy-seeded pending #5 (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.

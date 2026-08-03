@@ -49,12 +49,21 @@ func TestNoDeadPackages(t *testing.T) {
 // reviewer gets to ask whether the new dependency belongs.
 func TestImportGraphIsPinned(t *testing.T) {
 	// The composition root imports the binding layer; the binding layer reads
-	// build identity. buildinfo imports nothing first-party — it is a leaf, and
-	// depguard pins that independently.
+	// build identity and composes the backend services. buildinfo imports
+	// nothing first-party — it is a leaf, and depguard pins that
+	// independently.
+	//
+	// internal/app -> internal/pty is the first service edge (#2). It belongs
+	// because the binding layer is where services are composed: the App owns
+	// the Manager so that quitting the app can end the PTY sessions, which
+	// nothing else is positioned to do. The edge runs one way only — pty
+	// imports no first-party package at all, which is what keeps it usable
+	// from the stream server (#3) without dragging the Wails layer in.
 	want := map[string][]string{
 		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo"},
+		"internal/app":       {"internal/buildinfo", "internal/pty"},
 		"internal/buildinfo": {},
+		"internal/pty":       {},
 	}
 
 	graph := firstPartyImports(t)
