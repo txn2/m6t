@@ -50,6 +50,17 @@ GOBUILD := $(GO) build
 GOLINT := golangci-lint
 WAILS := wails
 
+# Wails links the system webview. On Linux it defaults to webkit2gtk-4.0,
+# which is EOL and absent from current distros (Ubuntu 24.04 ships 4.1 only),
+# so Linux builds select 4.1 with this tag. DESIGN.md §9 names webkit2gtk-4.1
+# as the Linux dependency; this is what makes the build honour that. Empty on
+# macOS and Windows, which use WKWebView and WebView2.
+ifeq ($(shell uname -s),Linux)
+WAILS_BUILD_TAGS := -tags webkit2_41
+else
+WAILS_BUILD_TAGS :=
+endif
+
 .PHONY: all help tools-check fmt lint lint-full lint-fix test coverage coverage-report \
 	patch-coverage security semgrep codeql sast osv dead-code licenses licenses-go \
 	licenses-js build build-check clean mutate verify verify-release dev run \
@@ -367,7 +378,7 @@ bindings-check: bindings
 ## build: Build the desktop application for the host platform
 build:
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
-	@$(WAILS) build -clean -ldflags "$(LDFLAGS)" -o $(BINARY_NAME)
+	@$(WAILS) build -clean $(WAILS_BUILD_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_NAME)
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
 ## build-check: Compile everything, verify the module graph, and smoke the app build
@@ -377,7 +388,7 @@ build-check: frontend-build
 	@echo "Verifying module checksums..."
 	@$(GO) mod verify
 	@echo "Smoke-building the desktop app..."
-	@$(WAILS) build -s -ldflags "$(LDFLAGS)" -o $(BINARY_NAME)
+	@$(WAILS) build -s $(WAILS_BUILD_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_NAME)
 	@test -e $(BUILD_DIR)/$(BINARY_NAME) || test -d $(BUILD_DIR)/$(BINARY_NAME).app \
 		|| { echo "FAIL: wails build produced no artifact in $(BUILD_DIR)"; exit 1; }
 	@echo "Build smoke passed."

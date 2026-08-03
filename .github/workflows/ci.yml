@@ -134,7 +134,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Linux builds against webkit2gtk-4.1: Wails defaults to 4.0, which
+          # is EOL and not packaged on Ubuntu 24.04. Same flag as the
+          # Makefile's WAILS_BUILD_TAGS. macOS (WKWebView) and Windows
+          # (WebView2) need no tag.
+          - os: ubuntu-latest
+            wails_build_tags: "-tags webkit2_41"
+          - os: macos-latest
+            wails_build_tags: ""
+          - os: windows-latest
+            wails_build_tags: ""
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -177,7 +187,7 @@ jobs:
         run: cd frontend && npm ci --no-audit --no-fund && npm run build
 
       - name: Smoke-build the desktop app
-        run: wails build -s -o m6t
+        run: wails build -s ${{ matrix.wails_build_tags }} -o m6t
 
       # `wails build` regenerates frontend/wailsjs from the bound Go methods.
       # If the committed bindings differ, they were stale — the frontend was
