@@ -10,6 +10,18 @@ export function ChooseProjectDirectory() {
   return window['go']['app']['App']['ChooseProjectDirectory']();
 }
 
+export function CreateEntry(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateEntry'](arg1, arg2, arg3);
+}
+
+export function DeleteEntry(arg1, arg2) {
+  return window['go']['app']['App']['DeleteEntry'](arg1, arg2);
+}
+
+export function ListDirectory(arg1, arg2) {
+  return window['go']['app']['App']['ListDirectory'](arg1, arg2);
+}
+
 export function OpenTerminal(arg1, arg2, arg3) {
   return window['go']['app']['App']['OpenTerminal'](arg1, arg2, arg3);
 }
@@ -20,6 +32,10 @@ export function Projects() {
 
 export function RemoveProject(arg1) {
   return window['go']['app']['App']['RemoveProject'](arg1);
+}
+
+export function RenameEntry(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RenameEntry'](arg1, arg2, arg3);
 }
 
 export function StreamEndpoint() {

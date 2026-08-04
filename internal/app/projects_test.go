@@ -9,13 +9,29 @@ import (
 	"testing"
 
 	"github.com/txn2/m6t/internal/project"
+	"github.com/txn2/m6t/internal/watch"
 )
 
-// testApp builds the binding over a registry in a fresh temp directory.
+// testApp builds the binding over a registry in a fresh temp directory, with
+// a watch service so AddProject/RemoveProject's watcher wiring is exercised
+// rather than nil-panicking.
 func testApp(t *testing.T) *App {
 	t.Helper()
-	return &App{projects: project.New(t.TempDir())}
+	a := &App{
+		projects: project.New(t.TempDir()),
+		trees:    watch.New(discardEvents{}, watch.Options{}),
+	}
+	t.Cleanup(a.trees.Shutdown)
+	return a
 }
+
+// discardEvents is a watch.Events that does nothing — the binding-layer
+// tests care about the registry and the watcher's lifecycle, not what it
+// publishes; internal/stream and internal/watch each cover that on their
+// own side of the seam.
+type discardEvents struct{}
+
+func (discardEvents) PublishTreeChanged(string, []string) {}
 
 // repoDir creates a directory the registry will accept as a worktree.
 func repoDir(t *testing.T, name string) string {

@@ -43,7 +43,7 @@ var structuralPins = map[string]packagePin{
 		why: "composition root: embeds the frontend, hands options to the Wails runtime",
 	},
 	"internal/app": {
-		loc: 400, exported: 2,
+		loc: 540, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/buildinfo": {
@@ -61,6 +61,10 @@ var structuralPins = map[string]packagePin{
 	"internal/stream": {
 		loc: 900, exported: 5,
 		why: "loopback stream server: token-authenticated WebSocket transport for PTY I/O and backend-push events",
+	},
+	"internal/watch": {
+		loc: 950, exported: 13,
+		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
 	},
 }
 
@@ -110,6 +114,23 @@ var structuralPins = map[string]packagePin{
 // store, and the project schema — and 650 is that plus the follow-up room a new
 // service attracts, the same allowance internal/pty got in #2.
 //
+// internal/watch is measured: it landed with #6 at 807 lines across five
+// files — os.Root-confined List/Create/Rename/Delete, the fsnotify watcher and
+// its coalescer, the polling fallback, and the Start/Stop/Shutdown service —
+// and 950 is that plus the same proportional follow-up room internal/pty and
+// internal/project carry.
+//
+// 400 -> 540 in #6. tree.go added a fourth composed service (the file-tree
+// watcher, internal/watch) the same shape as #3's stream adapter and #5's
+// registry bindings: a treeBridge adapter (watch.Events -> stream.Server, the
+// PublishTree seam) and four delegating bindings (ListDirectory, CreateEntry,
+// RenameEntry, DeleteEntry). 466 is today's actual; 540 is that plus the same
+// proportional headroom internal/pty and internal/project carry for one more
+// follow-up of this size. internal/project.Registry.Remove changed shape in
+// this PR too — it returns the removed project instead of only an error — so
+// RemoveProject's watcher-stop no longer needs a second lookup; that is a net
+// LOC reduction in internal/app, not a contributor to this raise.
+//
 // The rest are still seeded as policy, because the services that would let
 // them be measured (git, kube, helm; DESIGN.md §3.2) land later:
 //
@@ -122,7 +143,7 @@ var structuralPins = map[string]packagePin{
 // changed, so there is no new measurement to pin them to. No other ceiling here
 // needs the caveat: counts of packages, files and exported names do not grow
 // through ordinary editing.
-const locCeilingNote = "internal/pty, internal/stream, internal/app and internal/project are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
+const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project and internal/watch are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.

@@ -141,9 +141,11 @@ body {
 
 .workbench__tree {
   grid-area: tree;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-right: 1px solid var(--m6t-border);
-  padding: 0.75rem;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .workbench__editor {
@@ -170,6 +172,149 @@ body {
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 0.85em;
   overflow-wrap: anywhere;
+}
+
+/* --- file tree --------------------------------------------------------- */
+
+.tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.tree__header {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--m6t-border);
+}
+
+.tree__header button {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.tree__hidden-toggle {
+  margin-left: auto;
+  color: var(--m6t-muted);
+  white-space: nowrap;
+}
+
+.tree__rows {
+  flex: 1;
+  overflow: auto;
+  padding: 0.35rem 0;
+}
+
+.tree__empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  color: var(--m6t-muted);
+}
+
+.tree__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.tree__row:hover,
+.tree__row:focus-visible {
+  background: var(--m6t-panel);
+  outline: none;
+}
+
+.tree__row--selected {
+  background: var(--m6t-panel);
+  color: var(--m6t-accent);
+}
+
+.tree__row--confirm {
+  gap: 0.5rem;
+  background: var(--m6t-panel);
+}
+
+.tree__row--editing {
+  padding: 0.15rem 0.5rem;
+}
+
+.tree__icon {
+  color: var(--m6t-muted);
+  width: 1em;
+  text-align: center;
+}
+
+.tree__icon--dir {
+  color: var(--m6t-accent);
+}
+
+.tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree__menu-button {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--m6t-muted);
+  opacity: 0;
+}
+
+.tree__row:hover .tree__menu-button,
+.tree__row:focus-within .tree__menu-button {
+  opacity: 1;
+}
+
+.tree__menu {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  margin-top: 1.5rem;
+  padding: 0.25rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 6px;
+  background: var(--m6t-panel);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
+}
+
+.tree__menu button {
+  border: none;
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+}
+
+.tree__menu-note {
+  padding: 0.3rem 0.5rem;
+  color: var(--m6t-muted);
+  font-size: 0.75rem;
+  white-space: normal;
+}
+
+.tree__inline-field {
+  flex: 1;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--m6t-accent);
+  border-radius: 4px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+}
+
+.tree__inline-error {
+  color: #e06c75;
+  font-size: 0.75rem;
+  white-space: normal;
 }
 
 /* --- toolbar --------------------------------------------------------- */

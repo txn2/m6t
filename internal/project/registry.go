@@ -114,31 +114,44 @@ func (r *Registry) append(resolved string) (Project, error) {
 	return added, nil
 }
 
-// Remove drops a project from the registry.
+// Remove drops a project from the registry and returns what it removed.
 //
 // It touches the registry and nothing else. The working tree stays exactly
 // where it is — "remove" here means m6t stops listing the repository, and a
 // user who wanted the files gone would have said so to something other than a
 // project list.
-func (r *Registry) Remove(name string) error {
+//
+// Returning the removed project (path expanded, as List's do) is what lets a
+// caller that keyed something else off that path — a watcher, keyed by
+// worktree rather than by name (internal/watch) — tear it down without a
+// second lookup.
+func (r *Registry) Remove(name string) (Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	projects, err := load(r.dir)
 	if err != nil {
-		return err
+		return Project{}, err
 	}
 
+	var removed Project
+	found := false
 	remaining := make([]Project, 0, len(projects))
 	for _, p := range projects {
-		if p.Name != name {
-			remaining = append(remaining, p)
+		if p.Name == name {
+			removed, found = p, true
+			continue
 		}
+		remaining = append(remaining, p)
 	}
-	if len(remaining) == len(projects) {
-		return fmt.Errorf("removing %s: %w", name, ErrNotFound)
+	if !found {
+		return Project{}, fmt.Errorf("removing %s: %w", name, ErrNotFound)
 	}
-	return save(r.dir, remaining)
+	if err := save(r.dir, remaining); err != nil {
+		return Project{}, err
+	}
+	removed.Path = expand(removed.Path)
+	return removed, nil
 }
 
 // Settings returns the named project's kube binding and helm defaults.

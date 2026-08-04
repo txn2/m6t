@@ -1,8 +1,14 @@
 import type { ReactNode } from "react";
+import { FileTree } from "./FileTree";
 import type { Project } from "../lib/projects";
+import type { FileTreeController } from "../lib/useFileTree";
 
 export interface WorkbenchProps {
-  readonly project: Project;
+  /** The file tree's state and operations for this project (#6). */
+  readonly tree: FileTreeController;
+  /** The open-file intent a tree selection emits; #7's editor is what will
+   * act on it. */
+  readonly onOpenFile: (path: string) => void;
   /** The terminal strip and panes for this project. */
   readonly terminals: ReactNode;
 }
@@ -10,18 +16,15 @@ export interface WorkbenchProps {
 /**
  * The per-project workbench (DESIGN.md §5): file tree, editor, terminal.
  *
- * The tree and editor are placeholders that name the issue that fills them, so
- * the layout this ticket delivers is honest about what is in it. The terminal
- * pane is real — it is #4's, rooted at this project's checkout.
+ * The editor is a placeholder that names the issue that fills it. The file
+ * tree is real — it is #6's — and the terminal pane is real — it is #4's,
+ * rooted at this project's checkout.
  */
-export function Workbench({ project, terminals }: WorkbenchProps) {
+export function Workbench({ tree, onOpenFile, terminals }: WorkbenchProps) {
   return (
     <div className="workbench">
-      <aside className="workbench__tree" aria-label="File tree">
-        <p className="placeholder">File tree — #6</p>
-        <p className="placeholder placeholder--path" title={project.path}>
-          {project.path}
-        </p>
+      <aside className="workbench__tree">
+        <FileTree tree={tree} onOpenFile={onOpenFile} />
       </aside>
 
       <section className="workbench__editor" aria-label="Editor">

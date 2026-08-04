@@ -38,6 +38,20 @@ describe("frames received from the server", () => {
     ).toEqual({ type: "resync", droppedBytes: 4096 });
   });
 
+  it("reads a tree change and the directories it names", () => {
+    expect(
+      decodeServerMessage(
+        '{"type":"tree","payload":{"root":"/repo","dirs":[".","manifests"]}}',
+      ),
+    ).toEqual({ type: "tree", root: "/repo", dirs: [".", "manifests"] });
+  });
+
+  it("reads a tree change naming no directories", () => {
+    expect(
+      decodeServerMessage('{"type":"tree","payload":{"root":"/repo","dirs":[]}}'),
+    ).toEqual({ type: "tree", root: "/repo", dirs: [] });
+  });
+
   // §5: an envelope whose type is unknown, or which does not decode, is
   // ignored — not an error, and not a reason to close the connection. Each of
   // these must come back null rather than throw or produce a partial message.
@@ -51,6 +65,10 @@ describe("frames received from the server", () => {
     ["an exit with no payload", '{"type":"exit"}'],
     ["an exit whose code is not a number", '{"type":"exit","payload":{"code":"0"}}'],
     ["a resync with no count", '{"type":"resync","payload":{}}'],
+    ["a tree change with no root", '{"type":"tree","payload":{"dirs":["."]}}'],
+    ["a tree change with no dirs", '{"type":"tree","payload":{"root":"/repo"}}'],
+    ["a tree change whose dirs is not an array", '{"type":"tree","payload":{"root":"/repo","dirs":"."}}'],
+    ["a tree change whose dirs holds a non-string", '{"type":"tree","payload":{"root":"/repo","dirs":[1]}}'],
   ])("ignores %s", (_name, raw) => {
     expect(decodeServerMessage(raw)).toBeNull();
   });

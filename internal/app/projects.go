@@ -56,15 +56,24 @@ func (a *App) AddProject(path string) (project.Project, error) {
 	if err != nil {
 		return project.Project{}, fmt.Errorf("adding project at %s: %w", path, err)
 	}
+
+	// Best effort, like streams.Start at OnStartup: a watcher that fails to
+	// start must not stop the project from being usable — List, Create,
+	// Rename and Delete all work without it, and the tree simply will not
+	// self-update until the watcher does start.
+	_ = a.trees.Start(added.Path)
+
 	return added, nil
 }
 
 // RemoveProject drops a project from the registry, leaving its working tree on
 // disk untouched.
 func (a *App) RemoveProject(name string) error {
-	if err := a.projects.Remove(name); err != nil {
+	removed, err := a.projects.Remove(name)
+	if err != nil {
 		return fmt.Errorf("removing project %s: %w", name, err)
 	}
+	a.trees.Stop(removed.Path)
 	return nil
 }
 

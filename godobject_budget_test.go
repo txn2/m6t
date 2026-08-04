@@ -51,7 +51,17 @@ const (
 	// this is the only handle on one. It is a field rather than a parameter
 	// because Wails hands it over at startup and the bound methods the frontend
 	// calls take only their own arguments.
-	maxAppFields = 5
+	//
+	// 5 -> 6 in #6. The file-tree watcher arrives as a single *watch.Service
+	// handle: the one-handle-per-service case a fourth time — every open
+	// project's fsnotify/poll watcher, its coalescing and its lifecycle live in
+	// internal/watch, and the App holds the handle only to start, stop and wire
+	// it to the stream server. The lookup and startup-fanout helpers this
+	// service needed (projectPath, startRegisteredWatchers) are free functions
+	// over the registry and service handles the App already has, not App
+	// methods — spending fields is the described pattern, spending the method
+	// ceiling on internal wiring is not.
+	maxAppFields = 6
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.
@@ -90,7 +100,15 @@ const (
 	// The get-settings binding the issue asked for was deliberately NOT added:
 	// Projects already returns every project's settings, so a reader would have
 	// been a second way to fetch what the frontend holds.
-	maxAppMethods = 8
+	//
+	// 8 -> 12 in #6. ListDirectory, CreateEntry, RenameEntry, DeleteEntry: the
+	// file tree's whole surface, the same shape the project registry's five
+	// methods took in #5 — a request with an answer and no throughput, once per
+	// operation the tree UI drives directly. Watching itself adds nothing here:
+	// a project's watcher starts and stops from AddProject/RemoveProject and
+	// application startup, never from a binding of its own, which is what kept
+	// this a four-method raise instead of a wider one.
+	maxAppMethods = 12
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

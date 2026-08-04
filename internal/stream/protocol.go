@@ -27,6 +27,12 @@ const (
 	// typeResync reports that output was dropped, so a renderer knows its view
 	// is no longer a faithful replay of the stream.
 	typeResync = "resync"
+
+	// typeTree reports that one or more directories under a project's
+	// worktree may have changed (internal/watch). It is published on
+	// /events only — a file tree is not a terminal session, so there is no
+	// matching client-to-server form.
+	typeTree = "tree"
 )
 
 // envelope is the JSON text frame both endpoints speak: a type and its payload.
@@ -46,6 +52,15 @@ type exitPayload struct {
 // resyncPayload carries how much output was discarded since the last marker.
 type resyncPayload struct {
 	DroppedBytes int64 `json:"droppedBytes"`
+}
+
+// treePayload names the project and the directories within it that changed.
+// Dirs are root-relative and slash-separated, "." for the project's own
+// root — the same form internal/watch uses throughout, carried onto the wire
+// unchanged.
+type treePayload struct {
+	Root string   `json:"root"`
+	Dirs []string `json:"dirs"`
 }
 
 // control is an inbound text frame. Only the fields the server acts on are

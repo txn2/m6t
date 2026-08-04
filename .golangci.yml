@@ -397,6 +397,20 @@ linters:
         linters:
           - gosec
         text: "G304"
+      # G302 (file permissions >0600) in tests only, and only for directories
+      # restored after a deliberate chmod 0 (internal/watch's fsnotify_test.go
+      # and poll_test.go exercise "a directory becomes unreadable mid-walk").
+      # A directory needs its execute bit to be usable at all, so nothing
+      # gosec would accept here would leave the fixture usable again; the
+      # mode is a fixed, owner-only constant, scoped to a path inside the
+      # test's own t.TempDir(). Production code never takes this path: it
+      # writes only through internal/project's os.Root (configPerm 0600,
+      # dirPerm 0700) and internal/watch's own filePerm/dirPerm (0640/0750),
+      # neither of which this exemption touches.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G302"
       # G204 (subprocess launched with variable) is structurally in conflict
       # with what m6t is. Driving the user's own git, kubectl and helm with
       # arguments built from project paths, branch names and values files is the
