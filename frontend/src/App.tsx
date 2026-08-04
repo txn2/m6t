@@ -6,6 +6,8 @@ import { TerminalTabs } from "./components/TerminalTabs";
 import { Toolbar } from "./components/Toolbar";
 import { ProjectStatus, Workbench } from "./components/Workbench";
 import { type BuildStatus, detachedBuild, loadBuild } from "./lib/build";
+import type { Directory } from "./lib/directory";
+import { wailsDirectory } from "./lib/directory";
 import type { Project, Registry } from "./lib/projects";
 import {
   findProject,
@@ -20,6 +22,7 @@ import {
   clampFontSize,
   preferredAppearance,
 } from "./lib/theme";
+import { useFileTree } from "./lib/useFileTree";
 import { useTerminals } from "./lib/useTerminals";
 
 const initialStatus: BuildStatus = { info: detachedBuild, attached: false };
@@ -34,6 +37,8 @@ export interface AppProps {
   endpoint?: () => Promise<Endpoint>;
   /** Injectable for tests and harnesses; defaults to the Wails bindings. */
   registry?: Registry;
+  /** Injectable for tests and harnesses; defaults to the Wails bindings. */
+  directory?: Directory;
 }
 
 /**
@@ -47,6 +52,7 @@ export default function App({
   load = loadBuild,
   endpoint = StreamEndpoint,
   registry = wailsRegistry,
+  directory = wailsDirectory,
 }: AppProps) {
   const [build, setBuild] = useState<BuildStatus>(initialStatus);
   const [stream, setStream] = useState<Endpoint | null>(null);
@@ -152,6 +158,13 @@ export default function App({
   );
 
   const active = findProject(projects, activeProject);
+  const tree = useFileTree(active?.path ?? null, stream, directory);
+
+  // The open-file intent (DESIGN.md §5) has nowhere to go until #7 builds an
+  // editor. Selecting a file already updates the tree's own selection
+  // highlight through useFileTree; this is deliberately a no-op rather than
+  // a half-built editor stub.
+  const handleOpenFile = useCallback(() => undefined, []);
 
   return (
     <main className={`shell shell--${appearance}`}>
@@ -184,7 +197,8 @@ export default function App({
         </p>
       ) : (
         <Workbench
-          project={active}
+          tree={tree}
+          onOpenFile={handleOpenFile}
           terminals={
             <Terminals
               project={active}

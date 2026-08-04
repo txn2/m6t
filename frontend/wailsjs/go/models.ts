@@ -139,3 +139,22 @@ export namespace stream {
 
 }
 
+export namespace watch {
+	
+	export class Entry {
+	    name: string;
+	    isDir: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.isDir = source["isDir"];
+	    }
+	}
+
+}
+

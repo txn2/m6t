@@ -35,6 +35,17 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	c.drainReads()
 }
 
+// PublishTree announces that dirs under a project's root may have changed
+// (internal/watch's Events seam). It is the one entry point into this
+// package for a producer other than a terminal connection: git and helm
+// (DESIGN.md §3.2) get their own exported Publish method the same shape as
+// this one when they land, rather than a generic "publish anything" call
+// that would let a caller invent envelope types this file does not know
+// about.
+func (s *Server) PublishTree(root string, dirs []string) {
+	s.publish(envelope{Type: typeTree, Payload: treePayload{Root: root, Dirs: dirs}})
+}
+
 // publish sends an event to every subscribed connection.
 //
 // A subscriber too far behind loses events the same way a terminal loses output:

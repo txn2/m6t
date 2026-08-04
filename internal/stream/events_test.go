@@ -1,6 +1,9 @@
 package stream
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // A PTY exit goes to the event channel as well as to the terminal socket: a tab
 // renders it, and the rest of the UI learns a session ended without having to be
@@ -30,6 +33,50 @@ func TestSessionExitIsPublishedToEveryEventSubscriber(t *testing.T) {
 		if frame.Payload.Code != 3 {
 			t.Errorf("%s subscriber received code %d, want 3", name, frame.Payload.Code)
 		}
+	}
+}
+
+// PublishTree is internal/watch's entry point into the event channel: a
+// producer other than a terminal connection can announce a change and every
+// /events subscriber sees it, the same as a PTY exit does.
+func TestPublishTreeIsPublishedToEveryEventSubscriber(t *testing.T) {
+	terminals := newFakeTerminals()
+	server, endpoint := startTestServer(t, terminals)
+
+	first := dial(t, endpoint, "/events")
+	second := dial(t, endpoint, "/events")
+
+	server.PublishTree("/repo", []string{".", "manifests"})
+
+	for name, subscriber := range map[string]*client{"first": first, "second": second} {
+		frame := subscriber.readEnvelope()
+		if frame.Type != typeTree {
+			t.Errorf("%s subscriber received type %q, want %q", name, frame.Type, typeTree)
+		}
+		if frame.Payload.Root != "/repo" {
+			t.Errorf("%s subscriber received root %q, want %q", name, frame.Payload.Root, "/repo")
+		}
+		if want := []string{".", "manifests"}; !slices.Equal(frame.Payload.Dirs, want) {
+			t.Errorf("%s subscriber received dirs %v, want %v", name, frame.Payload.Dirs, want)
+		}
+	}
+}
+
+// A terminal connection is not registered for events (the same guarantee
+// TestPublishingWithNoSubscribersIsHarmless covers for exit), so a tree
+// change must never arrive on one.
+func TestPublishTreeDoesNotReachTerminalConnections(t *testing.T) {
+	terminals := newFakeTerminals()
+	server, endpoint := startTestServer(t, terminals)
+
+	terminal := dial(t, endpoint, "/pty/"+fakeSessionID)
+	server.PublishTree("/repo", []string{"."})
+
+	// The session ending is what unblocks the read below without a tree frame
+	// ever having to (not) arrive on its own timeout.
+	terminals.session().exit(0)
+	if frame := terminal.readEnvelope(); frame.Type != typeExit {
+		t.Fatalf("terminal frame type = %q, want %q — a tree event must not reach a terminal socket", frame.Type, typeExit)
 	}
 }
 

@@ -76,13 +76,22 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// stream server — there is no project -> stream edge, for the same reason
 	// there is no stream -> pty one. Three services out of the binding layer,
 	// still none between them.
+	//
+	// internal/app -> internal/watch is #6's edge, the fourth service and the
+	// same shape again: watch declares its own Events seam (mirroring stream's
+	// Terminals) rather than importing internal/stream, so the binding layer
+	// holds the one adapter (treeBridge, tree.go) that joins the two. There is
+	// still no edge between any pair of services — watch does not import
+	// project, project does not import watch — each one is composed, never
+	// composing another.
 	want := map[string][]string{
 		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo", "internal/project", "internal/pty", "internal/stream"},
+		"internal/app":       {"internal/buildinfo", "internal/project", "internal/pty", "internal/stream", "internal/watch"},
 		"internal/buildinfo": {},
 		"internal/project":   {},
 		"internal/pty":       {},
 		"internal/stream":    {},
+		"internal/watch":     {},
 	}
 
 	graph := firstPartyImports(t)

@@ -127,6 +127,7 @@ message without the other having to be updated in lockstep.
 |---|---|---|
 | `exit` | `{"code": <int>}` | The child ended. `-1` means it was terminated by a signal rather than exiting on its own. Sent on `/pty/{sessionID}` and published on `/events`. |
 | `resync` | `{"droppedBytes": <int>}` | Output was discarded before the frame that follows (§6). |
+| `tree` | `{"root": <string>, "dirs": [<string>, …]}` | One or more directories under a project's worktree (`root`, its absolute path) may have changed — `internal/watch`, coalesced. `dirs` are root-relative, slash-separated, `"."` for the root itself. Published on `/events` only. A consumer re-lists whichever of `dirs` it currently has loaded; a directory it has not loaded needs no action. |
 
 ## 6. Backpressure
 

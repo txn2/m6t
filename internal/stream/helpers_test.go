@@ -311,8 +311,10 @@ func (c *client) readBinary() []byte {
 type serverFrame struct {
 	Type    string `json:"type"`
 	Payload struct {
-		Code         int   `json:"code"`
-		DroppedBytes int64 `json:"droppedBytes"`
+		Code         int      `json:"code"`
+		DroppedBytes int64    `json:"droppedBytes"`
+		Root         string   `json:"root"`
+		Dirs         []string `json:"dirs"`
 	} `json:"payload"`
 }
 

@@ -231,7 +231,7 @@ func TestRemoveDropsTheProjectAndLeavesTheWorkingTree(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	if err := r.Remove("infra"); err != nil {
+	if _, err := r.Remove("infra"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
@@ -257,7 +257,7 @@ func TestRemoveKeepsTheOtherProjects(t *testing.T) {
 		}
 	}
 
-	if err := r.Remove("beta"); err != nil {
+	if _, err := r.Remove("beta"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
@@ -275,7 +275,7 @@ func TestRemoveKeepsTheOtherProjects(t *testing.T) {
 }
 
 func TestRemoveUnknownProjectIsNotFound(t *testing.T) {
-	if err := newRegistry(t).Remove("ghost"); !errors.Is(err, ErrNotFound) {
+	if _, err := newRegistry(t).Remove("ghost"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Remove of an unregistered project = %v, want ErrNotFound", err)
 	}
 }
@@ -412,7 +412,7 @@ func TestEveryOperationRefusesAMalformedConfig(t *testing.T) {
 	operations := map[string]func() error{
 		"List":     func() error { _, err := r.List(); return err },
 		"Add":      func() error { _, err := r.Add(repo); return err },
-		"Remove":   func() error { return r.Remove("anything") },
+		"Remove":   func() error { _, err := r.Remove("anything"); return err },
 		"Settings": func() error { _, err := r.Settings("anything"); return err },
 		"Update":   func() error { _, err := r.Update("anything", Settings{}); return err },
 	}
@@ -466,7 +466,7 @@ func TestWritesReportAFailedSave(t *testing.T) {
 
 	writes := map[string]func() error{
 		"Add":    func() error { second, _ := fakeRepo(t, "other"); _, err := r.Add(second); return err },
-		"Remove": func() error { return r.Remove("infra") },
+		"Remove": func() error { _, err := r.Remove("infra"); return err },
 		"Update": func() error { _, err := r.Update("infra", Settings{Kube: Kube{Context: "x"}}); return err },
 	}
 

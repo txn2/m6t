@@ -8,6 +8,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"os"
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -17,6 +18,7 @@ import (
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/pty"
 	"github.com/txn2/m6t/internal/stream"
+	"github.com/txn2/m6t/internal/watch"
 )
 
 // Window geometry. m6t is a single-window app: the three-pane project
@@ -58,6 +60,12 @@ type App struct {
 	// binding all hang off.
 	projects *project.Registry
 
+	// trees watches every registered project's worktree (DESIGN.md §3.2) and
+	// backs the tree UI's lazy listing and CRUD (tree.go). Every project is
+	// an open tab from the moment it is registered, so a watcher's lifetime
+	// tracks AddProject/RemoveProject and application startup.
+	trees *watch.Service
+
 	// window holds the Wails runtime context, published by OnStartup. It is what
 	// native dialogs are addressed to — a directory picker has to be owned by a
 	// window — and it is unset until OnStartup runs, which
@@ -75,6 +83,7 @@ type App struct {
 // the window options is unreachable from the frontend.
 func newApp() *App {
 	terminals := pty.New()
+	streams := stream.New(terminalBridge{terminals: terminals})
 
 	// A registry with no path reports the failure on every call rather than
 	// taking the window down at construction: an app that cannot find the OS
@@ -88,8 +97,14 @@ func newApp() *App {
 	return &App{
 		info:      buildinfo.Get(),
 		terminals: terminals,
-		streams:   stream.New(terminalBridge{terminals: terminals}),
+		streams:   streams,
 		projects:  project.New(configDir),
+
+		// M6T_FS_POLL selects the polling fallback (DESIGN.md §3.2). There
+		// is no per-project settings UI yet (Kube and Helm are in the same
+		// state, DESIGN.md §4), so a global override unblocks a network
+		// mount until one exists.
+		trees: watch.New(treeBridge{streams: streams}, watch.Options{Poll: os.Getenv("M6T_FS_POLL") != ""}),
 	}
 }
 
@@ -163,6 +178,7 @@ func Options(assets embed.FS) *options.App {
 			// assignment, so a reader either sees no window or sees this one.
 			application.window.Store(&ctx)
 			_ = application.streams.Start()
+			startRegisteredWatchers(application.projects, application.trees)
 		},
 
 		// PTYs are backend-owned and outlive every window in the app, so the
@@ -176,6 +192,7 @@ func Options(assets embed.FS) *options.App {
 		OnShutdown: func(context.Context) {
 			application.streams.Shutdown()
 			application.terminals.Shutdown()
+			application.trees.Shutdown()
 		},
 	}
 }

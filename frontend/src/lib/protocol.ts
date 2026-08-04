@@ -12,6 +12,7 @@ const TYPE_CLOSE = "close";
 /** Envelope type names the server sends. */
 const TYPE_EXIT = "exit";
 const TYPE_RESYNC = "resync";
+const TYPE_TREE = "tree";
 
 /**
  * Tells the backend what window size the child should see. Sent whenever the
@@ -33,7 +34,8 @@ export function closeFrame(): string {
 /** A control message from the server (§5, server to client). */
 export type ServerMessage =
   | { readonly type: "exit"; readonly code: number }
-  | { readonly type: "resync"; readonly droppedBytes: number };
+  | { readonly type: "resync"; readonly droppedBytes: number }
+  | { readonly type: "tree"; readonly root: string; readonly dirs: string[] };
 
 /**
  * Decodes a text frame, returning null for anything this version does not
@@ -59,6 +61,12 @@ export function decodeServerMessage(raw: string): ServerMessage | null {
       return withNumber(envelope.payload, "droppedBytes", (droppedBytes) => ({
         type: "resync",
         droppedBytes,
+      }));
+    case TYPE_TREE:
+      return withTreePayload(envelope.payload, (root, dirs) => ({
+        type: "tree",
+        root,
+        dirs,
       }));
     default:
       return null;
@@ -110,4 +118,28 @@ function withNumber<T>(
   }
   const value = (payload as Record<string, unknown>)[field];
   return typeof value === "number" ? build(value) : null;
+}
+
+/**
+ * Applies `build` to a `{root, dirs}` payload, or returns null when either
+ * field is missing or malformed — the same "drop rather than half-apply"
+ * rule withNumber follows.
+ */
+function withTreePayload<T>(
+  payload: unknown,
+  build: (root: string, dirs: string[]) => T,
+): T | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const root = record.root;
+  const dirs = record.dirs;
+  if (typeof root !== "string" || !Array.isArray(dirs)) {
+    return null;
+  }
+  if (!dirs.every((d): d is string => typeof d === "string")) {
+    return null;
+  }
+  return build(root, dirs);
 }
