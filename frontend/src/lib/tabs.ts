@@ -22,10 +22,18 @@ export interface TerminalTab {
   readonly key: string;
   readonly title: string;
   /**
+   * The project this tab belongs to, by name.
+   *
+   * Terminals are scoped to a project (#5): the strip shows only the active
+   * project's tabs, but every tab's pane stays mounted regardless, so switching
+   * projects leaves a running `claude` session exactly where it was.
+   */
+  readonly project: string;
+  /**
    * The directory the tab's shell starts in, fixed when the tab is created.
-   * It is held per tab rather than read from the toolbar at connect time so
-   * that editing the field does not move a running tab's shell out from under
-   * it. Issue #5 replaces the field with the project root.
+   * It is held per tab rather than read from the project at connect time so
+   * that a tab whose project is removed keeps running in the directory it
+   * started in rather than losing its footing.
    */
   readonly cwd: string;
   readonly status: TabStatus;
@@ -50,12 +58,14 @@ export interface TerminalTab {
 /** Creates a tab that has not yet asked the backend for a session. */
 export function newTab(
   key: string,
+  project: string,
   title: string,
   cwd: string,
   autorun: string | null = null,
 ): TerminalTab {
   return {
     key,
+    project,
     title,
     cwd,
     status: "starting",
@@ -64,6 +74,24 @@ export function newTab(
     autorun,
     generation: 0,
   };
+}
+
+/**
+ * The tabs belonging to one project.
+ *
+ * The full list is kept flat and filtered for display rather than nested per
+ * project, because the panes are rendered from the flat list: a tab that
+ * disappeared from the tree while its project was inactive would unmount its
+ * pane and detach a running shell.
+ */
+export function tabsForProject(
+  tabs: readonly TerminalTab[],
+  project: string | null,
+): TerminalTab[] {
+  if (project === null) {
+    return [];
+  }
+  return tabs.filter((tab) => tab.project === project);
 }
 
 /**

@@ -195,3 +195,25 @@ func TestEachCallBuildsItsOwnBinding(t *testing.T) {
 		t.Error("Options returned a shared App instance; each window must own its binding")
 	}
 }
+
+// A machine where the OS config directory cannot be located must still get a
+// window. The registry is built with no directory and reports the failure on
+// every call — the project list shows an error and the terminals still work,
+// rather than the app refusing to start.
+func TestNewAppSurvivesAnUnresolvableConfigDirectory(t *testing.T) {
+	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "AppData", "USERPROFILE"} {
+		t.Setenv(key, "")
+	}
+
+	application := newApp()
+
+	if application.projects == nil {
+		t.Fatal("newApp left the registry nil; every project call would panic")
+	}
+	if _, err := application.Projects(); err == nil {
+		t.Error("Projects over an unusable config location succeeded, want an error")
+	}
+	if application.terminals == nil || application.streams == nil {
+		t.Error("newApp skipped the other services; the app must still run without a registry")
+	}
+}

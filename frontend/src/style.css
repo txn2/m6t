@@ -42,12 +42,134 @@ body {
   overflow: hidden;
 }
 
+/* A column rather than a fixed grid: the registry error is a conditional row,
+   and a grid-template-rows list would have to be restated for every
+   combination of rows that can be on screen. */
 .shell {
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   background: var(--m6t-bg);
   color: var(--m6t-fg);
+}
+
+.shell__error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--m6t-border);
+  color: #e06c75;
+}
+
+/* --- project strip --------------------------------------------------- */
+
+.projects {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem 0;
+  background: var(--m6t-panel);
+  border-bottom: 1px solid var(--m6t-border);
+}
+
+.projects__list {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.projects__tab {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--m6t-border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--m6t-bg);
+}
+
+.projects__tab--active {
+  border-color: var(--m6t-accent);
+}
+
+.projects__select,
+.projects__remove,
+.projects__add {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+}
+
+.projects__select {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.projects__tab--active .projects__select {
+  color: var(--m6t-accent);
+}
+
+.projects__remove {
+  color: var(--m6t-muted);
+  padding-left: 0;
+}
+
+.projects__add {
+  margin-left: auto;
+  color: var(--m6t-muted);
+  white-space: nowrap;
+}
+
+/* --- workbench ------------------------------------------------------- */
+
+/* Tree | editor over terminal (DESIGN.md §5). min-height: 0 on the row is what
+   lets the terminal pane shrink instead of pushing the status bar off-screen. */
+.workbench {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 16rem 1fr;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "tree editor"
+    "terminal terminal";
+  min-height: 0;
+}
+
+.workbench__tree {
+  grid-area: tree;
+  border-right: 1px solid var(--m6t-border);
+  padding: 0.75rem;
+  overflow: auto;
+}
+
+.workbench__editor {
+  grid-area: editor;
+  padding: 0.75rem;
+  overflow: auto;
+}
+
+.workbench__terminal {
+  grid-area: terminal;
+  display: flex;
+  flex-direction: column;
+  min-height: 18rem;
+  height: 45vh;
+  border-top: 1px solid var(--m6t-border);
+}
+
+.placeholder {
+  margin: 0 0 0.5rem;
+  color: var(--m6t-muted);
+}
+
+.placeholder--path {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
 }
 
 /* --- toolbar --------------------------------------------------------- */

@@ -8,11 +8,13 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"github.com/txn2/m6t/internal/buildinfo"
+	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/pty"
 	"github.com/txn2/m6t/internal/stream"
 )
@@ -49,6 +51,23 @@ type App struct {
 	// I/O does not cross the Wails bridge — the bridge carries only the
 	// endpoint the frontend needs to open a socket to it.
 	streams *stream.Server
+
+	// projects is the project registry (DESIGN.md §4): the persistent list of
+	// manifest repositories and their per-project settings. It is the app's
+	// organizing unit — a project is what a tab, a working directory and a kube
+	// binding all hang off.
+	projects *project.Registry
+
+	// window holds the Wails runtime context, published by OnStartup. It is what
+	// native dialogs are addressed to — a directory picker has to be owned by a
+	// window — and it is unset until OnStartup runs, which
+	// ChooseProjectDirectory reports rather than dereferences.
+	//
+	// It is atomic because the two sides run on different goroutines: Wails
+	// calls OnStartup on its own, and every bound method the frontend invokes
+	// arrives on another. A plain field would be a data race whose safety
+	// depended on undocumented ordering inside Wails.
+	window atomic.Pointer[context.Context]
 }
 
 // newApp builds the binding. It is unexported because Options is the only
@@ -56,10 +75,21 @@ type App struct {
 // the window options is unreachable from the frontend.
 func newApp() *App {
 	terminals := pty.New()
+
+	// A registry with no path reports the failure on every call rather than
+	// taking the window down at construction: an app that cannot find the OS
+	// config directory can still run terminals, and a project list showing an
+	// error is a better answer than no window at all.
+	configDir, err := project.ConfigDir()
+	if err != nil {
+		configDir = ""
+	}
+
 	return &App{
 		info:      buildinfo.Get(),
 		terminals: terminals,
 		streams:   stream.New(terminalBridge{terminals: terminals}),
+		projects:  project.New(configDir),
 	}
 }
 
@@ -127,7 +157,11 @@ func Options(assets embed.FS) *options.App {
 		// runs, without terminals — and it is not logged here because the
 		// server keeps it and StreamEndpoint reports it to the frontend, which
 		// is where a user can actually see it.
-		OnStartup: func(context.Context) {
+		OnStartup: func(ctx context.Context) {
+			// Published before the listener starts: the frontend cannot call a
+			// bound method until the webview loads, and this is the only
+			// assignment, so a reader either sees no window or sees this one.
+			application.window.Store(&ctx)
 			_ = application.streams.Start()
 		},
 

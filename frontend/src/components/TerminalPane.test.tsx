@@ -47,7 +47,7 @@ function fakeTerminal(): MountedTerminal {
 
 function renderPane(overrides: Partial<Parameters<typeof TerminalPane>[0]>) {
   const props = {
-    tab: newTab("k0", "shell 1", "/w/project"),
+    tab: newTab("k0", "infra", "shell 1", "/w/project"),
     endpoint,
     active: true,
     fontSize: 13,
@@ -112,7 +112,7 @@ describe("a running pane", () => {
 
 describe("a pane whose shell has ended", () => {
   const ended = (patch: Parameters<typeof patchTab>[2]) =>
-    patchTab([newTab("k0", "shell 1", "/w")], "k0", patch)[0];
+    patchTab([newTab("k0", "infra", "shell 1", "/w")], "k0", patch)[0];
 
   it("says how it ended and offers to start another", () => {
     const { props } = renderPane({

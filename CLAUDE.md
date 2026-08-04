@@ -36,6 +36,10 @@ internal/app/             the Wails binding layer — the object bound to the
                           services below it; they never import it.
 internal/buildinfo/       link-time build identity. A dependency root: it
                           imports nothing first-party.
+internal/project/         project registry: the persistent list of manifest
+                          repositories (projects.yaml, DESIGN.md §4), their
+                          per-project settings, and clone-by-URL. Imports
+                          nothing first-party.
 internal/pty/             PTY service: the sessions behind the embedded
                           terminal. Imports nothing first-party.
 internal/stream/          loopback WebSocket transport (DESIGN.md §3.3) for PTY

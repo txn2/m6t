@@ -1,29 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StreamEndpoint } from "../wailsjs/go/app/App";
+import { ProjectTabs } from "./components/ProjectTabs";
 import { TerminalPane } from "./components/TerminalPane";
 import { TerminalTabs } from "./components/TerminalTabs";
 import { Toolbar } from "./components/Toolbar";
+import { ProjectStatus, Workbench } from "./components/Workbench";
 import { type BuildStatus, detachedBuild, loadBuild } from "./lib/build";
-import type { Endpoint } from "./lib/stream";
-import type { TerminalTab } from "./lib/tabs";
+import type { Project, Registry } from "./lib/projects";
 import {
-  endingClosesTheTab,
-  newTab,
-  nextTitle,
-  patchTab,
-  removeTab,
-  renameTab,
-  restartTab,
-  selectionAfterClose,
-  statusPatch,
-} from "./lib/tabs";
-import type { SessionStatus, TerminalSession } from "./lib/terminalSession";
+  findProject,
+  selectionAfterReload,
+  selectionAfterRemove,
+  wailsRegistry,
+} from "./lib/projects";
+import type { Endpoint } from "./lib/stream";
 import type { Appearance } from "./lib/theme";
 import {
   DEFAULT_FONT_SIZE,
   clampFontSize,
   preferredAppearance,
 } from "./lib/theme";
+import { useTerminals } from "./lib/useTerminals";
 
 const initialStatus: BuildStatus = { info: detachedBuild, attached: false };
 
@@ -35,37 +32,34 @@ export interface AppProps {
   load?: typeof loadBuild;
   /** Injectable for tests and harnesses; defaults to the Wails binding. */
   endpoint?: () => Promise<Endpoint>;
+  /** Injectable for tests and harnesses; defaults to the Wails bindings. */
+  registry?: Registry;
 }
 
 /**
- * The dev layout for issue #4: a terminal tab strip over a terminal pane.
+ * The project workbench (DESIGN.md §5).
  *
- * This is the spike-exit shell, not the workbench. The three-pane project
- * layout in DESIGN.md §5 arrives with projects (#5); what has to be true here
- * is that a full-screen TUI in one of these tabs feels like a terminal.
+ * Projects are the organizing unit: a top-level tab each, and inside one, the
+ * three-pane layout with terminals rooted at the checkout. The terminal state
+ * lives above the project tabs deliberately — see `useTerminals`.
  */
 export default function App({
   load = loadBuild,
   endpoint = StreamEndpoint,
+  registry = wailsRegistry,
 }: AppProps) {
   const [build, setBuild] = useState<BuildStatus>(initialStatus);
   const [stream, setStream] = useState<Endpoint | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
-  const [cwd, setCwd] = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProject, setActiveProject] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [appearance, setAppearance] = useState<Appearance>(preferredAppearance);
 
-  const [tabs, setTabs] = useState<TerminalTab[]>([]);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-
-  // Tab keys are never reused: a key that came back would let React match a new
-  // tab's pane to a dead one's terminal.
-  const keys = useRef(0);
-  // The live sessions, by tab key. They are the panes' to own and the strip's
-  // to end — closing a tab has to kill its PTY, and unmounting deliberately
-  // does not (PROTOCOL.md §4).
-  const sessions = useRef(new Map<string, TerminalSession>());
+  const terminals = useTerminals(activeProject);
 
   useEffect(() => {
     let current = true;
@@ -101,80 +95,75 @@ export default function App({
     };
   }, [endpoint]);
 
-  const handleAttach = useCallback((key: string, session: TerminalSession) => {
-    sessions.current.set(key, session);
-  }, []);
-
-  // Only the session that is actually registered is removed: a restart mounts
-  // the replacement pane and unmounts the old one, and a blind delete would
-  // drop the new session on the old one's way out — leaving the tab's shell
-  // with nothing able to kill it.
-  const handleDetach = useCallback((key: string, session: TerminalSession) => {
-    if (sessions.current.get(key) === session) {
-      sessions.current.delete(key);
+  const reload = useCallback(async () => {
+    try {
+      const listed = await registry.list();
+      setProjects(listed);
+      setActiveProject((active) => selectionAfterReload(listed, active));
+      setProjectError(null);
+    } catch (error: unknown) {
+      // A registry that will not load is shown, never swallowed: an empty strip
+      // would read as "you have no projects" when the truth is a broken
+      // projects.yaml the user has to go fix.
+      setProjectError(describe(error));
     }
-  }, []);
+  }, [registry]);
 
-  // The current strip, for the handlers that must stay stable across renders:
-  // a pane holds its callbacks for the life of its session, so a handler that
-  // changed identity would rebuild the terminal underneath a running program.
-  const strip = useRef<TerminalTab[]>([]);
   useEffect(() => {
-    strip.current = tabs;
-  }, [tabs]);
+    void reload();
+  }, [reload]);
 
-  const dropTab = useCallback((key: string) => {
-    setActiveKey((active) => selectionAfterClose(strip.current, key, active));
-    setTabs((current) => removeTab(current, key));
-  }, []);
-
-  const handleStatus = useCallback(
-    (key: string, status: SessionStatus) => {
-      if (endingClosesTheTab(status)) {
-        dropTab(key);
-        return;
+  // Browse, then register. The picker returns "" when the user dismisses it,
+  // which ends the flow silently — a cancelled dialog is not a failure and must
+  // not leave an error on screen.
+  const handleAdd = useCallback(() => {
+    setProjectError(null);
+    void (async () => {
+      try {
+        const chosen = await registry.choose();
+        if (chosen === "") {
+          return;
+        }
+        const added = await registry.add(chosen);
+        await reload();
+        setActiveProject(added.name);
+      } catch (error: unknown) {
+        setProjectError(describe(error));
       }
-      setTabs((current) => patchTab(current, key, statusPatch(status)));
+    })();
+  }, [registry, reload]);
+
+  const handleRemove = useCallback(
+    (name: string) => {
+      // The project's terminals go with it. Their panes would otherwise stay
+      // mounted for the life of the app with no tab left to reach them.
+      terminals.closeProject(name);
+      setActiveProject((active) => selectionAfterRemove(projects, name, active));
+      void (async () => {
+        try {
+          await registry.remove(name);
+          await reload();
+        } catch (error: unknown) {
+          setProjectError(describe(error));
+        }
+      })();
     },
-    [dropTab],
+    [projects, registry, reload, terminals],
   );
 
-  const create = useCallback(
-    (autorun: string | null) => {
-      keys.current += 1;
-      const key = `tab-${String(keys.current)}`;
-      setTabs((current) => [
-        ...current,
-        newTab(key, nextTitle(current, autorun ?? "shell"), cwd, autorun),
-      ]);
-      setActiveKey(key);
-    },
-    [cwd],
-  );
-
-  const handleClose = useCallback(
-    (key: string) => {
-      // Ending the session is the point of closing a tab. Unmounting the pane
-      // only detaches, so without this the shell would run on unreachable.
-      sessions.current.get(key)?.close();
-      dropTab(key);
-    },
-    [dropTab],
-  );
-
-  const handleRestart = useCallback((key: string) => {
-    setTabs((current) => restartTab(current, key));
-  }, []);
-
-  const handleRename = useCallback((key: string, title: string) => {
-    setTabs((current) => renameTab(current, key, title));
-  }, []);
+  const active = findProject(projects, activeProject);
 
   return (
     <main className={`shell shell--${appearance}`}>
+      <ProjectTabs
+        projects={projects}
+        activeName={activeProject}
+        onSelect={setActiveProject}
+        onRemove={handleRemove}
+        onAdd={handleAdd}
+      />
+
       <Toolbar
-        cwd={cwd}
-        onCwd={setCwd}
         fontSize={fontSize}
         onFontSize={(px) => {
           setFontSize(clampFontSize(px));
@@ -183,49 +172,34 @@ export default function App({
         onAppearance={setAppearance}
       />
 
-      <TerminalTabs
-        tabs={tabs}
-        activeKey={activeKey}
-        onSelect={setActiveKey}
-        onClose={handleClose}
-        onRename={handleRename}
-        onCreate={() => {
-          create(null);
-        }}
-        onCreateClaude={() => {
-          create(CLAUDE_COMMAND);
-        }}
-      />
+      {projectError !== null && (
+        <p className="shell__error" role="alert">
+          {projectError}
+        </p>
+      )}
 
-      <div className="panes">
-        {stream === null ? (
-          <p className="panes__empty" data-testid="stream-status">
-            {streamError ?? "connecting to the terminal backend…"}
-          </p>
-        ) : (
-          tabs.map((tab) => (
-            <TerminalPane
-              key={`${tab.key}:${String(tab.generation)}`}
-              tab={tab}
-              endpoint={stream}
-              active={tab.key === activeKey}
+      {active === null ? (
+        <p className="panes__empty">
+          No project open. Add a repository to get started.
+        </p>
+      ) : (
+        <Workbench
+          project={active}
+          terminals={
+            <Terminals
+              project={active}
+              stream={stream}
+              streamError={streamError}
+              terminals={terminals}
               fontSize={fontSize}
               appearance={appearance}
-              onStatus={handleStatus}
-              onRestart={handleRestart}
-              onAttach={handleAttach}
-              onDetach={handleDetach}
             />
-          ))
-        )}
-        {stream !== null && tabs.length === 0 && (
-          <p className="panes__empty">
-            No terminals open. Set a working directory above, then open a shell.
-          </p>
-        )}
-      </div>
+          }
+        />
+      )}
 
       <footer className="statusbar">
+        <ProjectStatus project={active} />
         <span data-testid="build-version">{build.info.version}</span>
         <span data-testid="build-commit">{build.info.commit}</span>
         <span data-testid="build-date">{build.info.date}</span>
@@ -236,6 +210,77 @@ export default function App({
         </span>
       </footer>
     </main>
+  );
+}
+
+interface TerminalsProps {
+  readonly project: Project;
+  readonly stream: Endpoint | null;
+  readonly streamError: string | null;
+  readonly terminals: ReturnType<typeof useTerminals>;
+  readonly fontSize: number;
+  readonly appearance: Appearance;
+}
+
+/**
+ * The terminal strip and its panes for one project.
+ *
+ * Every tab in the app is rendered here, not only the active project's: a pane
+ * that unmounted on a project switch would detach its shell. The strip shows
+ * the active project's tabs; the panes hidden by `active` are the rest.
+ */
+function Terminals({
+  project,
+  stream,
+  streamError,
+  terminals,
+  fontSize,
+  appearance,
+}: TerminalsProps) {
+  return (
+    <>
+      <TerminalTabs
+        tabs={terminals.visible}
+        activeKey={terminals.activeKey}
+        onSelect={terminals.select}
+        onClose={terminals.close}
+        onRename={terminals.rename}
+        onCreate={() => {
+          terminals.create(project.name, project.path, null);
+        }}
+        onCreateClaude={() => {
+          terminals.create(project.name, project.path, CLAUDE_COMMAND);
+        }}
+      />
+
+      <div className="panes">
+        {stream === null ? (
+          <p className="panes__empty" data-testid="stream-status">
+            {streamError ?? "connecting to the terminal backend…"}
+          </p>
+        ) : (
+          terminals.tabs.map((tab) => (
+            <TerminalPane
+              key={`${tab.key}:${String(tab.generation)}`}
+              tab={tab}
+              endpoint={stream}
+              active={tab.key === terminals.activeKey}
+              fontSize={fontSize}
+              appearance={appearance}
+              onStatus={terminals.onStatus}
+              onRestart={terminals.restart}
+              onAttach={terminals.onAttach}
+              onDetach={terminals.onDetach}
+            />
+          ))
+        )}
+        {stream !== null && terminals.visible.length === 0 && (
+          <p className="panes__empty">
+            No terminals open in {project.name}. Open a shell to get started.
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 

@@ -39,7 +39,19 @@ const (
 	// spread across the App — the port, the token, the live connections and the
 	// event subscribers all live behind that field in internal/stream, and the
 	// App holds it only to start it, stop it, and report its endpoint.
-	maxAppFields = 3
+	//
+	// 3 -> 5 in #5. The project registry arrives as a single *project.Registry
+	// handle: the one-handle-per-service case again — the registry owns its
+	// file, its locking and its validation, and the App holds it only to
+	// delegate. Five bound methods arrived with it and the handle count moved by
+	// one, which is the relationship this ceiling exists to keep true.
+	//
+	// The second field is the Wails runtime context, captured in OnStartup. It
+	// is not service state: native dialogs have to be addressed to a window, and
+	// this is the only handle on one. It is a field rather than a parameter
+	// because Wails hands it over at startup and the bound methods the frontend
+	// calls take only their own arguments.
+	maxAppFields = 5
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.
@@ -64,7 +76,21 @@ const (
 	// close all stayed on the socket, which is what that paragraph was
 	// protecting. This is the last terminal method: #5 gives a tab a project's
 	// cwd, and a cwd is an argument to this one, not a new binding.
-	maxAppMethods = 3
+	//
+	// 3 -> 8 in #5, and the promise above held: no terminal method was added.
+	// A project's cwd is an argument to OpenTerminal exactly as predicted. The
+	// five new methods are the project registry's surface — Projects,
+	// ChooseProjectDirectory, AddProject, RemoveProject, UpdateProject — and
+	// they are bound rather than pushed onto the transport because each is a
+	// request with an answer and no throughput, which is the same test
+	// OpenTerminal had to pass.
+	//
+	// This is the largest single raise this ceiling will take, because it is a
+	// whole service's surface landing at once rather than a method at a time.
+	// The get-settings binding the issue asked for was deliberately NOT added:
+	// Projects already returns every project's settings, so a reader would have
+	// been a second way to fetch what the frontend holds.
+	maxAppMethods = 8
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

@@ -387,6 +387,41 @@ linters:
         linters:
           - gosec
         text: "G101"
+      # G304 (file inclusion via variable) in tests only. Production code has no
+      # exemption: internal/project reads through os.Root with constant
+      # filenames, which is the real fix gosec itself recommends and which
+      # confines every operation to the config directory. Tests read back files
+      # they just wrote into their own t.TempDir(), where there is no path to
+      # traverse out of and no input to distrust.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G304"
+      # G204 (subprocess launched with variable) is structurally in conflict
+      # with what m6t is. Driving the user's own git, kubectl and helm with
+      # arguments built from project paths, branch names and values files is the
+      # product, not an accident — .semgrep/go-security.yml says so in its own
+      # first rule — so G204 fires on every correct invocation this app will ever
+      # make. A gate that fires on the correct pattern trains people to suppress
+      # it, which is how the incorrect pattern gets through later.
+      #
+      # The risk G204 exists to catch is covered, by controls that target it
+      # precisely rather than by banning variable argv:
+      #   - no-shell-invocation-for-external-tools (.semgrep/go-security.yml)
+      #     fails the build on exec.Command("sh"|"bash"|"zsh"|"cmd"|"powershell").
+      #     No shell means shell metacharacters in a path are inert, which is the
+      #     actual attack G204 approximates.
+      #   - argv is a slice of separate strings, so no argument can become a
+      #     second command.
+      #   - "--" terminates option parsing before any user-supplied operand, so a
+      #     dash-leading URL cannot become a flag such as --upload-pack. That one
+      #     is pinned by a test (TestCloneTreatsADashLeadingURLAsARepository).
+      #
+      # Scoped to the packages that invoke tools, not repo-wide.
+      - path: (internal/project/|_test\.go)
+        linters:
+          - gosec
+        text: "G204"
 
 issues:
   max-issues-per-linter: 50

@@ -6,8 +6,8 @@ import { TerminalTabs } from "./TerminalTabs";
 afterEach(cleanup);
 
 const tabs = [
-  newTab("k0", "shell 1", "/w"),
-  newTab("k1", "claude 1", "/w", "claude"),
+  newTab("k0", "infra", "shell 1", "/w"),
+  newTab("k1", "infra", "claude 1", "/w", "claude"),
 ];
 
 function renderStrip(overrides: Partial<Parameters<typeof TerminalTabs>[0]>) {

@@ -43,12 +43,16 @@ var structuralPins = map[string]packagePin{
 		why: "composition root: embeds the frontend, hands options to the Wails runtime",
 	},
 	"internal/app": {
-		loc: 260, exported: 2,
+		loc: 400, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,
 		why: "link-time build identity; a dependency root importing nothing first-party",
+	},
+	"internal/project": {
+		loc: 650, exported: 9,
+		why: "project registry: the persistent list of manifest repositories and their per-project settings",
 	},
 	"internal/pty": {
 		loc: 750, exported: 7,
@@ -90,18 +94,35 @@ var structuralPins = map[string]packagePin{
 // translation, or a service implemented here instead of composed here, is what
 // this number exists to bring to review.
 //
+// 260 -> 400 in #5, and this is the raise most worth arguing with. The registry
+// bindings in projects.go are 82 lines for five methods, four of them a
+// delegation to internal/project with an error wrap and the fifth a native
+// dialog — the shape this ceiling wants, not the shape it refuses. What actually
+// moved the number is that the binding layer now composes three services instead
+// of two, and each arrives with a doc comment explaining why its operation
+// belongs on the bridge rather than behind the transport. 400 is today's 343
+// plus room for one more service of that size. The check on this is not the line count but the god-object
+// gate: if these lines were behavior rather than delegation, App would be
+// growing fields, and maxAppFields is still pinned at one handle per service.
+//
+// internal/project is measured: it landed with #5 at 570 lines across three
+// files — the registry and its read-modify-write cycles, the confined atomic
+// store, and the project schema — and 650 is that plus the follow-up room a new
+// service attracts, the same allowance internal/pty got in #2.
+//
 // The rest are still seeded as policy, because the services that would let
-// them be measured (git, kube, helm; DESIGN.md §3.2) land in #5:
+// them be measured (git, kube, helm; DESIGN.md §3.2) land later:
 //
 //   - 150 for buildinfo — roughly 2x today's size, so ordinary work does not
 //     trip the gate while a package that doubles again arrives in review as a
 //     decomposition question.
 //   - 60 for the root: main.go does one thing and must keep doing only that.
 //
-// Re-pin those against real measurements once #5 lands. No other ceiling here
+// Both are still policy-seeded after #5 rather than re-pinned: neither package
+// changed, so there is no new measurement to pin them to. No other ceiling here
 // needs the caveat: counts of packages, files and exported names do not grow
 // through ordinary editing.
-const locCeilingNote = "internal/pty, internal/stream and internal/app are measured; buildinfo and the root are policy-seeded pending #5 (see locCeilingNote)"
+const locCeilingNote = "internal/pty, internal/stream, internal/app and internal/project are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.
