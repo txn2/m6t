@@ -301,3 +301,72 @@ func TestExpandAlwaysAcceptsTheForwardSlashForm(t *testing.T) {
 		t.Errorf("expand of the platform-separator form = %q, want %q", got, filepath.Join(home, "workspace"))
 	}
 }
+
+// noHomeDirectory blanks every variable the standard library consults for a
+// home or config directory, on every platform, so the failure branches below
+// are reached rather than described.
+func noHomeDirectory(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"HOME", "XDG_CONFIG_HOME", "AppData", "USERPROFILE"} {
+		t.Setenv(key, "")
+	}
+}
+
+// A machine with no resolvable home directory is rare but not impossible — a
+// daemon context, a stripped environment. It must produce an error naming what
+// failed, not a path built from an empty string.
+func TestConfigDirReportsAnUnresolvableHome(t *testing.T) {
+	noHomeDirectory(t)
+
+	if dir, err := ConfigDir(); err == nil {
+		t.Errorf("ConfigDir with no home = %q, want an error", dir)
+	}
+}
+
+// The config root existing as a FILE is the other way this fails: MkdirAll
+// cannot create a directory where one already is.
+func TestConfigDirReportsAnUncreatableDirectory(t *testing.T) {
+	home := t.TempDir()
+	occupied := filepath.Join(home, "occupied")
+	if err := os.WriteFile(occupied, []byte("x"), 0o600); err != nil {
+		t.Fatalf("occupying the config root: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", occupied)
+	t.Setenv("HOME", occupied)
+	t.Setenv("AppData", occupied)
+
+	if dir, err := ConfigDir(); err == nil {
+		t.Errorf("ConfigDir under a file = %q, want an error", dir)
+	}
+}
+
+// A projects.yaml that exists but cannot be read is distinct from one that is
+// absent: absent is an empty registry, unreadable is an error. A directory in
+// its place is the reachable form of unreadable.
+func TestLoadReportsAnUnreadableRegistry(t *testing.T) {
+	dir := tempConfigDir(t)
+	if err := os.MkdirAll(registryFile(dir), 0o750); err != nil {
+		t.Fatalf("occupying the registry: %v", err)
+	}
+
+	if projects, err := load(dir); err == nil {
+		t.Errorf("load of an unreadable registry = %v, want an error", projects)
+	}
+}
+
+// With no home directory there is nothing to abbreviate against or expand to,
+// and both must return the path untouched rather than a path built from "".
+func TestPathHelpersFallBackWithNoHomeDirectory(t *testing.T) {
+	noHomeDirectory(t)
+
+	absolute := filepath.Join(string(filepath.Separator), "opt", "infra")
+	if got := abbreviate(absolute); got != absolute {
+		t.Errorf("abbreviate with no home = %q, want it unchanged", got)
+	}
+	if got := expand("~/workspace"); got != "~/workspace" {
+		t.Errorf("expand with no home = %q, want it unchanged", got)
+	}
+	if got := expand(homeMarker); got != homeMarker {
+		t.Errorf("expand(~) with no home = %q, want it unchanged", got)
+	}
+}

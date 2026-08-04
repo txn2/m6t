@@ -487,3 +487,14 @@ func TestWritesReportAFailedSave(t *testing.T) {
 		t.Errorf("registry after failed writes = %+v, want the original single project", listed)
 	}
 }
+
+// requireRepository is reached through Add, which resolves the path first and
+// so never hands it something missing. Its own stat failure therefore needs
+// driving directly — otherwise the branch is unreachable and untested.
+func TestRequireRepositoryReportsAnUnreadablePath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+
+	if err := requireRepository(missing); err == nil {
+		t.Error("requireRepository on a missing path succeeded, want an error")
+	}
+}
