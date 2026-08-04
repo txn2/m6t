@@ -3,6 +3,8 @@
 import {stream} from '../models';
 import {buildinfo} from '../models';
 
+export function OpenTerminal(arg1:string,arg2:number,arg3:number):Promise<string>;
+
 export function StreamEndpoint():Promise<stream.Endpoint>;
 
 export function Version():Promise<buildinfo.Info>;

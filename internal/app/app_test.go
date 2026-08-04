@@ -4,7 +4,9 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/txn2/m6t/internal/buildinfo"
@@ -102,6 +104,79 @@ func TestShutdownTerminatesEveryTerminalSession(t *testing.T) {
 
 	if _, err := application.terminals.Attach(id); !errors.Is(err, pty.ErrNoSuchSession) {
 		t.Errorf("session %s survived shutdown: Attach error = %v, want ErrNoSuchSession", id, err)
+	}
+}
+
+// OpenTerminal is the frontend's only way to get a session, so the identifier
+// it hands back has to be one the stream server can attach to — an id the
+// manager does not know is a terminal tab that opens onto a 404.
+func TestOpenTerminalReturnsAnAttachableSession(t *testing.T) {
+	application := newApp()
+	t.Cleanup(application.terminals.Shutdown)
+
+	id, err := application.OpenTerminal(t.TempDir(), 100, 40)
+	if err != nil {
+		t.Fatalf("OpenTerminal: %v", err)
+	}
+	if id == "" {
+		t.Fatal("OpenTerminal returned an empty session id")
+	}
+
+	attachment, err := application.terminals.Attach(pty.SessionID(id))
+	if err != nil {
+		t.Fatalf("attaching to the session OpenTerminal returned: %v", err)
+	}
+	attachment.Detach()
+
+	// Two tabs are two shells. An id reused across calls would put both tabs on
+	// one PTY, with each one's keystrokes arriving in the other.
+	second, err := application.OpenTerminal(t.TempDir(), 100, 40)
+	if err != nil {
+		t.Fatalf("OpenTerminal (second): %v", err)
+	}
+	if second == id {
+		t.Errorf("both calls returned session id %q; each tab needs its own", id)
+	}
+}
+
+// A tab whose directory is gone must fail at the call, with the directory named
+// — the frontend shows this string to the user, and "opening terminal" alone
+// does not say which one.
+func TestOpenTerminalFailsWhenTheDirectoryDoesNotExist(t *testing.T) {
+	application := newApp()
+	t.Cleanup(application.terminals.Shutdown)
+
+	missing := filepath.Join(t.TempDir(), "no-such-directory")
+
+	id, err := application.OpenTerminal(missing, 100, 40)
+	if err == nil {
+		t.Fatalf("OpenTerminal in a missing directory returned id %q and no error", id)
+	}
+	if id != "" {
+		t.Errorf("OpenTerminal returned id %q alongside an error, want the empty id", id)
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the directory %q", err, missing)
+	}
+}
+
+// The argument-to-field mapping, pinned directly. A transposed cols/rows draws
+// every prompt at the wrong width, and a dropped Cwd silently starts the tab in
+// the application's own directory — both are wrong quietly rather than loudly.
+func TestTerminalOptionsMapEachArgumentToItsField(t *testing.T) {
+	got := terminalOptions("/projects/infra-prod", 120, 40)
+
+	if got.Cwd != "/projects/infra-prod" {
+		t.Errorf("Cwd = %q, want %q", got.Cwd, "/projects/infra-prod")
+	}
+	if got.Cols != 120 {
+		t.Errorf("Cols = %d, want 120", got.Cols)
+	}
+	if got.Rows != 40 {
+		t.Errorf("Rows = %d, want 40", got.Rows)
+	}
+	if got.Command != nil {
+		t.Errorf("Command = %v, want nil: a tab runs the user's login shell and no argv crosses the bridge", got.Command)
 	}
 }
 

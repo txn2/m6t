@@ -56,7 +56,15 @@ const (
 	// operation — write, resize, close — is a WebSocket frame and adds nothing
 	// to this number. A future PR that adds a per-operation binding is not
 	// raising a ceiling, it is bypassing the transport.
-	maxAppMethods = 2
+	//
+	// 2 -> 3 in #4: OpenTerminal. The paragraph above is the test this had to
+	// pass, and creating a session is the one terminal operation that is not a
+	// per-operation binding — it is a request with an answer and no throughput,
+	// and it has to happen BEFORE there is a socket to ask on. Write, resize and
+	// close all stayed on the socket, which is what that paragraph was
+	// protecting. This is the last terminal method: #5 gives a tab a project's
+	// cwd, and a cwd is an argument to this one, not a new binding.
+	maxAppMethods = 3
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

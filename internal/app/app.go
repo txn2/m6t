@@ -69,6 +69,28 @@ func (a *App) Version() buildinfo.Info {
 	return a.info
 }
 
+// OpenTerminal starts a PTY session for a terminal tab at cwd, sized to the
+// pane that will show it, and returns the identifier the frontend opens the
+// session's stream socket with (PROTOCOL.md §4).
+//
+// Creating a session is the one terminal operation that belongs on the Wails
+// bridge: it is a request with an answer and no throughput. Everything the tab
+// does afterwards — keystrokes, resize, close — is a frame on the socket, which
+// is what keeps the character stream off the bridge (DESIGN.md §3.3).
+//
+// No argv crosses the bridge. A tab is the user's login shell, and the "Claude
+// Code" action is the frontend typing `claude` into a fresh one — which is also
+// what leaves a usable shell behind when claude exits, instead of a dead tab.
+// The size is passed here rather than left to the first resize frame so the
+// shell's first prompt is drawn at the pane's real width.
+func (a *App) OpenTerminal(cwd string, cols, rows uint16) (string, error) {
+	id, err := a.terminals.Create(terminalOptions(cwd, cols, rows))
+	if err != nil {
+		return "", fmt.Errorf("opening terminal in %s: %w", cwd, err)
+	}
+	return string(id), nil
+}
+
 // StreamEndpoint reports the loopback port and per-launch token the frontend
 // needs to open its stream sockets (DESIGN.md §3.3).
 //
