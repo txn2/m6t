@@ -7,6 +7,20 @@ import (
 	"github.com/txn2/m6t/internal/stream"
 )
 
+// terminalOptions translates a terminal tab's request into the PTY service's
+// options.
+//
+// It is a function rather than a struct literal inside OpenTerminal so that the
+// mapping — which argument lands in which field — is pinned by a test. The
+// alternative is asking a live shell what size it thinks it is, which is a
+// flaky test of pty's job rather than a direct test of this one.
+//
+// Command stays empty deliberately: a terminal tab is the user's login shell,
+// and no argv crosses the Wails bridge (see App.OpenTerminal).
+func terminalOptions(cwd string, cols, rows uint16) pty.Options {
+	return pty.Options{Cwd: cwd, Cols: cols, Rows: rows}
+}
+
 // terminalBridge presents the PTY service through the seam the stream server
 // declares.
 //

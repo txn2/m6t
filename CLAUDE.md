@@ -9,9 +9,22 @@ the same process and [DESIGN.md](DESIGN.md) for what m6t is.
 
 **Run `make verify` before proposing any commit.** It is the CI-parity gate:
 every check it runs has an equivalent CI job at the same threshold. A green
-verify on a diff means CI cannot fail on that diff. Proposing a commit without
-it means asking a human to find out in CI what you could have found in three
-minutes.
+verify on a diff means CI cannot fail on that diff *for a reason that is in
+the diff*. Proposing a commit without it means asking a human to find out in
+CI what you could have found in three minutes.
+
+**A pull request is not delivered until its checks are green.** Opening it is
+the second-to-last step. Poll `gh pr checks <n>` until every check has
+settled, and report the result — a PR handed over while its checks are still
+running is a PR whose author decided someone else would read the failures.
+
+When a check does fail after a green verify, read the log before touching the
+code. It is one of two things and they need opposite responses: a finding
+against the diff means the parity claim above has a hole, and the hole gets
+fixed in the same PR; an error from the CI wrapper — a tool download, a cache,
+a remote schema fetch — means the workflow depends on something it should not,
+and the fix is in the workflow. Reporting either one as the other, or
+"fixing" a diff that was never at fault, is worse than the failure.
 
 ## Architecture map
 

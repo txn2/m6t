@@ -8,5 +8,19 @@ export default defineConfig({
     globals: false,
     include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
+    onConsoleLog(log, type) {
+      // xterm.js measures colours through a canvas when its module loads, and
+      // jsdom does not implement getContext. The message is jsdom's, it fires
+      // on import rather than on anything a test did, and the renderer itself
+      // is never exercised here — panes take an injected one. Dropping it keeps
+      // a failing assertion visible in the output instead of buried.
+      if (
+        type === "stderr" &&
+        log.includes("HTMLCanvasElement.prototype.getContext")
+      ) {
+        return false;
+      }
+      return undefined;
+    },
   },
 });

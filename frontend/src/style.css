@@ -1,7 +1,10 @@
 :root {
   --m6t-bg: #16181d;
+  --m6t-panel: #1c1f26;
+  --m6t-border: #2b2f39;
   --m6t-fg: #e6e8ee;
   --m6t-muted: #8b93a7;
+  --m6t-accent: #61afef;
 
   color-scheme: dark;
   font-family:
@@ -10,6 +13,19 @@
     "Segoe UI",
     sans-serif;
   font-size: 14px;
+}
+
+/* The terminal palette lives in lib/theme.ts as well: xterm paints its own
+   cells and cannot inherit a custom property. The two are the same colours. */
+.shell--light {
+  --m6t-bg: #fbfbfd;
+  --m6t-panel: #f0f1f5;
+  --m6t-border: #d7dae2;
+  --m6t-fg: #22252d;
+  --m6t-muted: #5f6674;
+  --m6t-accent: #2f6fd0;
+
+  color-scheme: light;
 }
 
 html,
@@ -27,45 +43,222 @@ body {
 }
 
 .shell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
   height: 100%;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+}
+
+/* --- toolbar --------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--m6t-border);
+  background: var(--m6t-panel);
+}
+
+.toolbar__field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--m6t-muted);
+  font-size: 0.8rem;
+}
+
+.toolbar__field input {
+  min-width: 18rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 4px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+}
+
+.toolbar__number {
+  min-width: 4rem !important;
+}
+
+button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 4px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--m6t-accent);
+}
+
+/* --- tab strip ------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--m6t-border);
+  background: var(--m6t-panel);
+  overflow-x: auto;
   user-select: none;
 }
 
-.shell__title {
-  margin: 0;
-  font-size: 2.5rem;
-  letter-spacing: 0.15em;
+.tab {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--m6t-border);
+  border-radius: 4px;
+  background: var(--m6t-bg);
 }
 
-.shell__subtitle {
-  margin: 0;
+.tab--active {
+  border-color: var(--m6t-accent);
+}
+
+.tab__label,
+.tab__close {
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+.tab__label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.tab__close {
+  padding: 0.25rem 0.4rem;
   color: var(--m6t-muted);
 }
 
-.shell__build {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 0.15rem 0.75rem;
-  margin: 1.5rem 0 0;
+.tab__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--m6t-muted);
+}
+
+.tab__dot--running {
+  background: #8cc265;
+}
+
+.tab__dot--exited {
+  background: var(--m6t-muted);
+}
+
+.tab__dot--failed {
+  background: #e06c75;
+}
+
+.tab__rename {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--m6t-accent);
+  border-radius: 4px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+}
+
+.tabs__add {
+  white-space: nowrap;
+}
+
+/* --- panes ----------------------------------------------------------- */
+
+.panes {
+  position: relative;
+  overflow: hidden;
+}
+
+.panes__empty {
+  margin: 0;
+  padding: 1rem;
+  color: var(--m6t-muted);
+}
+
+/*
+ * Every pane is laid out at full size whether or not it is the visible one.
+ * Hiding with `display: none` would collapse the terminal to zero columns and
+ * make the shell redraw at the wrong width on every tab switch; hiding it this
+ * way keeps the geometry — and the running program's screen — exactly as it
+ * was.
+ */
+.pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+}
+
+.pane--active {
+  visibility: visible;
+}
+
+.pane__terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 0.25rem 0 0 0.5rem;
+}
+
+.pane__ended {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--m6t-border);
+  background: var(--m6t-panel);
+}
+
+.pane__ended-text {
+  color: var(--m6t-muted);
+}
+
+/* --- find box -------------------------------------------------------- */
+
+.search {
+  display: flex;
+  gap: 0.25rem;
+  align-self: flex-end;
+  margin: 0.35rem 0.5rem 0;
+  padding: 0.25rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 4px;
+  background: var(--m6t-panel);
+}
+
+.search__input {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 4px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+}
+
+.search__input--missed {
+  border-color: #e06c75;
+}
+
+/* --- status bar ------------------------------------------------------ */
+
+.statusbar {
+  display: flex;
+  gap: 1rem;
+  padding: 0.3rem 0.75rem;
+  border-top: 1px solid var(--m6t-border);
+  background: var(--m6t-panel);
+  color: var(--m6t-muted);
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
-}
-
-.shell__build dt {
-  color: var(--m6t-muted);
-  text-align: right;
-}
-
-.shell__build dd {
-  margin: 0;
-}
-
-.shell__bridge {
-  margin: 0.75rem 0 0;
-  color: var(--m6t-muted);
-  font-size: 0.85rem;
 }
