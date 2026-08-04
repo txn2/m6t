@@ -2,9 +2,22 @@
 #
 # `make verify` is the single CI-parity gate: every check it runs has an
 # equivalent job in .github/workflows/ci.yml with the same threshold, so a
-# green verify on a diff means CI cannot fail on that diff. Keeping that true
-# is a maintained invariant — pins_test.go fails the build when a figure here
-# and a figure in CI/codecov/CONTRIBUTING drift apart.
+# green verify on a diff means CI cannot fail on that diff FOR A REASON THAT
+# IS IN THE DIFF. Keeping that true is a maintained invariant — pins_test.go
+# fails the build when a figure here and a figure in CI/codecov/CONTRIBUTING
+# drift apart.
+#
+# What it cannot cover, and no local gate can: the runner's own machinery.
+# CI reaches each of these targets through a GitHub Action that downloads
+# tools, restores caches and — until this was turned off — fetched a JSON
+# schema over HTTP before linting anything. A failure there is infrastructure,
+# not a finding, and verify is structurally blind to it.
+#
+# So when CI is red and verify was green, read the log before touching the
+# code. Two outcomes, and they need opposite responses: a finding against the
+# diff means the parity claim above has a hole and the hole gets fixed, while
+# an error from the wrapper means the workflow is depending on something it
+# should not be depending on. Neither is fixed by guessing at the diff.
 
 BINARY_NAME := m6t
 MODULE := github.com/txn2/m6t

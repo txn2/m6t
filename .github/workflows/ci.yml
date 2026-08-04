@@ -40,6 +40,16 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.11.4
+          # Do not validate .golangci.yml against the published JSONSchema.
+          # That check downloads https://golangci-lint.run/jsonschema/... at
+          # job start, so a slow response fails the gate before a single line
+          # of Go is examined — a red check that says nothing about the diff
+          # and that no local gate can predict. Config validity is a property
+          # of a file that changes a few times a year, not of a pull request;
+          # gating every PR on a third-party HTTP endpoint buys nothing and
+          # costs a flake. `golangci-lint run` still rejects a config it
+          # cannot parse.
+          verify: false
           # Only NEW issues fail. We use golangci-lint's own git-based
           # --new-from-rev rather than the action's only-new-issues: the latter
           # fetches the PR diff from the GitHub API, which hard-fails above
