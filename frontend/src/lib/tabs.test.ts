@@ -11,14 +11,15 @@ import {
   restartTab,
   selectionAfterClose,
   statusPatch,
+  tabsForProject,
 } from "./tabs";
 
 const strip = (...titles: string[]): TerminalTab[] =>
-  titles.map((title, index) => newTab(`k${String(index)}`, title, "/w"));
+  titles.map((title, index) => newTab(`k${String(index)}`, "infra", title, "/w"));
 
 describe("opening tabs", () => {
   it("starts a tab before it has a session", () => {
-    const tab = newTab("k1", "shell 1", "/w/project");
+    const tab = newTab("k1", "infra", "shell 1", "/w/project");
 
     expect(tab.status).toBe("starting");
     expect(tab.cwd).toBe("/w/project");
@@ -27,7 +28,7 @@ describe("opening tabs", () => {
   });
 
   it("carries the line the Claude Code action types", () => {
-    expect(newTab("k1", "claude 1", "/w", "claude").autorun).toBe("claude");
+    expect(newTab("k1", "infra", "claude 1", "/w", "claude").autorun).toBe("claude");
   });
 
   it("numbers a new tab from one", () => {
@@ -167,7 +168,7 @@ describe("the tab fields a status determines", () => {
 
 describe("describing an ended tab", () => {
   const ended = (patch: Partial<TerminalTab>) =>
-    exitDescription({ ...newTab("k", "t", "/w"), ...patch });
+    exitDescription({ ...newTab("k", "infra", "t", "/w"), ...patch });
 
   it("reports the child's status", () => {
     expect(ended({ status: "exited", exitCode: 130 })).toBe(
@@ -187,5 +188,34 @@ describe("describing an ended tab", () => {
     expect(ended({ status: "failed", error: "chdir /nope: no such file" })).toBe(
       "chdir /nope: no such file",
     );
+  });
+});
+
+describe("scoping tabs to a project", () => {
+  const mixed = [
+    newTab("k0", "alpha", "shell 1", "/w/alpha"),
+    newTab("k1", "beta", "shell 1", "/w/beta"),
+    newTab("k2", "alpha", "shell 2", "/w/alpha"),
+  ];
+
+  it("returns only that project's tabs, in order", () => {
+    expect(tabsForProject(mixed, "alpha").map((t) => t.key)).toEqual([
+      "k0",
+      "k2",
+    ]);
+  });
+
+  it("returns nothing for a project with no terminals", () => {
+    expect(tabsForProject(mixed, "gamma")).toEqual([]);
+  });
+
+  // No project selected is a real state — an empty registry, or the moment
+  // after the last project is removed.
+  it("returns nothing when no project is active", () => {
+    expect(tabsForProject(mixed, null)).toEqual([]);
+  });
+
+  it("records the project a tab was opened in", () => {
+    expect(newTab("k", "infra", "shell 1", "/w/infra").project).toBe("infra");
   });
 });

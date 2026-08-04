@@ -106,8 +106,9 @@ All text frames on both endpoints share one envelope:
 ```
 
 `payload` is omitted when a type carries no data. A field named `projectID` is
-reserved at the top level for when projects exist (issue #5); it is not sent
-today, and a decoder must tolerate its absence.
+reserved at the top level; it is not sent today, and a decoder must tolerate its
+absence. Projects landed in #5 without needing it — terminal frames are already
+addressed by session.
 
 An envelope whose `type` is unknown, or which does not decode, is **ignored** —
 not an error and not a reason to close. That is what lets either side add a

@@ -68,10 +68,19 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// between the services — either service can be replaced without the other
 	// being touched, and a future stream -> pty import would fail here as well
 	// as at lint time.
+	//
+	// internal/app -> internal/project is #5's edge, and it is the same shape a
+	// third time: the registry imports nothing first-party, knows nothing about
+	// Wails or transports, and is composed here. The clone progress it produces
+	// reaches the frontend because the binding layer hands each line to the
+	// stream server — there is no project -> stream edge, for the same reason
+	// there is no stream -> pty one. Three services out of the binding layer,
+	// still none between them.
 	want := map[string][]string{
 		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo", "internal/pty", "internal/stream"},
+		"internal/app":       {"internal/buildinfo", "internal/project", "internal/pty", "internal/stream"},
 		"internal/buildinfo": {},
+		"internal/project":   {},
 		"internal/pty":       {},
 		"internal/stream":    {},
 	}
