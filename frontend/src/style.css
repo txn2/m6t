@@ -148,10 +148,15 @@ body {
   overflow: hidden;
 }
 
+/* The editor column is a strip over a stack of panes, and it must not scroll
+   as a whole: CodeMirror manages its own scrolling, and an outer scroller
+   would give a long file two of them. */
 .workbench__editor {
   grid-area: editor;
-  padding: 0.75rem;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .workbench__terminal {
@@ -528,4 +533,230 @@ button:hover {
   color: var(--m6t-muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* =============================================================================
+   Editor (#7)
+   ========================================================================== */
+
+.tabs--editor {
+  border-top: none;
+}
+
+.tab__icon {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 1px;
+  background: var(--m6t-muted);
+}
+
+.tab__icon--yaml {
+  background: var(--m6t-accent);
+}
+
+.tab__icon--markdown {
+  background: #8cc265;
+}
+
+.tab__dirty {
+  margin-left: 0.35rem;
+  color: var(--m6t-accent);
+  font-size: 0.7em;
+  line-height: 1;
+}
+
+.tab--confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.4rem;
+}
+
+.tab--confirm button {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 3px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.tab--confirm button:hover {
+  border-color: var(--m6t-accent);
+}
+
+.tab__mode {
+  padding: 0 0.3rem;
+  border: none;
+  background: none;
+  color: var(--m6t-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab__mode[aria-pressed="true"] {
+  color: var(--m6t-accent);
+}
+
+/* Like `.panes`, every editor pane stays laid out whether or not it is the
+   visible one — see the note there. A CodeMirror view in a `display: none`
+   subtree measures itself at zero width and redraws wrongly on every tab
+   switch. */
+.editor-panes {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  visibility: visible;
+}
+
+.editor-pane--hidden {
+  visibility: hidden;
+}
+
+.editor-pane__cm {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-pane__cm .cm-editor {
+  height: 100%;
+}
+
+.editor-pane__notice,
+.editor-pane__error {
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--m6t-border);
+  font-size: 0.9em;
+}
+
+.editor-pane__notice {
+  color: var(--m6t-muted);
+}
+
+.editor-pane__error {
+  color: #e06c75;
+}
+
+.editor-pane__conflict {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--m6t-border);
+  background: var(--m6t-panel);
+  font-size: 0.9em;
+}
+
+.editor-pane__conflict button {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 3px;
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.editor-pane__conflict button:hover {
+  border-color: var(--m6t-accent);
+}
+
+/* Markdown preview. The type scale is deliberately close to the app's rather
+   than a document's: this is a pane in a workbench, not a reader. */
+.markdown {
+  flex: 1;
+  min-height: 0;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+  line-height: 1.6;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 1.2em 0 0.5em;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.5em;
+}
+
+.markdown h2 {
+  font-size: 1.25em;
+}
+
+.markdown h3 {
+  font-size: 1.1em;
+}
+
+.markdown h1:first-child,
+.markdown h2:first-child {
+  margin-top: 0;
+}
+
+.markdown a {
+  color: var(--m6t-accent);
+}
+
+.markdown code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--m6t-panel);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.markdown pre {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--m6t-border);
+  border-radius: 4px;
+  background: var(--m6t-panel);
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.75em 0;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--m6t-border);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--m6t-panel);
+}
+
+.markdown blockquote {
+  margin: 0.75em 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--m6t-border);
+  color: var(--m6t-muted);
+}
+
+.markdown img {
+  max-width: 100%;
 }

@@ -19,6 +19,8 @@ export function OpenTerminal(arg1:string,arg2:number,arg3:number):Promise<string
 
 export function Projects():Promise<Array<project.Project>>;
 
+export function ReadFile(arg1:string,arg2:string):Promise<watch.FileContent>;
+
 export function RemoveProject(arg1:string):Promise<void>;
 
 export function RenameEntry(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -28,3 +30,5 @@ export function StreamEndpoint():Promise<stream.Endpoint>;
 export function UpdateProject(arg1:string,arg2:project.Settings):Promise<project.Project>;
 
 export function Version():Promise<buildinfo.Info>;
+
+export function WriteFile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<void>;

@@ -30,6 +30,10 @@ export function Projects() {
   return window['go']['app']['App']['Projects']();
 }
 
+export function ReadFile(arg1, arg2) {
+  return window['go']['app']['App']['ReadFile'](arg1, arg2);
+}
+
 export function RemoveProject(arg1) {
   return window['go']['app']['App']['RemoveProject'](arg1);
 }
@@ -48,4 +52,8 @@ export function UpdateProject(arg1, arg2) {
 
 export function Version() {
   return window['go']['app']['App']['Version']();
+}
+
+export function WriteFile(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['WriteFile'](arg1, arg2, arg3, arg4);
 }

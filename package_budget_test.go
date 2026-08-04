@@ -63,8 +63,8 @@ var structuralPins = map[string]packagePin{
 		why: "loopback stream server: token-authenticated WebSocket transport for PTY I/O and backend-push events",
 	},
 	"internal/watch": {
-		loc: 950, exported: 13,
-		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
+		loc: 1250, exported: 21,
+		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, file content read/write for the editor (#7), plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
 	},
 }
 
@@ -119,6 +119,30 @@ var structuralPins = map[string]packagePin{
 // its coalescer, the polling fallback, and the Start/Stop/Shutdown service —
 // and 950 is that plus the same proportional follow-up room internal/pty and
 // internal/project carry.
+//
+// 950 -> 1250 in #7. content.go adds ReadFile/WriteFile — the editor's file
+// content I/O — as a sixth file in the same package rather than a new
+// sibling: it reuses the exact os.Root confinement and .git exclusion
+// List/Create/Rename/Delete already established, which a new internal/editor
+// package could only get by duplicating (siblings may not import each
+// other). 1107 is today's actual; 1250 is that plus the same proportional
+// follow-up room the rest of this note's measured packages carry.
+//
+// content.go is 302 of those lines, and most of what makes it that long is
+// the part worth reviewing: EOL classification that refuses to guess at a
+// mixed file, and an atomic scratch-then-rename write that carries the
+// target's mode across. Both exist because the issue's acceptance criterion
+// is that a save shows up in `git diff` as exactly the edit — a naive
+// truncate-and-write would satisfy the happy path and quietly rewrite every
+// line of a mixed-EOL file, or drop a 0755 script to 0640, on the paths
+// nobody demonstrates. The atomic half deliberately mirrors
+// internal/project/store.go, which already writes the registry this way for
+// the same durability reason.
+//
+// The exported surface moved 13 -> 21: FileContent, ReadFile, WriteFile,
+// LargeFileThreshold, MaxEditableSize, and three sentinel errors
+// (ErrIsDirectory, ErrTooLarge, ErrBinaryFile) are the content operations'
+// whole seam, pinned with the usual zero slack.
 //
 // 400 -> 540 in #6. tree.go added a fourth composed service (the file-tree
 // watcher, internal/watch) the same shape as #3's stream adapter and #5's

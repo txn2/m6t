@@ -108,7 +108,18 @@ const (
 	// a project's watcher starts and stops from AddProject/RemoveProject and
 	// application startup, never from a binding of its own, which is what kept
 	// this a four-method raise instead of a wider one.
-	maxAppMethods = 12
+	//
+	// 12 -> 14 in #7. ReadFile, WriteFile: the editor's file content I/O
+	// (DESIGN.md §5), the same request-with-an-answer-and-no-throughput shape
+	// every binding on this list already takes — a file's bytes are not a
+	// stream, so unlike terminal I/O they belong on the bridge rather than the
+	// loopback socket. No new field came with them: both delegate through the
+	// same *watch.Service handle ListDirectory already reaches, in
+	// internal/app/files.go rather than tree.go, because file content and
+	// directory shape are different enough concerns to read as separate files
+	// even though they share one backing package (internal/watch, see
+	// package_budget_test.go's #7 note for why).
+	maxAppMethods = 14
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

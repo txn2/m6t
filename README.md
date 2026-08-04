@@ -24,7 +24,7 @@ things done extremely well:
   with explicit per-project context binding and typed confirmation for
   protected clusters. Plain YAML and Helm (render→apply or true releases).
 - **Terminal** — real PTY terminals per project (cwd at the repo root), sized
-  for full-screen Claude Code sessions, plus an "Open in Ghostty" escape hatch.
+  for full-screen Claude Code sessions.
 
 Everything m6t does to a repo or a cluster is something you could have typed
 yourself (`git`, `kubectl`, `helm`) — it wraps your tooling and credentials,
