@@ -155,6 +155,26 @@ export namespace watch {
 	        this.isDir = source["isDir"];
 	    }
 	}
+	export class FileContent {
+	    content: string;
+	    crlf: boolean;
+	    mixedEol: boolean;
+	    readOnly: boolean;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileContent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.crlf = source["crlf"];
+	        this.mixedEol = source["mixedEol"];
+	        this.readOnly = source["readOnly"];
+	        this.size = source["size"];
+	    }
+	}
 
 }
 

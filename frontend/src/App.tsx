@@ -8,6 +8,8 @@ import { ProjectStatus, Workbench } from "./components/Workbench";
 import { type BuildStatus, detachedBuild, loadBuild } from "./lib/build";
 import type { Directory } from "./lib/directory";
 import { wailsDirectory } from "./lib/directory";
+import type { Files } from "./lib/files";
+import { wailsFiles } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
 import {
   findProject,
@@ -22,8 +24,11 @@ import {
   clampFontSize,
   preferredAppearance,
 } from "./lib/theme";
+import { useEditorTabs } from "./lib/useEditorTabs";
 import { useFileTree } from "./lib/useFileTree";
 import { useTerminals } from "./lib/useTerminals";
+import { EditorPane } from "./components/EditorPane";
+import { EditorTabs } from "./components/EditorTabs";
 
 const initialStatus: BuildStatus = { info: detachedBuild, attached: false };
 
@@ -39,6 +44,8 @@ export interface AppProps {
   registry?: Registry;
   /** Injectable for tests and harnesses; defaults to the Wails bindings. */
   directory?: Directory;
+  /** Injectable for tests and harnesses; defaults to the Wails bindings. */
+  files?: Files;
 }
 
 /**
@@ -53,6 +60,7 @@ export default function App({
   endpoint = StreamEndpoint,
   registry = wailsRegistry,
   directory = wailsDirectory,
+  files = wailsFiles,
 }: AppProps) {
   const [build, setBuild] = useState<BuildStatus>(initialStatus);
   const [stream, setStream] = useState<Endpoint | null>(null);
@@ -66,6 +74,7 @@ export default function App({
   const [appearance, setAppearance] = useState<Appearance>(preferredAppearance);
 
   const terminals = useTerminals(activeProject);
+  const editors = useEditorTabs(activeProject, stream, files);
 
   useEffect(() => {
     let current = true;
@@ -141,9 +150,11 @@ export default function App({
 
   const handleRemove = useCallback(
     (name: string) => {
-      // The project's terminals go with it. Their panes would otherwise stay
-      // mounted for the life of the app with no tab left to reach them.
+      // The project's terminals and editor tabs go with it. Their panes would
+      // otherwise stay mounted for the life of the app with no tab left to
+      // reach them.
       terminals.closeProject(name);
+      editors.closeProject(name);
       setActiveProject((active) => selectionAfterRemove(projects, name, active));
       void (async () => {
         try {
@@ -154,17 +165,20 @@ export default function App({
         }
       })();
     },
-    [projects, registry, reload, terminals],
+    [projects, registry, reload, terminals, editors],
   );
 
   const active = findProject(projects, activeProject);
   const tree = useFileTree(active?.path ?? null, stream, directory);
 
-  // The open-file intent (DESIGN.md §5) has nowhere to go until #7 builds an
-  // editor. Selecting a file already updates the tree's own selection
-  // highlight through useFileTree; this is deliberately a no-op rather than
-  // a half-built editor stub.
-  const handleOpenFile = useCallback(() => undefined, []);
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      if (active !== null) {
+        editors.open(active.name, active.path, path);
+      }
+    },
+    [active, editors],
+  );
 
   return (
     <main className={`shell shell--${appearance}`}>
@@ -199,6 +213,9 @@ export default function App({
         <Workbench
           tree={tree}
           onOpenFile={handleOpenFile}
+          editor={
+            <Editor project={active} editors={editors} appearance={appearance} />
+          }
           terminals={
             <Terminals
               project={active}
@@ -214,16 +231,78 @@ export default function App({
 
       <footer className="statusbar">
         <ProjectStatus project={active} />
-        <span data-testid="build-version">{build.info.version}</span>
-        <span data-testid="build-commit">{build.info.commit}</span>
-        <span data-testid="build-date">{build.info.date}</span>
-        <span data-testid="bridge-status">
-          {build.attached
-            ? "connected to the Wails backend"
-            : "detached — no Wails runtime"}
-        </span>
+        <BuildLine build={build} />
       </footer>
     </main>
+  );
+}
+
+/** The build identity half of the status bar. */
+function BuildLine({ build }: { readonly build: BuildStatus }) {
+  return (
+    <>
+      <span data-testid="build-version">{build.info.version}</span>
+      <span data-testid="build-commit">{build.info.commit}</span>
+      <span data-testid="build-date">{build.info.date}</span>
+      <span data-testid="bridge-status">
+        {build.attached
+          ? "connected to the Wails backend"
+          : "detached — no Wails runtime"}
+      </span>
+    </>
+  );
+}
+
+interface EditorProps {
+  readonly project: Project;
+  readonly editors: ReturnType<typeof useEditorTabs>;
+  readonly appearance: Appearance;
+}
+
+/**
+ * The editor strip and its panes for one project.
+ *
+ * Every tab in the app is rendered here, not only the active project's, for
+ * the reason `Terminals` gives about shells and one of its own: a pane that
+ * unmounted on a project switch would drop its CodeMirror view, and with it
+ * the undo history behind whatever unsaved work the tab is holding.
+ */
+function Editor({ project, editors, appearance }: EditorProps) {
+  return (
+    <>
+      <EditorTabs
+        tabs={editors.visible}
+        activeKey={editors.activeKey}
+        onSelect={editors.select}
+        onClose={editors.close}
+        onSave={editors.save}
+        onPreview={(key, preview) => {
+          editors.setMode(key, preview ? "preview" : "edit");
+        }}
+      />
+
+      <div className="editor-panes">
+        {editors.tabs.map((tab) => (
+          <EditorPane
+            key={tab.key}
+            tab={tab}
+            active={tab.key === editors.activeKey}
+            appearance={appearance}
+            onChange={editors.edit}
+            onSave={(key) => {
+              void editors.save(key);
+            }}
+            onKeepMine={editors.keepMine}
+            onTakeDisk={editors.takeDisk}
+          />
+        ))}
+        {editors.visible.length === 0 && (
+          <p className="panes__empty">
+            No file open in {project.name}. Pick one from the tree to start editing.
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 

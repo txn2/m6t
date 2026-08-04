@@ -50,7 +50,7 @@ Targets: macOS, Linux, Windows.
 | App shell | **Go backend + Wails (system webview)** | Go fits the txn2 toolchain and owns git/PTY/kube logic natively. Small binaries. Rejected: Electron (100MB+, Node backend), Tauri (Rust ecosystem weaker for kube/git/pty), native Go GUIs (terminal and editor widgets too immature — the two components that matter most). |
 | Wails version | **v2 (stable)**; migrate to v3 when it reaches beta | Single-window app needs nothing v3-exclusive. High-throughput data bypasses the JS bridge anyway (see §3.3). |
 | Frontend | **TypeScript + React + Vite** | xterm.js and CodeMirror 6 are framework-agnostic; React chosen for ecosystem depth. All MIT. |
-| Terminal | **xterm.js + real PTY** (WebGL renderer) | The proven embedded-terminal stack (VS Code's). Cross-platform today. Rejected for v1: libghostty (pre-1.0 embedding API, Zig in build chain, macOS-first) — revisit post-v1; an "Open in Ghostty" escape hatch ships in v1 (§8). |
+| Terminal | **xterm.js + real PTY** (WebGL renderer) | The proven embedded-terminal stack (VS Code's). Cross-platform today, MIT, and fast enough for full-screen `claude` and `vim` (§8). |
 | Editor | **CodeMirror 6** | Lighter than Monaco, better touch/perf profile, MIT. "Light yaml editing" does not need Monaco's weight. |
 | Git | **Shell out to system `git`**, parse porcelain output | Inherits SSH agent, credential helpers, signing config, and every edge case for free. Rejected: go-git (auth and worktree edge-case parity is a permanent tax). |
 | Kube mutations | **Shell out to `kubectl`** (`diff`, `apply`, `delete`) | Inherits kubeconfig, exec auth plugins (OIDC / EKS / GKE / AKS), server-side apply semantics. |
@@ -269,12 +269,6 @@ knows how to read git errors — do not translate them).
 - I/O over the loopback WebSocket (binary), no chunk-size games through the JS
   bridge. Target: comfortable full-screen `claude` and `vim` sessions.
 - Scrollback, copy/paste, and font/theme settings shared with the app theme.
-- **"Open in Ghostty"** action per project: launches the user's real terminal
-  (configurable command template, defaulting to Ghostty on macOS/Linux) with
-  cwd at the project root — the escape hatch for anyone who wants the true
-  Ghostty experience for long Claude Code sessions.
-- Post-v1: evaluate libghostty embedding as a replacement for xterm.js once its
-  embedding API stabilizes cross-platform (§10).
 
 ---
 
@@ -301,7 +295,7 @@ Known risks, accepted:
 | Wails, React, Vite, xterm.js, CodeMirror 6, creack/pty, go-pty | MIT |
 | TypeScript, client-go, sigs.k8s.io/cli-utils (kstatus), sigs.k8s.io/yaml | Apache 2.0 |
 | fsnotify | BSD-3 |
-| git, kubectl, helm, ghostty | external binaries — invoked, never linked; no license coupling |
+| git, kubectl, helm | external binaries — invoked, never linked; no license coupling |
 
 Every linked dependency is Apache-2.0-compatible and safe for a future
 commercial edition. A CI check (e.g. go-licenses + a JS license checker) gates
@@ -320,9 +314,9 @@ protected-context confirmations, mac/linux/windows builds.
 settings, helm-diff plugin integration polish, Flatpak/deb/rpm, per-project
 environment variables for terminals.
 
-**v2 candidates:** libghostty terminal, multi-window, sops/secrets awareness,
-yaml-language-server (full LSP) instead of bundled-schema validation, apply
-history/audit log, Wails v3 migration.
+**v2 candidates:** multi-window, sops/secrets awareness, yaml-language-server
+(full LSP) instead of bundled-schema validation, apply history/audit log,
+Wails v3 migration.
 
 ---
 

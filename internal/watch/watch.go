@@ -1,8 +1,9 @@
 // Package watch owns the file tree behind m6t's workbench (DESIGN.md §3.2,
 // §5): lazy, one-directory-at-a-time listing of a project's worktree, the
-// create/rename/delete operations the tree UI drives, and the fsnotify-backed
-// watcher that keeps it in sync with changes made outside the app — a
-// terminal pane running `git checkout`, an editor elsewhere, `rm` at a shell.
+// create/rename/delete operations the tree UI drives, the file content
+// read/write the editor (#7) drives, and the fsnotify-backed watcher that
+// keeps it in sync with changes made outside the app — a terminal pane
+// running `git checkout`, an editor elsewhere, `rm` at a shell.
 //
 // Every operation is confined to a project's root by os.Root (Go 1.24+): a
 // traversal out of the worktree is refused by the kernel-level check the

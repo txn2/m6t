@@ -6,9 +6,10 @@ import type { FileTreeController } from "../lib/useFileTree";
 export interface WorkbenchProps {
   /** The file tree's state and operations for this project (#6). */
   readonly tree: FileTreeController;
-  /** The open-file intent a tree selection emits; #7's editor is what will
-   * act on it. */
+  /** The open-file intent a tree selection emits; the editor strip acts on it. */
   readonly onOpenFile: (path: string) => void;
+  /** The editor strip and panes for this project (#7). */
+  readonly editor: ReactNode;
   /** The terminal strip and panes for this project. */
   readonly terminals: ReactNode;
 }
@@ -16,11 +17,10 @@ export interface WorkbenchProps {
 /**
  * The per-project workbench (DESIGN.md §5): file tree, editor, terminal.
  *
- * The editor is a placeholder that names the issue that fills it. The file
- * tree is real — it is #6's — and the terminal pane is real — it is #4's,
- * rooted at this project's checkout.
+ * All three are real: the tree is #6's, the editor is #7's, and the terminal
+ * is #4's, rooted at this project's checkout.
  */
-export function Workbench({ tree, onOpenFile, terminals }: WorkbenchProps) {
+export function Workbench({ tree, onOpenFile, editor, terminals }: WorkbenchProps) {
   return (
     <div className="workbench">
       <aside className="workbench__tree">
@@ -28,7 +28,7 @@ export function Workbench({ tree, onOpenFile, terminals }: WorkbenchProps) {
       </aside>
 
       <section className="workbench__editor" aria-label="Editor">
-        <p className="placeholder">Editor — #7</p>
+        {editor}
       </section>
 
       <section className="workbench__terminal" aria-label="Terminal">
