@@ -8,19 +8,30 @@ import (
 	"github.com/txn2/m6t/internal/watch"
 )
 
-// treeBridge presents the loopback stream server through the seam
+// watchBridge presents the loopback stream server through the seam
 // internal/watch declares (watch.Events). The two are sibling backend
 // services and must not import each other, so the binding layer does the
-// one-line adaptation — the same shape terminalBridge already takes for the
-// PTY service in terminals.go.
-type treeBridge struct {
+// adaptation — the same shape terminalBridge already takes for the PTY
+// service in terminals.go.
+type watchBridge struct {
 	streams *stream.Server
 }
 
 // PublishTreeChanged forwards a coalesced batch of changed directories onto
-// the /events channel (PROTOCOL.md §5).
-func (b treeBridge) PublishTreeChanged(root string, dirs []string) {
+// the /events channel (PROTOCOL.md §5), as two messages.
+//
+// The fan-out is here rather than in either service because this is the only
+// place that knows both exist. One filesystem change means two things to the
+// UI — the tree's listing for a directory may be stale, and the project's git
+// status may be stale — and the watcher is already reporting the changes that
+// drive both: #6 put watches on .git and .git/refs for exactly this, so a
+// branch switch reaches the git consumer without a second watcher.
+//
+// Neither message carries state, so publishing both costs two small frames
+// on a channel that already drops the oldest under pressure.
+func (b watchBridge) PublishTreeChanged(root string, dirs []string) {
 	b.streams.PublishTree(root, dirs)
+	b.streams.PublishGit(root)
 }
 
 // startRegisteredWatchers begins watching every project already in the

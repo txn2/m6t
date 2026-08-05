@@ -10,6 +10,8 @@ import type { Directory } from "./lib/directory";
 import { wailsDirectory } from "./lib/directory";
 import type { Files } from "./lib/files";
 import { wailsFiles } from "./lib/files";
+import type { Git } from "./lib/git";
+import { wailsGit } from "./lib/git";
 import type { Project, Registry } from "./lib/projects";
 import {
   findProject,
@@ -26,6 +28,7 @@ import {
 } from "./lib/theme";
 import { useEditorTabs } from "./lib/useEditorTabs";
 import { useFileTree } from "./lib/useFileTree";
+import { useGitStatus } from "./lib/useGitStatus";
 import { useTerminals } from "./lib/useTerminals";
 import { EditorPane } from "./components/EditorPane";
 import { EditorTabs } from "./components/EditorTabs";
@@ -35,17 +38,39 @@ const initialStatus: BuildStatus = { info: detachedBuild, attached: false };
 /** The line typed into a fresh shell by the "Claude Code" action. */
 const CLAUDE_COMMAND = "claude";
 
+/**
+ * The backend seams the workbench reads through — one per service that has
+ * one (DESIGN.md §3.2).
+ *
+ * They are one object rather than one prop each because the list grows with
+ * every service that lands, and a prop apiece grows this component's
+ * branching with it: a defaulted parameter is a decision point, so the fourth
+ * service to arrive is what pushes `App` past the complexity ceiling. A test
+ * overrides the seam it cares about and inherits the rest.
+ */
+export interface Backend {
+  readonly registry: Registry;
+  readonly directory: Directory;
+  readonly files: Files;
+  readonly git: Git;
+}
+
+/** Every seam backed by its generated Wails binding. */
+export const wailsBackend: Backend = {
+  registry: wailsRegistry,
+  directory: wailsDirectory,
+  files: wailsFiles,
+  git: wailsGit,
+};
+
 export interface AppProps {
   /** Injectable for tests and harnesses; defaults to the Wails binding. */
   load?: typeof loadBuild;
   /** Injectable for tests and harnesses; defaults to the Wails binding. */
   endpoint?: () => Promise<Endpoint>;
-  /** Injectable for tests and harnesses; defaults to the Wails bindings. */
-  registry?: Registry;
-  /** Injectable for tests and harnesses; defaults to the Wails bindings. */
-  directory?: Directory;
-  /** Injectable for tests and harnesses; defaults to the Wails bindings. */
-  files?: Files;
+  /** Overrides for individual backend seams; each one not given is the Wails
+   * binding. */
+  backend?: Partial<Backend>;
 }
 
 /**
@@ -58,10 +83,10 @@ export interface AppProps {
 export default function App({
   load = loadBuild,
   endpoint = StreamEndpoint,
-  registry = wailsRegistry,
-  directory = wailsDirectory,
-  files = wailsFiles,
+  backend,
 }: AppProps) {
+  const { registry, directory, files, git } = { ...wailsBackend, ...backend };
+
   const [build, setBuild] = useState<BuildStatus>(initialStatus);
   const [stream, setStream] = useState<Endpoint | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -169,7 +194,11 @@ export default function App({
   );
 
   const active = findProject(projects, activeProject);
-  const tree = useFileTree(active?.path ?? null, stream, directory);
+  // One binding for both hooks: they take the same path, and computing it
+  // twice is two more branches in a component that has a ceiling on them.
+  const activePath = active?.path ?? null;
+  const tree = useFileTree(activePath, stream, directory);
+  const gitStatus = useGitStatus(activePath, stream, git);
 
   const handleOpenFile = useCallback(
     (path: string) => {
@@ -212,6 +241,7 @@ export default function App({
       ) : (
         <Workbench
           tree={tree}
+          git={gitStatus}
           onOpenFile={handleOpenFile}
           editor={
             <Editor project={active} editors={editors} appearance={appearance} />
@@ -230,7 +260,7 @@ export default function App({
       )}
 
       <footer className="statusbar">
-        <ProjectStatus project={active} />
+        <ProjectStatus project={active} git={gitStatus} />
         <BuildLine build={build} />
       </footer>
     </main>

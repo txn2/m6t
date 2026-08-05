@@ -19,6 +19,87 @@ export namespace buildinfo {
 
 }
 
+export namespace git {
+	
+	export class Branch {
+	    name: string;
+	    upstream: string;
+	    ahead: number;
+	    behind: number;
+	    detached: boolean;
+	    unborn: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Branch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.upstream = source["upstream"];
+	        this.ahead = source["ahead"];
+	        this.behind = source["behind"];
+	        this.detached = source["detached"];
+	        this.unborn = source["unborn"];
+	    }
+	}
+	export class FileStatus {
+	    path: string;
+	    staged: string;
+	    worktree: string;
+	    conflicted: boolean;
+	    origPath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.staged = source["staged"];
+	        this.worktree = source["worktree"];
+	        this.conflicted = source["conflicted"];
+	        this.origPath = source["origPath"];
+	    }
+	}
+	export class Status {
+	    availability: string;
+	    branch: Branch;
+	    files: FileStatus[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.availability = source["availability"];
+	        this.branch = this.convertValues(source["branch"], Branch);
+	        this.files = this.convertValues(source["files"], FileStatus);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace project {
 	
 	export class Helm {

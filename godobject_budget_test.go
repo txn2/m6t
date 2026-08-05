@@ -119,7 +119,18 @@ const (
 	// directory shape are different enough concerns to read as separate files
 	// even though they share one backing package (internal/watch, see
 	// package_budget_test.go's #7 note for why).
-	maxAppMethods = 14
+	// 14 -> 15 in #8. GitStatus: the git service's whole bound surface, and
+	// the first service to arrive without also taking a field. There is no
+	// handle to hold because internal/git keeps nothing between calls — a
+	// status is read from the repository each time one is asked for — so
+	// maxAppFields stays at 6 while a fourth backend service lands.
+	//
+	// It is one method rather than several because the refresh trigger is not
+	// a binding: the watcher #6 already runs publishes a `git` event
+	// (PROTOCOL.md §5) and the frontend calls this again. A future PR adding
+	// GitRefresh, or a binding per git subcommand, would be pushing work onto
+	// the bridge that the transport is already carrying.
+	maxAppMethods = 15
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

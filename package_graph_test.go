@@ -84,10 +84,20 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// still no edge between any pair of services — watch does not import
 	// project, project does not import watch — each one is composed, never
 	// composing another.
+	//
+	// internal/app -> internal/git is #8's edge, and it is the shape with the
+	// least in it: git declares no seam at all, because it pushes nothing. It
+	// is a reader — the binding layer calls it and returns the answer — and
+	// the notification that the answer is stale rides the watcher's existing
+	// batch through the one adapter (watchBridge, tree.go). That is why there
+	// is no git -> watch edge for the trigger and no stream -> git edge for
+	// the payload: the event on the wire names a project, and the status
+	// itself never leaves this package's reach.
 	want := map[string][]string{
 		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo", "internal/project", "internal/pty", "internal/stream", "internal/watch"},
+		"internal/app":       {"internal/buildinfo", "internal/git", "internal/project", "internal/pty", "internal/stream", "internal/watch"},
 		"internal/buildinfo": {},
+		"internal/git":       {},
 		"internal/project":   {},
 		"internal/pty":       {},
 		"internal/stream":    {},

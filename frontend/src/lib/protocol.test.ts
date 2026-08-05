@@ -52,6 +52,13 @@ describe("frames received from the server", () => {
     ).toEqual({ type: "tree", root: "/repo", dirs: [] });
   });
 
+  it("reads a git change, which names only its project", () => {
+    expect(decodeServerMessage('{"type":"git","payload":{"root":"/repo"}}')).toEqual({
+      type: "git",
+      root: "/repo",
+    });
+  });
+
   // §5: an envelope whose type is unknown, or which does not decode, is
   // ignored — not an error, and not a reason to close the connection. Each of
   // these must come back null rather than throw or produce a partial message.
@@ -69,6 +76,9 @@ describe("frames received from the server", () => {
     ["a tree change with no dirs", '{"type":"tree","payload":{"root":"/repo"}}'],
     ["a tree change whose dirs is not an array", '{"type":"tree","payload":{"root":"/repo","dirs":"."}}'],
     ["a tree change whose dirs holds a non-string", '{"type":"tree","payload":{"root":"/repo","dirs":[1]}}'],
+    ["a git change with no payload", '{"type":"git"}'],
+    ["a git change with no root", '{"type":"git","payload":{}}'],
+    ["a git change whose root is not a string", '{"type":"git","payload":{"root":7}}'],
   ])("ignores %s", (_name, raw) => {
     expect(decodeServerMessage(raw)).toBeNull();
   });

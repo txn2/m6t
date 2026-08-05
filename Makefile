@@ -257,9 +257,18 @@ patch-coverage:
 	@PATCH_COVERAGE_THRESHOLD=$(PATCH_COVERAGE_MIN) ./scripts/patch-coverage.sh
 
 ## security: gosec + govulncheck
+##
+## G204 is excluded HERE ONLY, and it is still enforced. gosec runs twice in
+## this repo: standalone (this target) and inside golangci-lint, where
+## .golangci.yml scopes G204 off for internal/git alone and explains why —
+## driving the user's git with a worktree path IS the product, so the rule
+## fires on every correct invocation there. Standalone gosec has no path
+## scoping, so the choice is this flag or a //nolint in the source, and
+## CLAUDE.md rules out the second. Every package outside internal/git is still
+## checked for G204, by the golangci-lint run in `make lint`.
 security:
 	@echo "Running gosec..."
-	gosec -quiet ./...
+	gosec -quiet -exclude=G204 ./...
 	@echo "Running govulncheck..."
 	govulncheck ./...
 

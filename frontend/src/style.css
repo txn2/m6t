@@ -6,6 +6,13 @@
   --m6t-muted: #8b93a7;
   --m6t-accent: #61afef;
 
+  /* Git marker colors (#8). Hue carries the same meaning in both
+     palettes; only the lightness changes. */
+  --m6t-git-added: #7ec699;
+  --m6t-git-modified: #e0b055;
+  --m6t-git-deleted: #e08585;
+  --m6t-git-conflict: #f06d6d;
+
   color-scheme: dark;
   font-family:
     system-ui,
@@ -16,7 +23,7 @@
 }
 
 /* The terminal palette lives in lib/theme.ts as well: xterm paints its own
-   cells and cannot inherit a custom property. The two are the same colours. */
+   cells and cannot inherit a custom property. The two are the same colors. */
 .shell--light {
   --m6t-bg: #fbfbfd;
   --m6t-panel: #f0f1f5;
@@ -24,6 +31,11 @@
   --m6t-fg: #22252d;
   --m6t-muted: #5f6674;
   --m6t-accent: #2f6fd0;
+
+  --m6t-git-added: #2f7d4f;
+  --m6t-git-modified: #96660d;
+  --m6t-git-deleted: #b23a3a;
+  --m6t-git-conflict: #c22b2b;
 
   color-scheme: light;
 }
@@ -181,11 +193,14 @@ body {
 
 /* --- file tree --------------------------------------------------------- */
 
+/* The tree and the changes panel share the sidebar column. The tree takes
+   what is left after the panel has taken what it needs, so a repository with
+   one changed file does not give half the sidebar to a list of one. */
 .tree {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 100%;
+  flex: 1;
 }
 
 .tree__header {
@@ -759,4 +774,147 @@ button:hover {
 
 .markdown img {
   max-width: 100%;
+}
+
+/* =============================================================================
+   Git status: tree badges and the changes panel (#8)
+   ========================================================================== */
+
+/* The badge sits between the name and the actions button, and takes the space
+   the button occupies on hover — so a row's width does not change when the
+   pointer enters it. */
+.tree__badge {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  color: var(--m6t-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tree__row:hover .tree__badge,
+.tree__row:focus-within .tree__badge {
+  margin-left: 0;
+}
+
+.tree__badge[data-badge="A"],
+.changes__badge[data-badge="A"] {
+  color: var(--m6t-git-added);
+}
+
+.tree__badge[data-badge="M"],
+.tree__badge[data-badge="R"],
+.tree__badge[data-badge="C"],
+.changes__badge[data-badge="M"],
+.changes__badge[data-badge="R"],
+.changes__badge[data-badge="C"] {
+  color: var(--m6t-git-modified);
+}
+
+.tree__badge[data-badge="D"],
+.changes__badge[data-badge="D"] {
+  color: var(--m6t-git-deleted);
+}
+
+.tree__badge[data-badge="U"],
+.changes__badge[data-badge="U"] {
+  color: var(--m6t-git-conflict);
+}
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Enough to read at a glance, never enough to crowd out the tree. */
+  max-height: 40%;
+  overflow: auto;
+  border-top: 1px solid var(--m6t-border);
+}
+
+.changes__title {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  color: var(--m6t-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.changes__group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.2rem 0.5rem;
+  color: var(--m6t-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.changes__count {
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--m6t-panel);
+  font-variant-numeric: tabular-nums;
+}
+
+.changes__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changes__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.15rem 0.5rem;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes__row:hover,
+.changes__row:focus-visible {
+  background: var(--m6t-panel);
+  outline: none;
+}
+
+.changes__badge {
+  width: 1em;
+  color: var(--m6t-muted);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* A long path is elided from the left: the file name is what identifies a
+   row, and it is at the end. */
+.changes__path {
+  overflow: hidden;
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes__origin,
+.changes__empty,
+.changes__error {
+  color: var(--m6t-muted);
+  font-size: 0.75rem;
+}
+
+.changes__empty,
+.changes__error {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+}
+
+.changes__error {
+  color: var(--m6t-git-conflict);
 }

@@ -11,6 +11,8 @@ import { detachedBuild } from "./lib/build";
 import { project as models } from "../wailsjs/go/models";
 import type { Project, Registry } from "./lib/projects";
 import type { Endpoint } from "./lib/stream";
+import type { Git, Status } from "./lib/git";
+import { MODIFIED, emptyStatus } from "./lib/git";
 
 afterEach(cleanup);
 
@@ -74,7 +76,7 @@ function fakeRegistry(initial: Project[] = []): Registry & {
 /** Renders the app over a registry already holding `names`. */
 async function renderWith(names: string[], registry = fakeRegistry(names.map((n) => project(n)))) {
   const view = render(
-    <App load={attached} endpoint={pending} registry={registry} />,
+    <App load={attached} endpoint={pending} backend={{ registry }} />,
   );
   if (names.length > 0) {
     await screen.findByRole("button", { name: names[0] });
@@ -89,7 +91,7 @@ const open = (label: string) => {
 describe("the build identity in the status line", () => {
   it("reports what the backend says", async () => {
     render(
-      <App load={attached} endpoint={pending} registry={fakeRegistry()} />,
+      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry() }} />,
     );
 
     expect((await screen.findByTestId("build-version")).textContent).toBe(
@@ -107,7 +109,7 @@ describe("the build identity in the status line", () => {
       <App
         load={() => Promise.resolve({ info: detachedBuild, attached: false })}
         endpoint={pending}
-        registry={fakeRegistry()}
+        backend={{ registry: fakeRegistry() }}
       />,
     );
 
@@ -131,7 +133,7 @@ describe("the project strip", () => {
 
   it("says there is nothing open when the registry is empty", async () => {
     render(
-      <App load={attached} endpoint={pending} registry={fakeRegistry()} />,
+      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry() }} />,
     );
 
     expect(await screen.findByText(/No project open/)).toBeDefined();
@@ -177,7 +179,7 @@ describe("the project strip", () => {
       Promise.reject(new Error("parsing projects.yaml: line 3")),
     );
 
-    render(<App load={attached} endpoint={pending} registry={registry} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
 
     expect(
       (await screen.findByRole("alert")).textContent,
@@ -211,7 +213,7 @@ describe("adding a project", () => {
   it("does nothing when the picker is cancelled", async () => {
     const registry = fakeRegistry();
     registry.choose = vi.fn(() => Promise.resolve(""));
-    render(<App load={attached} endpoint={pending} registry={registry} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
 
     open("+ Project");
 
@@ -229,7 +231,7 @@ describe("adding a project", () => {
     registry.add = vi.fn(() =>
       Promise.reject(new Error("not a git repository")),
     );
-    render(<App load={attached} endpoint={pending} registry={registry} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
 
     open("+ Project");
 
@@ -243,7 +245,7 @@ describe("adding a project", () => {
     registry.choose = vi.fn(() =>
       Promise.reject(new Error("the application window is not ready")),
     );
-    render(<App load={attached} endpoint={pending} registry={registry} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
 
     open("+ Project");
 
@@ -288,7 +290,7 @@ describe("the stream endpoint", () => {
       <App
         load={attached}
         endpoint={() => Promise.reject(new Error("stream server is not started"))}
-        registry={fakeRegistry([project("infra")])}
+        backend={{ registry: fakeRegistry([project("infra")]) }}
       />,
     );
 
@@ -306,7 +308,7 @@ describe("the stream endpoint", () => {
         endpoint={() => {
           throw new TypeError("window.go is undefined");
         }}
-        registry={fakeRegistry([project("infra")])}
+        backend={{ registry: fakeRegistry([project("infra")]) }}
       />,
     );
 
@@ -438,5 +440,102 @@ describe("terminal settings", () => {
     fireEvent.change(field, { target: { value: "400" } });
 
     expect((field as HTMLInputElement).value).toBe("22");
+  });
+});
+
+describe("the git line in the status bar (#8)", () => {
+  /** A Git seam answering per project root. */
+  function fakeGit(byRoot: Record<string, Status>): Git {
+    return { status: (root) => Promise.resolve(byRoot[root] ?? emptyStatus()) };
+  }
+
+  function changedOn(branch: string, paths: string[]): Status {
+    const empty = emptyStatus();
+    return {
+      ...empty,
+      branch: { ...empty.branch, name: branch, upstream: `origin/${branch}`, ahead: 1, behind: 0 },
+      files: paths.map((path) => ({
+        path,
+        staged: "",
+        worktree: MODIFIED,
+        conflicted: false,
+        origPath: "",
+      })),
+    };
+  }
+
+  it("reports the active project's branch and change count", async () => {
+    const registry = fakeRegistry([project("infra", "/w/infra")]);
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry, git: fakeGit({ "/w/infra": changedOn("main", ["a.yaml", "b.yaml"]) }) }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toBe(
+        "\u2387 main \u21911 \u21930 \u00b7 2 changed",
+      );
+    });
+  });
+
+  // The status bar follows the tab strip: a project switch must not leave the
+  // previous repository's branch on screen.
+  it("follows the selected project", async () => {
+    const registry = fakeRegistry([
+      project("infra", "/w/infra"),
+      project("apps", "/w/apps"),
+    ]);
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry,
+          git: fakeGit({
+            "/w/infra": changedOn("main", ["a.yaml"]),
+            "/w/apps": changedOn("release", []),
+          }),
+        }}
+      />,
+    );
+    await screen.findByRole("button", { name: "infra" });
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toContain("main");
+    });
+
+    open("apps");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toBe(
+        "\u2387 release \u21911 \u21930 \u00b7 no changes",
+      );
+    });
+  });
+
+  // The default seam is the generated binding, which throws when there is no
+  // Wails runtime. The bar has to say so rather than take the render down.
+  it("shows a failing binding as a message rather than crashing", async () => {
+    const registry = fakeRegistry([project("infra", "/w/infra")]);
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry,
+          git: {
+            status: () => {
+              throw new Error("no Wails runtime");
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toBe("no Wails runtime");
+    });
   });
 });
