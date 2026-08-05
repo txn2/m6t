@@ -1,36 +1,80 @@
+/* =============================================================================
+   Tokens (#33)
+   =============================================================================
+
+   Every colour, space and size in this file comes from here. That is enforced
+   by style.test.ts, which fails the build on a literal hex or a raw length in
+   a spacing declaration — the rule exists because the previous stylesheet had
+   ten different rem paddings that computed to 2.1px, 2.8px, 3.5px, 4.2px,
+   4.9px, 5.6px, 7px, 8.4px, 10.5px and 14px, none of them on a pixel grid and
+   none related to each other. That is what "ugly margins" was.
+
+   Chrome is measured in px, not rem. This is a desktop application whose
+   metrics are copied from the tools it sits beside (VS Code, WebStorm): a
+   22px list row is 22px because that is what a dense file tree reads as, not
+   because it is 1.69 of something. Content — the markdown preview, the
+   editor — scales with its own font size and is the one place em survives.
+   ========================================================================== */
+
 :root {
+  /* Palette. */
   --m6t-bg: #16181d;
   --m6t-panel: #1c1f26;
+  --m6t-panel-alt: #21242c;
   --m6t-border: #2b2f39;
   --m6t-fg: #e6e8ee;
   --m6t-muted: #8b93a7;
   --m6t-accent: #61afef;
+  --m6t-danger: #e06c75;
+  --m6t-ok: #8cc265;
 
-  /* Git marker colors (#8). Hue carries the same meaning in both
-     palettes; only the lightness changes. */
+  /* Git markers. Hue carries the meaning in both palettes; only lightness
+     changes between them. */
   --m6t-git-added: #7ec699;
   --m6t-git-modified: #e0b055;
   --m6t-git-deleted: #e08585;
   --m6t-git-conflict: #f06d6d;
 
+  /* Spacing, on a 4px grid. There is no --m6t-space-0: zero is 0. */
+  --m6t-space-1: 2px;
+  --m6t-space-2: 4px;
+  --m6t-space-3: 8px;
+  --m6t-space-4: 12px;
+  --m6t-space-5: 16px;
+  --m6t-space-6: 24px;
+
+  /* Sizes. */
+  --m6t-row: 22px; /* list row, section header, status bar */
+  --m6t-tab: 32px; /* tab strip */
+  --m6t-indent: 8px; /* one level of tree nesting */
+  --m6t-separator: 4px; /* draggable divider */
+  --m6t-radius: 2px;
+  --m6t-radius-round: 50%;
+
+  /* Type. */
+  --m6t-font-size: 13px;
+  --m6t-font-size-sm: 11px;
+  --m6t-font-ui:
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  --m6t-font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+
   color-scheme: dark;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
-  font-size: 14px;
+  font-family: var(--m6t-font-ui);
+  font-size: var(--m6t-font-size);
 }
 
 /* The terminal palette lives in lib/theme.ts as well: xterm paints its own
-   cells and cannot inherit a custom property. The two are the same colors. */
+   cells and cannot inherit a custom property. The two are the same colours. */
 .shell--light {
   --m6t-bg: #fbfbfd;
   --m6t-panel: #f0f1f5;
+  --m6t-panel-alt: #e6e8ee;
   --m6t-border: #d7dae2;
   --m6t-fg: #22252d;
   --m6t-muted: #5f6674;
   --m6t-accent: #2f6fd0;
+  --m6t-danger: #c04553;
+  --m6t-ok: #4d8f2f;
 
   --m6t-git-added: #2f7d4f;
   --m6t-git-modified: #96660d;
@@ -54,6 +98,27 @@ body {
   overflow: hidden;
 }
 
+/* Thin, unobtrusive scrollbars: a workbench has many scrollable panes at once
+   and full-width bars make every one of them look like a document. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--m6t-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: var(--m6t-space-3);
+  height: var(--m6t-space-3);
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-border);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* A column rather than a fixed grid: the registry error is a conditional row,
    and a grid-template-rows list would have to be restated for every
    combination of rows that can be on screen. */
@@ -67,67 +132,71 @@ body {
 
 .shell__error {
   margin: 0;
-  padding: 0.5rem 0.75rem;
+  padding: var(--m6t-space-2) var(--m6t-space-4);
   border-bottom: 1px solid var(--m6t-border);
-  color: #e06c75;
+  color: var(--m6t-danger);
+  font-size: var(--m6t-font-size-sm);
 }
 
-/* --- project strip --------------------------------------------------- */
+/* --- project strip ---------------------------------------------------- */
 
 .projects {
   display: flex;
   align-items: stretch;
-  gap: 0.25rem;
-  padding: 0.35rem 0.5rem 0;
+  height: var(--m6t-tab);
+  padding: 0;
   background: var(--m6t-panel);
   border-bottom: 1px solid var(--m6t-border);
 }
 
 .projects__list {
   display: flex;
-  gap: 0.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow-x: auto;
 }
 
+/* Square, edge-to-edge tabs marked by an accent rule rather than a rounded
+   outline — the shape every editor in this class uses, and the shape that
+   lets a strip of them read as one surface instead of a row of buttons. */
 .projects__tab {
   display: flex;
   align-items: center;
-  border: 1px solid var(--m6t-border);
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  background: var(--m6t-bg);
+  border: none;
+  border-right: 1px solid var(--m6t-border);
+  box-shadow: inset 0 2px 0 transparent;
+  background: var(--m6t-panel);
 }
 
 .projects__tab--active {
-  border-color: var(--m6t-accent);
+  box-shadow: inset 0 2px 0 var(--m6t-accent);
+  background: var(--m6t-bg);
 }
 
 .projects__select,
 .projects__remove,
 .projects__add {
-  background: none;
+  padding: 0 var(--m6t-space-3);
   border: none;
+  border-radius: 0;
+  background: none;
   color: inherit;
   font: inherit;
   cursor: pointer;
-  padding: 0.35rem 0.5rem;
 }
 
 .projects__select {
-  font-weight: 600;
   white-space: nowrap;
 }
 
 .projects__tab--active .projects__select {
-  color: var(--m6t-accent);
+  color: var(--m6t-fg);
 }
 
 .projects__remove {
-  color: var(--m6t-muted);
   padding-left: 0;
+  color: var(--m6t-muted);
 }
 
 .projects__add {
@@ -136,18 +205,21 @@ body {
   white-space: nowrap;
 }
 
-/* --- workbench ------------------------------------------------------- */
+/* --- workbench -------------------------------------------------------- */
 
-/* Tree | editor over terminal (DESIGN.md §5). min-height: 0 on the row is what
-   lets the terminal pane shrink instead of pushing the status bar off-screen. */
+/* Tree | editor over terminal (DESIGN.md §5), with both splits draggable.
+   The two sizes are custom properties set from React state, so a drag writes
+   one number and the grid re-lays itself; min-height: 0 on the middle row is
+   what lets the terminal shrink instead of pushing the status bar off-screen. */
 .workbench {
   flex: 1;
   display: grid;
-  grid-template-columns: 16rem 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: var(--m6t-sidebar) auto 1fr;
+  grid-template-rows: 1fr auto var(--m6t-terminal);
   grid-template-areas:
-    "tree editor"
-    "terminal terminal";
+    "tree vsep editor"
+    "hsep hsep hsep"
+    "terminal terminal terminal";
   min-height: 0;
 }
 
@@ -156,7 +228,6 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--m6t-border);
   overflow: hidden;
 }
 
@@ -175,18 +246,44 @@ body {
   grid-area: terminal;
   display: flex;
   flex-direction: column;
-  min-height: 18rem;
-  height: 45vh;
-  border-top: 1px solid var(--m6t-border);
+  min-height: 0;
+}
+
+/* --- pane separators --------------------------------------------------- */
+
+/* The hit area is the full token; the visible line is the 1px border. A
+   4px target is the smallest a pointer reliably catches, and making the
+   whole of it draggable rather than the line itself is why. */
+.separator {
+  background: var(--m6t-border);
+  touch-action: none;
+}
+
+.separator:hover,
+.separator:focus-visible {
+  background: var(--m6t-accent);
+  outline: none;
+}
+
+.separator--vertical {
+  grid-area: vsep;
+  width: var(--m6t-separator);
+  cursor: col-resize;
+}
+
+.separator--horizontal {
+  grid-area: hsep;
+  height: var(--m6t-separator);
+  cursor: row-resize;
 }
 
 .placeholder {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--m6t-space-2);
   color: var(--m6t-muted);
 }
 
 .placeholder--path {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-family: var(--m6t-font-mono);
   font-size: 0.85em;
   overflow-wrap: anywhere;
 }
@@ -206,40 +303,55 @@ body {
 .tree__header {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  gap: var(--m6t-space-2);
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3);
   border-bottom: 1px solid var(--m6t-border);
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
 }
 
 .tree__header button {
-  padding: 0.2rem 0.4rem;
-  font-size: 0.8rem;
+  height: 100%;
+  padding: 0 var(--m6t-space-2);
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--m6t-font-size-sm);
 }
 
 .tree__hidden-toggle {
   margin-left: auto;
-  color: var(--m6t-muted);
   white-space: nowrap;
 }
 
 .tree__rows {
   flex: 1;
   overflow: auto;
-  padding: 0.35rem 0;
+  padding: 0;
 }
 
 .tree__empty {
   margin: 0;
-  padding: 0.5rem 0.75rem;
+  padding: var(--m6t-space-2) var(--m6t-space-3);
   color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
 }
 
+/* One row is exactly one row token tall, whatever its text. The indent is a
+   token multiplied by the row's depth, which React supplies as --depth —
+   the depth is data, the pixels-per-level is design, and this is the seam
+   between them. */
 .tree__row {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.15rem 0.5rem;
+  gap: var(--m6t-space-2);
+  height: var(--m6t-row);
+  padding-right: var(--m6t-space-2);
+  padding-left: calc(var(--m6t-space-3) + var(--m6t-indent) * var(--depth, 0));
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -252,22 +364,21 @@ body {
 }
 
 .tree__row--selected {
-  background: var(--m6t-panel);
-  color: var(--m6t-accent);
+  background: var(--m6t-panel-alt);
 }
 
 .tree__row--confirm {
-  gap: 0.5rem;
+  gap: var(--m6t-space-3);
+  height: auto;
+  padding-top: var(--m6t-space-1);
+  padding-bottom: var(--m6t-space-1);
   background: var(--m6t-panel);
-}
-
-.tree__row--editing {
-  padding: 0.15rem 0.5rem;
+  white-space: normal;
 }
 
 .tree__icon {
-  color: var(--m6t-muted);
   width: 1em;
+  color: var(--m6t-muted);
   text-align: center;
 }
 
@@ -282,8 +393,9 @@ body {
 
 .tree__menu-button {
   margin-left: auto;
-  padding: 0 0.3rem;
+  padding: 0 var(--m6t-space-1);
   border: none;
+  border-radius: 0;
   background: none;
   color: var(--m6t-muted);
   opacity: 0;
@@ -300,80 +412,58 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 10rem;
-  margin-top: 1.5rem;
-  padding: 0.25rem;
+  margin-top: var(--m6t-row);
+  padding: var(--m6t-space-1);
   border: 1px solid var(--m6t-border);
-  border-radius: 6px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-panel);
   box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
 }
 
 .tree__menu button {
+  padding: var(--m6t-space-1) var(--m6t-space-3);
   border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   text-align: left;
-  padding: 0.3rem 0.5rem;
+}
+
+.tree__menu button:hover {
+  background: var(--m6t-panel-alt);
 }
 
 .tree__menu-note {
-  padding: 0.3rem 0.5rem;
+  padding: var(--m6t-space-1) var(--m6t-space-3);
   color: var(--m6t-muted);
-  font-size: 0.75rem;
+  font-size: var(--m6t-font-size-sm);
   white-space: normal;
 }
 
 .tree__inline-field {
   flex: 1;
-  padding: 0.15rem 0.3rem;
+  min-width: 0;
+  padding: 0 var(--m6t-space-1);
   border: 1px solid var(--m6t-accent);
-  border-radius: 4px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-bg);
   color: var(--m6t-fg);
   font: inherit;
 }
 
 .tree__inline-error {
-  color: #e06c75;
-  font-size: 0.75rem;
+  color: var(--m6t-danger);
+  font-size: var(--m6t-font-size-sm);
   white-space: normal;
 }
 
-/* --- toolbar --------------------------------------------------------- */
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--m6t-border);
-  background: var(--m6t-panel);
-}
-
-.toolbar__field {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--m6t-muted);
-  font-size: 0.8rem;
-}
-
-.toolbar__field input {
-  min-width: 18rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--m6t-border);
-  border-radius: 4px;
-  background: var(--m6t-bg);
-  color: var(--m6t-fg);
-  font: inherit;
-}
-
-.toolbar__number {
-  min-width: 4rem !important;
-}
+/* --- buttons ----------------------------------------------------------- */
 
 button {
-  padding: 0.25rem 0.6rem;
+  padding: 0 var(--m6t-space-3);
   border: 1px solid var(--m6t-border);
-  border-radius: 4px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-bg);
   color: var(--m6t-fg);
   font: inherit;
@@ -384,13 +474,13 @@ button:hover {
   border-color: var(--m6t-accent);
 }
 
-/* --- tab strip ------------------------------------------------------- */
+/* --- tab strip --------------------------------------------------------- */
 
 .tabs {
   display: flex;
   align-items: stretch;
-  gap: 0.25rem;
-  padding: 0.35rem 0.5rem;
+  height: var(--m6t-tab);
+  padding: 0;
   border-bottom: 1px solid var(--m6t-border);
   background: var(--m6t-panel);
   overflow-x: auto;
@@ -400,18 +490,21 @@ button:hover {
 .tab {
   display: flex;
   align-items: center;
-  border: 1px solid var(--m6t-border);
-  border-radius: 4px;
-  background: var(--m6t-bg);
+  border: none;
+  border-right: 1px solid var(--m6t-border);
+  box-shadow: inset 0 2px 0 transparent;
+  background: var(--m6t-panel);
 }
 
 .tab--active {
-  border-color: var(--m6t-accent);
+  box-shadow: inset 0 2px 0 var(--m6t-accent);
+  background: var(--m6t-bg);
 }
 
 .tab__label,
 .tab__close {
   border: none;
+  border-radius: 0;
   background: none;
   color: inherit;
 }
@@ -419,24 +512,24 @@ button:hover {
 .tab__label {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--m6t-space-2);
   white-space: nowrap;
 }
 
 .tab__close {
-  padding: 0.25rem 0.4rem;
+  padding: 0 var(--m6t-space-2);
   color: var(--m6t-muted);
 }
 
 .tab__dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
+  width: var(--m6t-space-3);
+  height: var(--m6t-space-3);
+  border-radius: var(--m6t-radius-round);
   background: var(--m6t-muted);
 }
 
 .tab__dot--running {
-  background: #8cc265;
+  background: var(--m6t-ok);
 }
 
 .tab__dot--exited {
@@ -444,13 +537,13 @@ button:hover {
 }
 
 .tab__dot--failed {
-  background: #e06c75;
+  background: var(--m6t-danger);
 }
 
 .tab__rename {
-  padding: 0.25rem 0.4rem;
+  padding: 0 var(--m6t-space-2);
   border: 1px solid var(--m6t-accent);
-  border-radius: 4px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-bg);
   color: var(--m6t-fg);
   font: inherit;
@@ -460,16 +553,27 @@ button:hover {
   white-space: nowrap;
 }
 
-/* --- panes ----------------------------------------------------------- */
+/* --- panes ------------------------------------------------------------- */
 
+/* flex: 1 and min-height: 0 are a fix, not a restyle.
+
+   Every child of this container is `position: absolute` (see .pane below), so
+   its content height is zero. Without flex: 1 it is a zero-tall box inside the
+   terminal column, and the pane absolutely positioned to `inset: 0` of it is
+   zero-tall too — an invisible terminal, with the empty-state paragraph the
+   only thing that ever gave the container a height. `.editor-panes` has
+   carried exactly these two declarations since #7 for exactly this reason;
+   the terminal's container was missing them. */
 .panes {
   position: relative;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 .panes__empty {
   margin: 0;
-  padding: 1rem;
+  padding: var(--m6t-space-4);
   color: var(--m6t-muted);
 }
 
@@ -495,59 +599,94 @@ button:hover {
 .pane__terminal {
   flex: 1;
   min-height: 0;
-  padding: 0.25rem 0 0 0.5rem;
+  padding: var(--m6t-space-1) 0 0 var(--m6t-space-3);
 }
 
 .pane__ended {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  gap: var(--m6t-space-3);
+  padding: var(--m6t-space-2) var(--m6t-space-4);
   border-top: 1px solid var(--m6t-border);
   background: var(--m6t-panel);
+  font-size: var(--m6t-font-size-sm);
 }
 
 .pane__ended-text {
   color: var(--m6t-muted);
 }
 
-/* --- find box -------------------------------------------------------- */
+/* --- find box ---------------------------------------------------------- */
 
 .search {
   display: flex;
-  gap: 0.25rem;
+  gap: var(--m6t-space-2);
   align-self: flex-end;
-  margin: 0.35rem 0.5rem 0;
-  padding: 0.25rem;
+  margin: var(--m6t-space-2) var(--m6t-space-3) 0;
+  padding: var(--m6t-space-1);
   border: 1px solid var(--m6t-border);
-  border-radius: 4px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-panel);
 }
 
 .search__input {
-  padding: 0.2rem 0.4rem;
+  padding: 0 var(--m6t-space-2);
   border: 1px solid var(--m6t-border);
-  border-radius: 4px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-bg);
   color: var(--m6t-fg);
   font: inherit;
 }
 
 .search__input--missed {
-  border-color: #e06c75;
+  border-color: var(--m6t-danger);
 }
 
-/* --- status bar ------------------------------------------------------ */
+/* --- status bar -------------------------------------------------------- */
 
 .statusbar {
   display: flex;
-  gap: 1rem;
-  padding: 0.3rem 0.75rem;
+  align-items: center;
+  gap: var(--m6t-space-5);
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3);
   border-top: 1px solid var(--m6t-border);
   background: var(--m6t-panel);
   color: var(--m6t-muted);
-  font-size: 0.75rem;
+  font-size: var(--m6t-font-size-sm);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The font control sits at the end of the bar rather than in a toolbar of its
+   own: an IDE puts this class of setting in the status line, and a strip
+   holding one number input was the least IDE-like thing in the window. */
+.statusbar__spacer {
+  margin-left: auto;
+}
+
+.statusbar__field {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+}
+
+.statusbar__number {
+  width: var(--m6t-space-6);
+  padding: 0 var(--m6t-space-1);
+  border: 1px solid transparent;
+  border-radius: var(--m6t-radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar__number:hover,
+.statusbar__number:focus-visible {
+  border-color: var(--m6t-border);
+  background: var(--m6t-bg);
+  outline: none;
 }
 
 /* =============================================================================
@@ -559,9 +698,9 @@ button:hover {
 }
 
 .tab__icon {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 1px;
+  width: var(--m6t-space-3);
+  height: var(--m6t-space-3);
+  border-radius: var(--m6t-radius);
   background: var(--m6t-muted);
 }
 
@@ -570,11 +709,11 @@ button:hover {
 }
 
 .tab__icon--markdown {
-  background: #8cc265;
+  background: var(--m6t-ok);
 }
 
 .tab__dirty {
-  margin-left: 0.35rem;
+  margin-left: var(--m6t-space-1);
   color: var(--m6t-accent);
   font-size: 0.7em;
   line-height: 1;
@@ -583,14 +722,14 @@ button:hover {
 .tab--confirm {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0 0.4rem;
+  gap: var(--m6t-space-2);
+  padding: 0 var(--m6t-space-2);
 }
 
 .tab--confirm button {
-  padding: 0.1rem 0.4rem;
+  padding: 0 var(--m6t-space-2);
   border: 1px solid var(--m6t-border);
-  border-radius: 3px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-bg);
   color: var(--m6t-fg);
   font: inherit;
@@ -603,8 +742,9 @@ button:hover {
 }
 
 .tab__mode {
-  padding: 0 0.3rem;
+  padding: 0 var(--m6t-space-1);
   border: none;
+  border-radius: 0;
   background: none;
   color: var(--m6t-muted);
   font: inherit;
@@ -652,9 +792,9 @@ button:hover {
 .editor-pane__notice,
 .editor-pane__error {
   margin: 0;
-  padding: 0.4rem 0.75rem;
+  padding: var(--m6t-space-1) var(--m6t-space-4);
   border-bottom: 1px solid var(--m6t-border);
-  font-size: 0.9em;
+  font-size: var(--m6t-font-size-sm);
 }
 
 .editor-pane__notice {
@@ -662,27 +802,27 @@ button:hover {
 }
 
 .editor-pane__error {
-  color: #e06c75;
+  color: var(--m6t-danger);
 }
 
 .editor-pane__conflict {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.75rem;
+  gap: var(--m6t-space-3);
+  padding: var(--m6t-space-1) var(--m6t-space-4);
   border-bottom: 1px solid var(--m6t-border);
   background: var(--m6t-panel);
-  font-size: 0.9em;
+  font-size: var(--m6t-font-size-sm);
 }
 
 .editor-pane__conflict button {
-  padding: 0.15rem 0.5rem;
+  padding: 0 var(--m6t-space-3);
   border: 1px solid var(--m6t-border);
-  border-radius: 3px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-bg);
   color: var(--m6t-fg);
   font: inherit;
-  font-size: 0.9em;
+  font-size: inherit;
   cursor: pointer;
 }
 
@@ -690,12 +830,22 @@ button:hover {
   border-color: var(--m6t-accent);
 }
 
-/* Markdown preview. The type scale is deliberately close to the app's rather
-   than a document's: this is a pane in a workbench, not a reader. */
+/* =============================================================================
+   Markdown preview
+   =============================================================================
+
+   The one place em survives, and the one block style.test.ts exempts from the
+   spacing tokens. Prose spacing has to scale with the type it sits around: a
+   heading's margin is a property of that heading's size, not of the chrome's
+   4px grid, and pinning it to a token would make an h1 and an h3 sit in the
+   same amount of air. The type scale is deliberately close to the app's rather
+   than a document's — this is a pane in a workbench, not a reader.
+   ========================================================================== */
+
 .markdown {
   flex: 1;
   min-height: 0;
-  padding: 0.75rem 1rem;
+  padding: 0.75em 1em;
   overflow: auto;
   line-height: 1.6;
 }
@@ -730,16 +880,16 @@ button:hover {
 
 .markdown code {
   padding: 0.1em 0.3em;
-  border-radius: 3px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-panel);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-family: var(--m6t-font-mono);
   font-size: 0.9em;
 }
 
 .markdown pre {
-  padding: 0.6rem 0.75rem;
+  padding: 0.6em 0.75em;
   border: 1px solid var(--m6t-border);
-  border-radius: 4px;
+  border-radius: var(--m6t-radius);
   background: var(--m6t-panel);
   overflow-x: auto;
 }
@@ -756,7 +906,7 @@ button:hover {
 
 .markdown th,
 .markdown td {
-  padding: 0.3rem 0.6rem;
+  padding: 0.3em 0.6em;
   border: 1px solid var(--m6t-border);
   text-align: left;
 }
@@ -767,7 +917,7 @@ button:hover {
 
 .markdown blockquote {
   margin: 0.75em 0;
-  padding-left: 0.75rem;
+  padding-left: 0.75em;
   border-left: 3px solid var(--m6t-border);
   color: var(--m6t-muted);
 }
@@ -785,9 +935,9 @@ button:hover {
    pointer enters it. */
 .tree__badge {
   margin-left: auto;
-  padding: 0 0.3rem;
+  padding: 0 var(--m6t-space-1);
   color: var(--m6t-muted);
-  font-size: 0.8rem;
+  font-size: var(--m6t-font-size-sm);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -831,31 +981,28 @@ button:hover {
   border-top: 1px solid var(--m6t-border);
 }
 
-.changes__title {
+/* Section headers are the same height as a list row and set in the small,
+   uppercase, tracked face every sidebar in this class of tool uses — it is
+   what makes a heading read as chrome rather than as content. */
+.changes__title,
+.changes__group {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
   margin: 0;
-  padding: 0.35rem 0.5rem;
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3);
   color: var(--m6t-muted);
-  font-size: 0.75rem;
+  font-size: var(--m6t-font-size-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.changes__group {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0;
-  padding: 0.2rem 0.5rem;
-  color: var(--m6t-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
 .changes__count {
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: var(--m6t-panel);
+  padding: 0 var(--m6t-space-2);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-panel-alt);
   font-variant-numeric: tabular-nums;
 }
 
@@ -867,11 +1014,13 @@ button:hover {
 
 .changes__row {
   display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
+  align-items: center;
+  gap: var(--m6t-space-2);
   width: 100%;
-  padding: 0.15rem 0.5rem;
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3);
   border: none;
+  border-radius: 0;
   background: none;
   color: inherit;
   font: inherit;
@@ -906,13 +1055,13 @@ button:hover {
 .changes__empty,
 .changes__error {
   color: var(--m6t-muted);
-  font-size: 0.75rem;
+  font-size: var(--m6t-font-size-sm);
 }
 
 .changes__empty,
 .changes__error {
   margin: 0;
-  padding: 0.25rem 0.5rem;
+  padding: var(--m6t-space-1) var(--m6t-space-3);
 }
 
 .changes__error {

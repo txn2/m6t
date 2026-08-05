@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { IconKind, TreeRow } from "../lib/tree";
 import { ROOT, iconKind, parentPath, visibleRows } from "../lib/tree";
@@ -383,7 +383,7 @@ function RowView({
     return (
       <div
         className="tree__row tree__row--confirm"
-        style={{ paddingLeft: `${String(row.depth)}rem` }}
+        style={{ "--depth": row.depth } as CSSProperties}
         // A native button activates on Enter, and that keydown would
         // otherwise also bubble to the tree's own handler and activate
         // whatever row the cursor is on — this row is not it.
@@ -423,7 +423,7 @@ function RowView({
       aria-level={row.depth + 1}
       tabIndex={focused ? 0 : -1}
       className={`tree__row${selected ? " tree__row--selected" : ""}`}
-      style={{ paddingLeft: `${String(row.depth)}rem` }}
+      style={{ "--depth": row.depth } as CSSProperties}
       onClick={onActivate}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -562,7 +562,7 @@ function InlineField({ depth, initial, ariaLabel, placeholder, error, onCommit, 
   }, []);
 
   return (
-    <div className="tree__row tree__row--editing" style={{ paddingLeft: `${String(depth)}rem` }}>
+    <div className="tree__row tree__row--editing" style={{ "--depth": depth } as CSSProperties}>
       <input
         ref={field}
         type="text"

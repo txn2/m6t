@@ -3,7 +3,6 @@ import { StreamEndpoint } from "../wailsjs/go/app/App";
 import { ProjectTabs } from "./components/ProjectTabs";
 import { TerminalPane } from "./components/TerminalPane";
 import { TerminalTabs } from "./components/TerminalTabs";
-import { Toolbar } from "./components/Toolbar";
 import { ProjectStatus, Workbench } from "./components/Workbench";
 import { type BuildStatus, detachedBuild, loadBuild } from "./lib/build";
 import type { Directory } from "./lib/directory";
@@ -23,8 +22,11 @@ import type { Endpoint } from "./lib/stream";
 import type { Appearance } from "./lib/theme";
 import {
   DEFAULT_FONT_SIZE,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
   clampFontSize,
   preferredAppearance,
+  watchAppearance,
 } from "./lib/theme";
 import { useEditorTabs } from "./lib/useEditorTabs";
 import { useFileTree } from "./lib/useFileTree";
@@ -153,6 +155,13 @@ export default function App({
     void reload();
   }, [reload]);
 
+  // Appearance follows the OS and has no in-app override: theme belongs in a
+  // settings dialog, not in a button on the chrome. Following it live is what
+  // makes removing that button a fix rather than a regression — otherwise
+  // switching the OS to dark would leave m6t the only light window on screen
+  // until it was restarted.
+  useEffect(() => watchAppearance(setAppearance), []);
+
   // Browse, then register. The picker returns "" when the user dismisses it,
   // which ends the flow silently — a cancelled dialog is not a failure and must
   // not leave an error on screen.
@@ -219,15 +228,6 @@ export default function App({
         onAdd={handleAdd}
       />
 
-      <Toolbar
-        fontSize={fontSize}
-        onFontSize={(px) => {
-          setFontSize(clampFontSize(px));
-        }}
-        appearance={appearance}
-        onAppearance={setAppearance}
-      />
-
       {projectError !== null && (
         <p className="shell__error" role="alert">
           {projectError}
@@ -261,9 +261,49 @@ export default function App({
 
       <footer className="statusbar">
         <ProjectStatus project={active} git={gitStatus} />
+        <span className="statusbar__spacer" />
         <BuildLine build={build} />
+        <FontSize
+          size={fontSize}
+          onChange={(px) => {
+            setFontSize(clampFontSize(px));
+          }}
+        />
       </footer>
     </main>
+  );
+}
+
+/**
+ * The terminal's font size, in the status bar.
+ *
+ * It used to sit in a toolbar strip of its own above the workbench. That strip
+ * held one number input and read as a web page's settings bar; an IDE puts
+ * this class of control in the status line, and the strip is gone. The control
+ * itself stays because removing it would remove a setting, which is a decision
+ * for the settings dialog (DESIGN.md §8) rather than for a restyle.
+ */
+function FontSize({
+  size,
+  onChange,
+}: {
+  readonly size: number;
+  readonly onChange: (px: number) => void;
+}) {
+  return (
+    <label className="statusbar__field">
+      <span>font</span>
+      <input
+        type="number"
+        min={MIN_FONT_SIZE}
+        max={MAX_FONT_SIZE}
+        value={size}
+        className="statusbar__number"
+        onChange={(event) => {
+          onChange(Number(event.target.value));
+        }}
+      />
+    </label>
   );
 }
 

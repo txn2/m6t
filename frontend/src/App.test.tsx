@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -15,6 +16,9 @@ import type { Git, Status } from "./lib/git";
 import { MODIFIED, emptyStatus } from "./lib/git";
 
 afterEach(cleanup);
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 /**
  * The endpoint that never arrives.
@@ -419,16 +423,59 @@ describe("terminals scoped to a project", () => {
   });
 });
 
-describe("terminal settings", () => {
-  it("switches the whole app between light and dark", async () => {
+describe("appearance (#33)", () => {
+  /** Installs a matchMedia the app will read, and returns a way to flip it. */
+  function stubOSAppearance(light: boolean) {
+    const listeners: (() => void)[] = [];
+    const query = {
+      matches: light,
+      addEventListener: (_type: string, listener: () => void) => {
+        listeners.push(listener);
+      },
+      removeEventListener: (_type: string, listener: () => void) => {
+        const at = listeners.indexOf(listener);
+        if (at >= 0) {
+          listeners.splice(at, 1);
+        }
+      },
+    };
+    vi.stubGlobal("matchMedia", () => query);
+    return (to: boolean) => {
+      query.matches = to;
+      act(() => {
+        for (const listener of [...listeners]) {
+          listener();
+        }
+      });
+    };
+  }
+
+  // The theme toggle is gone: theme configuration belongs in a settings
+  // dialog, and until there is one the OS is the only source of truth.
+  it("has no theme control in the chrome", async () => {
+    await renderWith(["infra"]);
+
+    expect(screen.queryByRole("button", { name: /theme/ })).toBeNull();
+  });
+
+  it("starts in the appearance the OS asks for", async () => {
+    stubOSAppearance(true);
+
     const { container } = await renderWith(["infra"]);
-    const shell = container.querySelector(".shell");
 
-    expect(shell?.className).toContain("shell--dark");
+    expect(container.querySelector(".shell")?.className).toContain("shell--light");
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "light theme" }));
+  // Removing the button is only a fix if the app tracks the OS while running.
+  // Without this it would sit in yesterday's theme until restarted.
+  it("follows the OS when the appearance changes while running", async () => {
+    const flip = stubOSAppearance(false);
+    const { container } = await renderWith(["infra"]);
+    expect(container.querySelector(".shell")?.className).toContain("shell--dark");
 
-    expect(shell?.className).toContain("shell--light");
+    flip(true);
+
+    expect(container.querySelector(".shell")?.className).toContain("shell--light");
   });
 
   // Below the minimum the box-drawing characters a TUI is built from stop
