@@ -16,7 +16,7 @@ describe("opening the event socket", () => {
     const socket = {} as WebSocket;
     const create = vi.fn().mockReturnValue(socket);
 
-    openEventsSocket(endpoint, vi.fn(), create);
+    openEventsSocket(endpoint, {}, create);
 
     expect(create).toHaveBeenCalledWith("ws://127.0.0.1:51234/events", [
       "m6t.v1",
@@ -28,7 +28,7 @@ describe("opening the event socket", () => {
     const socket = {} as WebSocket;
     const onTree = vi.fn();
 
-    openEventsSocket(endpoint, onTree, () => socket);
+    openEventsSocket(endpoint, { onTree }, () => socket);
     socket.onmessage?.({
       data: '{"type":"tree","payload":{"root":"/repo","dirs":[".","manifests"]}}',
     } as MessageEvent<string>);
@@ -46,17 +46,60 @@ describe("opening the event socket", () => {
     const socket = {} as WebSocket;
     const onTree = vi.fn();
 
-    openEventsSocket(endpoint, onTree, () => socket);
+    openEventsSocket(endpoint, { onTree }, () => socket);
     socket.onmessage?.({ data: raw } as MessageEvent<string>);
 
     expect(onTree).not.toHaveBeenCalled();
+  });
+
+  it("invokes onGit for a decoded git message", () => {
+    const socket = {} as WebSocket;
+    const onGit = vi.fn();
+
+    openEventsSocket(endpoint, { onGit }, () => socket);
+    socket.onmessage?.({
+      data: '{"type":"git","payload":{"root":"/repo"}}',
+    } as MessageEvent<string>);
+
+    expect(onGit).toHaveBeenCalledWith("/repo");
+  });
+
+  // The two messages are dispatched independently: a consumer that asked for
+  // one must not be woken by the other, which is the whole reason the tree
+  // and the git status open their own sockets.
+  it("does not invoke a handler the other message type belongs to", () => {
+    const socket = {} as WebSocket;
+    const onTree = vi.fn();
+    const onGit = vi.fn();
+
+    openEventsSocket(endpoint, { onTree, onGit }, () => socket);
+    socket.onmessage?.({
+      data: '{"type":"git","payload":{"root":"/repo"}}',
+    } as MessageEvent<string>);
+
+    expect(onGit).toHaveBeenCalledOnce();
+    expect(onTree).not.toHaveBeenCalled();
+  });
+
+  // A socket opened with no handler for a type that arrives must not throw:
+  // the tree's socket receives every git event the backend publishes.
+  it("drops a message no handler was given for", () => {
+    const socket = {} as WebSocket;
+
+    openEventsSocket(endpoint, {}, () => socket);
+
+    expect(() => {
+      socket.onmessage?.({
+        data: '{"type":"git","payload":{"root":"/repo"}}',
+      } as MessageEvent<string>);
+    }).not.toThrow();
   });
 
   it("ignores a non-string message payload", () => {
     const socket = {} as WebSocket;
     const onTree = vi.fn();
 
-    openEventsSocket(endpoint, onTree, () => socket);
+    openEventsSocket(endpoint, { onTree }, () => socket);
     socket.onmessage?.({ data: new ArrayBuffer(0) } as MessageEvent<unknown>);
 
     expect(onTree).not.toHaveBeenCalled();

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeState } from "../lib/tree";
 import { ROOT, expand, initialTree, withListing } from "../lib/tree";
+import type { Badges } from "../lib/gitStatus";
 import { FileTree } from "./FileTree";
 
 afterEach(cleanup);
@@ -18,6 +19,12 @@ function loadedManifests(state: TreeState): TreeState {
   return withListing(expand(state, "manifests"), "manifests", [
     { name: "prod.yaml", isDir: false },
   ]);
+}
+
+/** No git markers — the default for the tests that predate #8 and care only
+ * about tree structure. The badge-specific tests build their own. */
+function noBadges(): Badges {
+  return { files: new Map(), dirs: new Map() };
 }
 
 function fakeController(
@@ -39,7 +46,7 @@ function fakeController(
 
 describe("rendering the tree", () => {
   it("shows root's entries, directories first", () => {
-    render(<FileTree tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
 
     const items = screen.getAllByRole("treeitem").map((el) => el.textContent);
     expect(items).toEqual(["▸manifests⋮", "◆deploy.yaml⋮"]);
@@ -47,13 +54,13 @@ describe("rendering the tree", () => {
 
   it("shows an expanded directory's children beneath it", () => {
     const state = loadedManifests(loadedRoot());
-    render(<FileTree tree={fakeController(state)} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(state)} onOpenFile={vi.fn()} />);
 
     expect(screen.getByRole("treeitem", { name: /prod\.yaml/ })).toBeDefined();
   });
 
   it("says there is nothing to show for an empty, loaded root", () => {
-    render(<FileTree tree={fakeController(withListing(initialTree(), ROOT, []))} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(withListing(initialTree(), ROOT, []))} onOpenFile={vi.fn()} />);
 
     expect(screen.getByText("No files in this project.")).toBeDefined();
   });
@@ -62,7 +69,7 @@ describe("rendering the tree", () => {
 describe("selecting entries", () => {
   it("expands a collapsed directory on click rather than opening it", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("treeitem", { name: /manifests/ }));
 
@@ -72,7 +79,7 @@ describe("selecting entries", () => {
   it("selects a file and emits the open-file intent on click", () => {
     const tree = fakeController(loadedRoot());
     const onOpenFile = vi.fn();
-    render(<FileTree tree={tree} onOpenFile={onOpenFile} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={onOpenFile} />);
 
     fireEvent.click(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
 
@@ -83,7 +90,7 @@ describe("selecting entries", () => {
 
 describe("keyboard navigation", () => {
   it("moves focus down and up between rows", () => {
-    render(<FileTree tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
     const treeEl = screen.getByRole("tree");
     // Arrow-key navigation only moves DOM focus once the tree already has it
     // (so a background refresh never steals focus elsewhere) — a real user
@@ -99,7 +106,7 @@ describe("keyboard navigation", () => {
 
   it("expands a collapsed directory with ArrowRight", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowRight" });
 
@@ -108,7 +115,7 @@ describe("keyboard navigation", () => {
 
   it("collapses an expanded directory with ArrowLeft", () => {
     const tree = fakeController(loadedManifests(loadedRoot()));
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
     // Focus is on manifests (row 0) by default; expand it via ArrowRight
     // first is not needed — moving onto its own row and pressing left when
     // already expanded collapses it directly.
@@ -118,7 +125,7 @@ describe("keyboard navigation", () => {
   });
 
   it("moves left from a child row to its parent directory's row", () => {
-    render(<FileTree tree={fakeController(loadedManifests(loadedRoot()))} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(loadedManifests(loadedRoot()))} onOpenFile={vi.fn()} />);
     const treeEl = screen.getByRole("tree");
     screen.getByRole("treeitem", { name: /manifests/ }).focus();
 
@@ -132,7 +139,7 @@ describe("keyboard navigation", () => {
   it("activates the focused row on Enter", () => {
     const tree = fakeController(loadedRoot());
     const onOpenFile = vi.fn();
-    render(<FileTree tree={tree} onOpenFile={onOpenFile} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={onOpenFile} />);
     const treeEl = screen.getByRole("tree");
     screen.getByRole("treeitem", { name: /manifests/ }).focus();
 
@@ -146,7 +153,7 @@ describe("keyboard navigation", () => {
 describe("the hidden-files toggle", () => {
   it("calls toggleHidden and reflects the current state", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     const toggle = screen.getByRole("button", { name: "show dotfiles" });
     fireEvent.click(toggle);
@@ -156,7 +163,7 @@ describe("the hidden-files toggle", () => {
 
   it("labels the button by whether hidden files are already shown", () => {
     const shown = { ...loadedRoot(), showHidden: true };
-    render(<FileTree tree={fakeController(shown)} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(shown)} onOpenFile={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "hide dotfiles" })).toBeDefined();
   });
@@ -165,7 +172,7 @@ describe("the hidden-files toggle", () => {
 describe("creating an entry", () => {
   it("creates a file at root from the header action", async () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []));
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "+ file" }));
     const field = screen.getByRole("textbox", { name: "new file name" });
@@ -179,7 +186,7 @@ describe("creating an entry", () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []), {
       createEntry: vi.fn().mockResolvedValue("path already exists"),
     });
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "+ file" }));
     const field = screen.getByRole("textbox", { name: "new file name" });
@@ -192,7 +199,7 @@ describe("creating an entry", () => {
 
   it("cancels on Escape without creating anything", () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []));
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "+ folder" }));
     const field = screen.getByRole("textbox", { name: "new folder name" });
@@ -205,7 +212,7 @@ describe("creating an entry", () => {
 
 describe("the row context menu", () => {
   it("opens on right-click and offers the real actions plus the deferred-scope note", () => {
-    render(<FileTree tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
 
@@ -215,7 +222,7 @@ describe("the row context menu", () => {
   });
 
   it("only offers New File/New Folder for a directory", () => {
-    render(<FileTree tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     expect(screen.queryByRole("menuitem", { name: "New File" })).toBeNull();
@@ -228,7 +235,7 @@ describe("the row context menu", () => {
 describe("renaming from the menu", () => {
   it("commits a rename on Enter", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
@@ -246,7 +253,7 @@ describe("renaming from the menu", () => {
   it("does not also activate a row when Enter commits a rename", () => {
     const tree = fakeController(loadedRoot());
     const onOpenFile = vi.fn();
-    render(<FileTree tree={tree} onOpenFile={onOpenFile} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={onOpenFile} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
@@ -261,7 +268,7 @@ describe("renaming from the menu", () => {
 
   it("does not navigate the tree while arrow keys are used to edit the name", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
@@ -278,7 +285,7 @@ describe("renaming from the menu", () => {
 describe("deleting with confirmation", () => {
   it("does not delete until the confirmation is accepted", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -292,7 +299,7 @@ describe("deleting with confirmation", () => {
 
   it("cancels the confirmation without deleting", () => {
     const tree = fakeController(loadedRoot());
-    render(<FileTree tree={tree} onOpenFile={vi.fn()} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -307,7 +314,7 @@ describe("deleting with confirmation", () => {
   it("does not also activate a row when a key is pressed inside the confirmation", () => {
     const tree = fakeController(loadedRoot());
     const onOpenFile = vi.fn();
-    render(<FileTree tree={tree} onOpenFile={onOpenFile} />);
+    render(<FileTree badges={noBadges()} tree={tree} onOpenFile={onOpenFile} />);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -320,5 +327,58 @@ describe("deleting with confirmation", () => {
     // necessarily the one being deleted, so a directory's expand is the call
     // that actually catches a regression here.
     expect(tree.expand).not.toHaveBeenCalled();
+  });
+});
+
+describe("git badges (#8)", () => {
+  it("marks a changed file with its own badge", () => {
+    const badges: Badges = { files: new Map([["deploy.yaml", "M"]]), dirs: new Map() };
+    render(<FileTree badges={badges} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+
+    const row = screen.getByRole("treeitem", { name: /deploy\.yaml/ });
+    expect(row.textContent).toContain("M");
+  });
+
+  it("says in words what a badge means", () => {
+    const badges: Badges = { files: new Map([["deploy.yaml", "?"]]), dirs: new Map() };
+    render(<FileTree badges={badges} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+
+    expect(screen.getByTitle("untracked").textContent).toBe("?");
+  });
+
+  it("rolls a change up to the directory that holds it", () => {
+    const badges: Badges = { files: new Map(), dirs: new Map([["manifests", "•"]]) };
+    render(<FileTree badges={badges} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+
+    expect(screen.getByRole("treeitem", { name: /manifests/ }).textContent).toContain("•");
+  });
+
+  it("leaves a row with no git state unmarked", () => {
+    render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+
+    expect(screen.getByRole("treeitem", { name: /deploy\.yaml/ }).textContent).toBe("◆deploy.yaml⋮");
+  });
+
+  // A submodule is a directory on disk and one entry to git, so git's own
+  // badge for the path has to win over the rollup marker.
+  it("prefers git's own badge over the rollup on a directory row", () => {
+    const badges: Badges = {
+      files: new Map([["manifests", "A"]]),
+      dirs: new Map([["manifests", "•"]]),
+    };
+    render(<FileTree badges={badges} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+
+    const row = screen.getByRole("treeitem", { name: /manifests/ });
+    expect(row.textContent).toContain("A");
+    expect(row.textContent).not.toContain("•");
+  });
+
+  // The badge sits beside the name; neither may displace the other.
+  it("keeps the name and the action button alongside the badge", () => {
+    const badges: Badges = { files: new Map([["deploy.yaml", "M"]]), dirs: new Map() };
+    render(<FileTree badges={badges} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
+
+    expect(screen.getByText("deploy.yaml")).toBeDefined();
+    expect(screen.getByRole("button", { name: "actions for deploy.yaml" })).toBeDefined();
   });
 });

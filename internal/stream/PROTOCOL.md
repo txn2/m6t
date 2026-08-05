@@ -87,15 +87,23 @@ the `exit` frame.
 Backend-push events. Server-to-client text frames only; anything the client
 sends is discarded.
 
-PTY exit is the only event type today, and it is published by the terminal
-connection that observes it. A session that ends with no socket attached is
-therefore not announced — when something other than the terminal tab needs to
-know, the fix is a dedicated attachment that watches the session, not a change to
-this protocol. Two sockets attached to the same session both publish, so a
-consumer must treat `exit` as idempotent rather than counted.
+Three event types are published here today: `exit`, `tree` and `git`.
 
-The git, watch and helm services push onto this same socket as they land, which
-is why the envelope carries a type rather than the endpoint implying one.
+`exit` is published by the terminal connection that observes it. A session that
+ends with no socket attached is therefore not announced — when something other
+than the terminal tab needs to know, the fix is a dedicated attachment that
+watches the session, not a change to this protocol. Two sockets attached to the
+same session both publish, so a consumer must treat `exit` as idempotent rather
+than counted.
+
+`tree` and `git` are both published from the filesystem watcher's coalesced
+batches, and neither carries the state it announces — a consumer re-lists or
+refetches. That is what keeps the state's schema out of this protocol: the
+payloads here are paths, not the file listings and status structures the
+services that own them define.
+
+The helm service pushes onto this same socket as it lands, which is why the
+envelope carries a type rather than the endpoint implying one.
 
 ## 5. Control and event frames
 
@@ -128,6 +136,7 @@ message without the other having to be updated in lockstep.
 | `exit` | `{"code": <int>}` | The child ended. `-1` means it was terminated by a signal rather than exiting on its own. Sent on `/pty/{sessionID}` and published on `/events`. |
 | `resync` | `{"droppedBytes": <int>}` | Output was discarded before the frame that follows (§6). |
 | `tree` | `{"root": <string>, "dirs": [<string>, …]}` | One or more directories under a project's worktree (`root`, its absolute path) may have changed — `internal/watch`, coalesced. `dirs` are root-relative, slash-separated, `"."` for the root itself. Published on `/events` only. A consumer re-lists whichever of `dirs` it currently has loaded; a directory it has not loaded needs no action. |
+| `git` | `{"root": <string>}` | A project's git status may be stale — its worktree, `.git/HEAD` or `.git/refs` changed. Published on `/events` only, from the same coalesced watcher batch as `tree`. It carries **no status**: a consumer calls `App.GitStatus(root)` for the current answer. Two consumers of the same root both refetch, so a consumer must treat this as "ask again", not as a delta to apply. |
 
 ## 6. Backpressure
 

@@ -427,12 +427,21 @@ linters:
       #     actual attack G204 approximates.
       #   - argv is a slice of separate strings, so no argument can become a
       #     second command.
-      #   - "--" terminates option parsing before any user-supplied operand, so a
-      #     dash-leading URL cannot become a flag such as --upload-pack. That one
-      #     is pinned by a test (TestCloneTreatsADashLeadingURLAsARepository).
+      #   - no user-supplied operand is passed in an option position. internal/git
+      #     builds a fixed argv and puts the only variable — the worktree path —
+      #     after `-C`, where git reads it as a value and not as a flag. A command
+      #     that ever takes a user-supplied *operand* (a URL, a ref) must
+      #     terminate option parsing with `--` before it, and pin that with a test.
       #
       # Scoped to the packages that invoke tools, not repo-wide.
-      - path: (internal/project/|_test\.go)
+      #
+      # The scope was `internal/project/` until #8, naming a clone-by-URL path
+      # that was never built — the package shells out to nothing, and the test
+      # this note used to cite as the `--` pin does not exist. #8 is the first
+      # real external-binary caller, so the scope now names the package that
+      # actually has one, and the claim above is written against code that is
+      # in the tree.
+      - path: (internal/git/|_test\.go)
         linters:
           - gosec
         text: "G204"

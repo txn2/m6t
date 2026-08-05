@@ -62,6 +62,33 @@ func TestPublishTreeIsPublishedToEveryEventSubscriber(t *testing.T) {
 	}
 }
 
+// The git event is the second non-terminal producer (#8). It carries the
+// project and nothing else: the status itself belongs to internal/git, and a
+// consumer asks the binding for it.
+func TestPublishGitIsPublishedToEveryEventSubscriber(t *testing.T) {
+	terminals := newFakeTerminals()
+	server, endpoint := startTestServer(t, terminals)
+
+	first := dial(t, endpoint, "/events")
+	second := dial(t, endpoint, "/events")
+
+	server.PublishGit("/repo")
+
+	for name, subscriber := range map[string]*client{"first": first, "second": second} {
+		frame := subscriber.readEnvelope()
+		if frame.Type != typeGit {
+			t.Errorf("%s subscriber received type %q, want %q", name, frame.Type, typeGit)
+		}
+		if frame.Payload.Root != "/repo" {
+			t.Errorf("%s subscriber received root %q, want %q", name, frame.Payload.Root, "/repo")
+		}
+		if len(frame.Payload.Dirs) != 0 {
+			t.Errorf("%s subscriber received dirs %v; a git event carries no directories",
+				name, frame.Payload.Dirs)
+		}
+	}
+}
+
 // A terminal connection is not registered for events (the same guarantee
 // TestPublishingWithNoSubscribersIsHarmless covers for exit), so a tree
 // change must never arrive on one.

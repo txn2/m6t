@@ -104,7 +104,7 @@ func newApp() *App {
 		// is no per-project settings UI yet (Kube and Helm are in the same
 		// state, DESIGN.md §4), so a global override unblocks a network
 		// mount until one exists.
-		trees: watch.New(treeBridge{streams: streams}, watch.Options{Poll: os.Getenv("M6T_FS_POLL") != ""}),
+		trees: watch.New(watchBridge{streams: streams}, watch.Options{Poll: os.Getenv("M6T_FS_POLL") != ""}),
 	}
 }
 

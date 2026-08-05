@@ -43,8 +43,12 @@ var structuralPins = map[string]packagePin{
 		why: "composition root: embeds the frontend, hands options to the Wails runtime",
 	},
 	"internal/app": {
-		loc: 540, exported: 2,
+		loc: 620, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
+	},
+	"internal/git": {
+		loc: 650, exported: 15,
+		why: "git service: porcelain v2 status over the system git, read-only, with the two degraded states (no git, not a repository) reported as values rather than errors (DESIGN.md §3.2, §7)",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,
@@ -144,6 +148,28 @@ var structuralPins = map[string]packagePin{
 // (ErrIsDirectory, ErrTooLarge, ErrBinaryFile) are the content operations'
 // whole seam, pinned with the usual zero slack.
 //
+// internal/git is measured: it landed with #8 at 542 lines across three
+// files — the status types and their two degraded states, the exec runner,
+// and the porcelain v2 parser — and 650 is that plus the same proportional
+// follow-up room internal/project carries. The parser is the bulk of it and
+// the part that should be allowed to grow: every record kind it does not
+// handle is a badge the tree cannot show, and #9's diff viewer reads the same
+// format's sibling commands.
+//
+// The exported surface is 15: Status, FileStatus, Branch and Load are the
+// operation, State and Availability are the two enumerations that cross the
+// bridge, and the nine constants are their values. They are exported because
+// TypeScript compares against them — the frontend's badge and status-bar
+// logic is written against these strings, so they are wire constants in the
+// same sense internal/stream's type names are.
+//
+// 540 -> 620 in #8. git.go adds one binding (GitStatus) and tree.go's
+// adapter gains a second publish. No new service handle came with it: the
+// git service is stateless, so unlike #3, #5 and #6 this raise buys a
+// delegating binding and its doc comment rather than a composed handle. 538
+// is today's actual; 620 is that plus room for one more binding of the same
+// size.
+//
 // 400 -> 540 in #6. tree.go added a fourth composed service (the file-tree
 // watcher, internal/watch) the same shape as #3's stream adapter and #5's
 // registry bindings: a treeBridge adapter (watch.Events -> stream.Server, the
@@ -167,7 +193,7 @@ var structuralPins = map[string]packagePin{
 // changed, so there is no new measurement to pin them to. No other ceiling here
 // needs the caveat: counts of packages, files and exported names do not grow
 // through ordinary editing.
-const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project and internal/watch are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
+const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project, internal/watch and internal/git are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.

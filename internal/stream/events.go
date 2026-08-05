@@ -46,6 +46,19 @@ func (s *Server) PublishTree(root string, dirs []string) {
 	s.publish(envelope{Type: typeTree, Payload: treePayload{Root: root, Dirs: dirs}})
 }
 
+// PublishGit announces that a project's git status may be stale (#8,
+// PROTOCOL.md §5).
+//
+// It is a separate message from PublishTree rather than a second consumer of
+// it, even though internal/app publishes both from the same watcher batch
+// today. The tree message's payload is a list of directories a tree consumer
+// filters against what it has loaded; a git consumer shares none of that
+// contract, and the directories it most depends on — .git and .git/refs — are
+// the ones the tree never loads and would be free to stop reporting.
+func (s *Server) PublishGit(root string) {
+	s.publish(envelope{Type: typeGit, Payload: gitPayload{Root: root}})
+}
+
 // publish sends an event to every subscribed connection.
 //
 // A subscriber too far behind loses events the same way a terminal loses output:

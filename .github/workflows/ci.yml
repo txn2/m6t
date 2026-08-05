@@ -233,10 +233,14 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # -exclude=G204 mirrors `make security` exactly; the rule stays enforced
+      # for every package but internal/git through golangci-lint's scoped
+      # exclusion. See the Makefile's security target for the full reasoning —
+      # the two must not drift, or verify stops being CI parity.
       - name: Run gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
-          gosec ./...
+          gosec -exclude=G204 ./...
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0

@@ -257,9 +257,18 @@ patch-coverage:
 	@PATCH_COVERAGE_THRESHOLD=$(PATCH_COVERAGE_MIN) ./scripts/patch-coverage.sh
 
 ## security: gosec + govulncheck
+##
+## G204 is excluded HERE ONLY, and it is still enforced. gosec runs twice in
+## this repo: standalone (this target) and inside golangci-lint, where
+## .golangci.yml scopes G204 off for internal/git alone and explains why —
+## driving the user's git with a worktree path IS the product, so the rule
+## fires on every correct invocation there. Standalone gosec has no path
+## scoping, so the choice is this flag or a //nolint in the source, and
+## CLAUDE.md rules out the second. Every package outside internal/git is still
+## checked for G204, by the golangci-lint run in `make lint`.
 security:
 	@echo "Running gosec..."
-	gosec -quiet ./...
+	gosec -quiet -exclude=G204 ./...
 	@echo "Running govulncheck..."
 	govulncheck ./...
 
@@ -368,18 +377,32 @@ frontend-build: frontend-install
 ## bindings: Regenerate the TypeScript bindings from the bound Go methods
 bindings:
 	@$(WAILS) generate module
-	@# Wails writes generated files 0755. Normalizing keeps a regenerate from
-	@# showing up in `git status` as a mode-only change on files that are not
-	@# executable in the first place.
-	@find $(FRONTEND_DIR)/wailsjs -type f -exec chmod 644 {} +
+	@# Converge on the modes `wails build` and `wails dev` leave behind, which
+	@# are the committed modes, so that no build of any kind dirties the tree.
+	@# Measured against Wails v2.13.0:
+	@#
+	@#              generate module   build / dev
+	@#   go/*            0755            0755
+	@#   runtime/*       0755            0644
+	@#
+	@# so only runtime/ needs normalizing. This used to chmod the whole tree to
+	@# 0644, which fought `build` over go/*: the bit went straight back to 0755
+	@# and left three mode-only modifications in `git status` after every
+	@# `make dev`.
+	@chmod 644 $(FRONTEND_DIR)/wailsjs/runtime/*
 
 ## bindings-check: Fail when the committed bindings are stale
 ##
-## Content only. Wails writes these files with an unstable exec bit — `wails
-## generate module` emits 0755 and `wails build` emits 0644 for the same
-## bytes — so a mode comparison would fail depending on which command ran
-## last. core.fileMode=false is scoped to this one command over the generated
-## tree; a binding whose API actually drifted still fails.
+## Content only, via core.fileMode=false scoped to this one command over the
+## generated tree. The exec bit on a generated .ts file carries no meaning, so
+## a mode difference is not staleness and must not fail the gate; a binding
+## whose API actually drifted still does.
+##
+## The bit really is unstable, but only under runtime/: `generate module` writes
+## it 0755 and `build` writes it 0644 for the same bytes. Under go/ both write
+## 0755. The `bindings` target normalizes the first case and the committed modes
+## match the second, so `git status` stays quiet either way — this flag is what
+## keeps the gate honest if a future Wails changes its mind again.
 bindings-check: bindings
 	@# A newly bound package produces a NEW binding file, which is untracked and
 	@# therefore invisible to the comparison below — the gate would report the

@@ -13,6 +13,7 @@ const TYPE_CLOSE = "close";
 const TYPE_EXIT = "exit";
 const TYPE_RESYNC = "resync";
 const TYPE_TREE = "tree";
+const TYPE_GIT = "git";
 
 /**
  * Tells the backend what window size the child should see. Sent whenever the
@@ -35,7 +36,8 @@ export function closeFrame(): string {
 export type ServerMessage =
   | { readonly type: "exit"; readonly code: number }
   | { readonly type: "resync"; readonly droppedBytes: number }
-  | { readonly type: "tree"; readonly root: string; readonly dirs: string[] };
+  | { readonly type: "tree"; readonly root: string; readonly dirs: string[] }
+  | { readonly type: "git"; readonly root: string };
 
 /**
  * Decodes a text frame, returning null for anything this version does not
@@ -68,6 +70,8 @@ export function decodeServerMessage(raw: string): ServerMessage | null {
         root,
         dirs,
       }));
+    case TYPE_GIT:
+      return withRoot(envelope.payload, (root) => ({ type: "git", root }));
     default:
       return null;
   }
@@ -129,17 +133,24 @@ function withTreePayload<T>(
   payload: unknown,
   build: (root: string, dirs: string[]) => T,
 ): T | null {
+  return withRoot(payload, (root) => {
+    const dirs = (payload as Record<string, unknown>).dirs;
+    if (!Array.isArray(dirs) || !dirs.every((d): d is string => typeof d === "string")) {
+      return null;
+    }
+    return build(root, dirs);
+  });
+}
+
+/**
+ * Applies `build` to a payload's `root` field, or returns null when it is
+ * missing or not a string. `build` may itself return null for a payload that
+ * carries more than a root and fails on the rest.
+ */
+function withRoot<T>(payload: unknown, build: (root: string) => T | null): T | null {
   if (typeof payload !== "object" || payload === null) {
     return null;
   }
-  const record = payload as Record<string, unknown>;
-  const root = record.root;
-  const dirs = record.dirs;
-  if (typeof root !== "string" || !Array.isArray(dirs)) {
-    return null;
-  }
-  if (!dirs.every((d): d is string => typeof d === "string")) {
-    return null;
-  }
-  return build(root, dirs);
+  const root = (payload as Record<string, unknown>).root;
+  return typeof root === "string" ? build(root) : null;
 }

@@ -1,4 +1,4 @@
-**Closes** #
+Closes #
 
 **What this does**
 

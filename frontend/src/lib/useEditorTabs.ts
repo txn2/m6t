@@ -236,10 +236,12 @@ export function useEditorTabs(
     }
     const socket = openEventsSocket(
       endpoint,
-      (changedRoot, dirs) => {
-        for (const tab of tabsInChangedDirs(strip.current, changedRoot, dirs)) {
-          reconcile(tab);
-        }
+      {
+        onTree: (changedRoot, dirs) => {
+          for (const tab of tabsInChangedDirs(strip.current, changedRoot, dirs)) {
+            reconcile(tab);
+          }
+        },
       },
       socketFactory,
     );

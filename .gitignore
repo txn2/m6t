@@ -11,6 +11,9 @@ frontend/*.tsbuildinfo
 # never descend far enough to honour the negation below.
 frontend/dist/*
 !frontend/dist/.gitkeep
+# The placeholder is regenerated rather than merely tracked: every build empties
+# dist and would otherwise delete it. frontend/public/.gitkeep is the source
+# Vite copies back in — see frontend/vite.config.ts.
 
 # frontend/wailsjs is generated (`make bindings`) but committed: the frontend
 # builds and type-checks without a Go toolchain, and `make bindings-check`

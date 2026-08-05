@@ -117,13 +117,15 @@ export function useFileTree(
     }
     const socket = openEventsSocket(
       endpoint,
-      (changedRoot, dirs) => {
-        if (changedRoot !== root) {
-          return;
-        }
-        for (const dir of affectedTrackedDirs(stateRef.current, dirs)) {
-          list(dir);
-        }
+      {
+        onTree: (changedRoot, dirs) => {
+          if (changedRoot !== root) {
+            return;
+          }
+          for (const dir of affectedTrackedDirs(stateRef.current, dirs)) {
+            list(dir);
+          }
+        },
       },
       socketFactory,
     );

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { IconKind, TreeRow } from "../lib/tree";
 import { ROOT, iconKind, parentPath, visibleRows } from "../lib/tree";
+import type { Badges } from "../lib/gitStatus";
+import { badgeAt, badgeTitle } from "../lib/gitStatus";
 
 /** The glyph shown for each icon bucket — text rather than an icon font, the
  * same minimal-dependency choice ProjectTabs' "×" already makes. */
@@ -14,6 +16,10 @@ const ICON_GLYPH: Record<IconKind, string> = {
 
 export interface FileTreeProps {
   readonly tree: FileTreeController;
+  /** Git markers for this project's rows (#8), rolled up to directories.
+   * Empty until the first status read lands, which is why it is a value
+   * rather than an optional. */
+  readonly badges: Badges;
   /** The open-file intent (DESIGN.md §5, "selecting a file emits an
    * open-file intent"). #7's editor is what actually opens it; until then
    * this is passed through and dropped, the same way `terminals` is
@@ -36,7 +42,7 @@ interface Creating {
  * expanded — lazy loading, not virtualization, is what bounds it (see the
  * plan this ticket shipped against).
  */
-export function FileTree({ tree, onOpenFile }: FileTreeProps) {
+export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
   const rows = visibleRows(tree.state);
   // Root failing to list is the one directory failure worth a dedicated
   // message: every other directory's error stays local to its own row
@@ -168,6 +174,7 @@ export function FileTree({ tree, onOpenFile }: FileTreeProps) {
             <RowView
               key={item.row.path}
               row={item.row}
+              badge={badgeAt(badges, item.row.path, item.row.isDir)}
               focused={rowIndexOf(rendered, index) === cursor}
               selected={tree.state.selected === item.row.path}
               expanded={tree.state.expanded.has(item.row.path)}
@@ -326,6 +333,8 @@ function activate(row: TreeRow, tree: FileTreeController, onOpenFile: (path: str
 
 interface RowViewProps {
   readonly row: TreeRow;
+  /** This row's git marker, or null when git reports nothing for it. */
+  readonly badge: string | null;
   readonly focused: boolean;
   readonly selected: boolean;
   readonly expanded: boolean;
@@ -349,6 +358,7 @@ interface RowViewProps {
 
 function RowView({
   row,
+  badge,
   focused,
   selected,
   expanded,
@@ -424,6 +434,13 @@ function RowView({
         {ICON_GLYPH[iconKind(row)]}
       </span>
       <span className="tree__name">{row.name}</span>
+      {badge !== null && (
+        // data-badge rather than a modifier class: a badge can be `?` or `•`,
+        // neither of which is usable in a class-selector name.
+        <span className="tree__badge" data-badge={badge} title={badgeTitle(badge)}>
+          {badge}
+        </span>
+      )}
       <button
         type="button"
         className="tree__menu-button"

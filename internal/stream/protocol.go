@@ -33,6 +33,12 @@ const (
 	// /events only — a file tree is not a terminal session, so there is no
 	// matching client-to-server form.
 	typeTree = "tree"
+
+	// typeGit reports that a project's git status may have changed
+	// (internal/git). Like typeTree it is /events only, and like typeTree
+	// it carries no status of its own: it names the project and the
+	// consumer asks for the current answer.
+	typeGit = "git"
 )
 
 // envelope is the JSON text frame both endpoints speak: a type and its payload.
@@ -61,6 +67,15 @@ type resyncPayload struct {
 type treePayload struct {
 	Root string   `json:"root"`
 	Dirs []string `json:"dirs"`
+}
+
+// gitPayload names the project whose git status may have changed. It carries
+// no status: the status itself is a value owned by internal/git, and putting
+// it on the wire here would mean this package knew that package's schema —
+// which is exactly the sibling dependency the service layout forbids. The
+// consumer asks the binding instead, the same way a tree consumer re-lists.
+type gitPayload struct {
+	Root string `json:"root"`
 }
 
 // control is an inbound text frame. Only the fields the server acts on are

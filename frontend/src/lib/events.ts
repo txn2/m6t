@@ -30,15 +30,26 @@ const defaultSocketFactory: SocketFactory = (url, protocols) =>
   new WebSocket(url, protocols);
 
 /**
- * Opens the event socket and invokes onTree for every `tree` message it
- * decodes (§5). Every other message type — `exit`, and anything a future
- * backend version adds — is dropped here: an event type this frontend does
- * not yet handle is not an error (§5), and `exit` already has its own
- * consumer on the terminal socket it was published alongside.
+ * What a caller wants off the channel. Every handler is optional because
+ * consumers subscribe to different messages — the file tree wants `tree`, the
+ * git status wants `git` — and each opens its own socket rather than sharing
+ * one, so that a consumer unmounting closes only what it opened.
+ */
+export interface EventHandlers {
+  readonly onTree?: (root: string, dirs: string[]) => void;
+  readonly onGit?: (root: string) => void;
+}
+
+/**
+ * Opens the event socket and dispatches the messages `handlers` asks for
+ * (§5). Everything else — `exit`, a message a handler was not given for, and
+ * anything a future backend version adds — is dropped here: an event type
+ * this frontend does not yet handle is not an error (§5), and `exit` already
+ * has its own consumer on the terminal socket it was published alongside.
  */
 export function openEventsSocket(
   endpoint: Endpoint,
-  onTree: (root: string, dirs: string[]) => void,
+  handlers: EventHandlers,
   create: SocketFactory = defaultSocketFactory,
 ): WebSocket {
   const socket = create(eventsURL(endpoint), subprotocols(endpoint));
@@ -48,7 +59,9 @@ export function openEventsSocket(
     }
     const message = decodeServerMessage(event.data);
     if (message?.type === "tree") {
-      onTree(message.root, message.dirs);
+      handlers.onTree?.(message.root, message.dirs);
+    } else if (message?.type === "git") {
+      handlers.onGit?.(message.root);
     }
   };
   return socket;
