@@ -115,20 +115,72 @@ export function clampFontSize(px: number): number {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(px)));
 }
 
-/**
- * The appearance the OS asks for, defaulting to dark where the query is not
- * available — jsdom, and any webview that does not implement it.
- */
-export function preferredAppearance(
-  matchMedia?: (query: string) => { matches: boolean },
-): Appearance {
-  const query =
+/** The media query the appearance follows. */
+const LIGHT_QUERY = "(prefers-color-scheme: light)";
+
+/** The subset of MediaQueryList this module uses, declared structurally so a
+ * test can supply one without a DOM. */
+export interface AppearanceQuery {
+  readonly matches: boolean;
+  addEventListener?: (type: "change", listener: () => void) => void;
+  removeEventListener?: (type: "change", listener: () => void) => void;
+}
+
+/** Resolves the query source, or null where there is none — jsdom, and any
+ * webview that does not implement matchMedia. */
+function queryFor(
+  matchMedia?: (query: string) => AppearanceQuery,
+): AppearanceQuery | null {
+  const source =
     matchMedia ??
     (typeof window !== "undefined" && typeof window.matchMedia === "function"
       ? window.matchMedia.bind(window)
       : null);
+  return source ? source(LIGHT_QUERY) : null;
+}
+
+/**
+ * The appearance the OS asks for, defaulting to dark where the query is not
+ * available.
+ */
+export function preferredAppearance(
+  matchMedia?: (query: string) => AppearanceQuery,
+): Appearance {
+  const query = queryFor(matchMedia);
   if (!query) {
     return "dark";
   }
-  return query("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return query.matches ? "light" : "dark";
+}
+
+/**
+ * Calls onChange whenever the OS appearance changes, and returns the
+ * unsubscribe.
+ *
+ * The app follows the OS and offers no override: the theme toggle that used
+ * to sit in the chrome is gone, because theme belongs in a settings dialog
+ * rather than in a button on the toolbar of a tool whose job is to show a
+ * repository. Following the OS *live* is what makes that removal a fix and
+ * not a regression — without this, switching the OS to dark at dusk would
+ * leave m6t the only light window on the screen until it was restarted.
+ *
+ * A source with no addEventListener (an older webview, or a test's stub)
+ * yields a no-op unsubscribe rather than failing: the initial appearance is
+ * still correct, only the live update is missing.
+ */
+export function watchAppearance(
+  onChange: (appearance: Appearance) => void,
+  matchMedia?: (query: string) => AppearanceQuery,
+): () => void {
+  const query = queryFor(matchMedia);
+  if (!query?.addEventListener || !query.removeEventListener) {
+    return () => undefined;
+  }
+  const listener = () => {
+    onChange(query.matches ? "light" : "dark");
+  };
+  query.addEventListener("change", listener);
+  return () => {
+    query.removeEventListener?.("change", listener);
+  };
 }
