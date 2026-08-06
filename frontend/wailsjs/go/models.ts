@@ -133,6 +133,8 @@ export namespace project {
 	export class Project {
 	    name: string;
 	    path: string;
+	    displayName: string;
+	    color: string;
 	    kube: Kube;
 	    helm: Helm;
 	
@@ -144,6 +146,8 @@ export namespace project {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.path = source["path"];
+	        this.displayName = source["displayName"];
+	        this.color = source["color"];
 	        this.kube = this.convertValues(source["kube"], Kube);
 	        this.helm = this.convertValues(source["helm"], Helm);
 	    }
@@ -167,6 +171,8 @@ export namespace project {
 		}
 	}
 	export class Settings {
+	    displayName: string;
+	    color: string;
 	    kube: Kube;
 	    helm: Helm;
 	
@@ -176,6 +182,8 @@ export namespace project {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.displayName = source["displayName"];
+	        this.color = source["color"];
 	        this.kube = this.convertValues(source["kube"], Kube);
 	        this.helm = this.convertValues(source["helm"], Helm);
 	    }

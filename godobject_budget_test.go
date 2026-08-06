@@ -169,7 +169,21 @@ const (
 	// a request with an answer and no throughput, which was true and is not
 	// the test these three failed — they failed the older one, that the bound
 	// surface is only what the UI calls.
-	maxAppMethods = 21
+	//
+	// 21 -> 22 in #41. One binding, ReorderProjects. It passes the test the
+	// #9 note sets — a drag ends once, writes the file once and answers with
+	// the list — and it is a method of its own rather than a widening of
+	// UpdateProject because the order is a property of the registry, not of a
+	// project: expressing "put this tab third" as a setting on the tab would
+	// be a rename of the operation, and the settings call would then be able
+	// to rearrange the strip as a side effect of binding a namespace.
+	//
+	// The wider alternative is what it refuses. A SetProjects taking the whole
+	// list would have covered reordering without a new method and let the
+	// frontend rewrite every path and kube binding in the same call; this one
+	// takes names, must name exactly the registered set, and cannot change
+	// anything else about a project.
+	maxAppMethods = 22
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

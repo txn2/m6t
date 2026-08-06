@@ -145,6 +145,8 @@ App configuration lives in the OS config dir (`~/Library/Application Support/m6t
 projects:
   - name: infra-prod
     path: ~/workspace/ops/infra-prod
+    displayName: Production infra  # the tab's label; defaults to name
+    color: amber                   # tab accent, by palette name
     kube:
       context: prod-us-west        # required before any kube action is enabled
       namespace: default
@@ -152,6 +154,19 @@ projects:
     helm:
       defaultValues: [values.yaml, values-prod.yaml]
 ```
+
+`name` is the key: it is derived from the checkout's directory, it is unique
+within the registry, and every other record — a terminal's project, an editor
+tab's, a watcher's — is filed under it. `displayName` is what the tab shows, and
+it is a setting precisely so that renaming a tab cannot invalidate any of those.
+Both new fields are optional: a registry written without them loads with the
+defaults and is rewritten without them.
+
+The order of the list is the order of the project tab strip, so dragging a tab
+rewrites it. A reorder must name exactly the registered set — a request that
+does not is refused rather than reconciled, because `projects.yaml` is editable
+by hand while m6t is running and applying a stale order would drop whatever the
+registry gained in the meantime.
 
 Nothing is written into the managed repos in v1 — they stay pristine manifest
 repos. (A shared in-repo `.m6t.yaml` for team defaults is a v2 candidate.)

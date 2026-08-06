@@ -50,9 +50,14 @@ func (a *App) ChooseProjectDirectory() (string, error) {
 	return dir, nil
 }
 
-// AddProject registers an existing checkout.
-func (a *App) AddProject(path string) (project.Project, error) {
-	added, err := a.projects.Add(path)
+// AddProject registers an existing checkout under the label name.
+//
+// The label arrives with the registration rather than in a follow-up call
+// because a project whose tab flashed its directory name before the rename
+// landed would be the exact problem the label exists to solve. A blank name
+// means the project is shown under its registry name.
+func (a *App) AddProject(path, name string) (project.Project, error) {
+	added, err := a.projects.Add(path, name)
 	if err != nil {
 		return project.Project{}, fmt.Errorf("adding project at %s: %w", path, err)
 	}
@@ -77,7 +82,22 @@ func (a *App) RemoveProject(name string) error {
 	return nil
 }
 
-// UpdateProject replaces a project's kube binding and helm defaults.
+// ReorderProjects rewrites the project order to the one the tab strip now
+// shows, and returns the registry as it stands afterwards.
+//
+// It returns the list rather than nothing so the strip does not have to re-read
+// what it just told the backend: a drag that ended in a reload would repaint
+// the tabs a frame after they settled.
+func (a *App) ReorderProjects(names []string) ([]project.Project, error) {
+	ordered, err := a.projects.Reorder(names)
+	if err != nil {
+		return nil, fmt.Errorf("reordering projects: %w", err)
+	}
+	return ordered, nil
+}
+
+// UpdateProject replaces a project's label, color, kube binding and helm
+// defaults.
 //
 // There is no matching getter bound: Projects already returns every project's
 // settings, so a ProjectSettings binding would be a second way to read what the

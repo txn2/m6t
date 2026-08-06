@@ -12,12 +12,8 @@ import { wailsFiles } from "./lib/files";
 import type { Git } from "./lib/git";
 import { wailsGit } from "./lib/git";
 import type { Project, Registry } from "./lib/projects";
-import {
-  findProject,
-  selectionAfterReload,
-  selectionAfterRemove,
-  wailsRegistry,
-} from "./lib/projects";
+import { projectLabel, wailsRegistry } from "./lib/projects";
+import { useProjects } from "./lib/useProjects";
 import type { Endpoint } from "./lib/stream";
 import type { Appearance } from "./lib/theme";
 import {
@@ -94,15 +90,13 @@ export default function App({
   const [stream, setStream] = useState<Endpoint | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProject, setActiveProject] = useState<string | null>(null);
-  const [projectError, setProjectError] = useState<string | null>(null);
+  const projects = useProjects(registry);
 
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [appearance, setAppearance] = useState<Appearance>(preferredAppearance);
 
-  const terminals = useTerminals(activeProject);
-  const editors = useEditorTabs(activeProject, stream, files);
+  const terminals = useTerminals(projects.activeName);
+  const editors = useEditorTabs(projects.activeName, stream, files);
 
   useEffect(() => {
     let current = true;
@@ -138,50 +132,12 @@ export default function App({
     };
   }, [endpoint]);
 
-  const reload = useCallback(async () => {
-    try {
-      const listed = await registry.list();
-      setProjects(listed);
-      setActiveProject((active) => selectionAfterReload(listed, active));
-      setProjectError(null);
-    } catch (error: unknown) {
-      // A registry that will not load is shown, never swallowed: an empty strip
-      // would read as "you have no projects" when the truth is a broken
-      // projects.yaml the user has to go fix.
-      setProjectError(describe(error));
-    }
-  }, [registry]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
   // Appearance follows the OS and has no in-app override: theme belongs in a
   // settings dialog, not in a button on the chrome. Following it live is what
   // makes removing that button a fix rather than a regression — otherwise
   // switching the OS to dark would leave m6t the only light window on screen
   // until it was restarted.
   useEffect(() => watchAppearance(setAppearance), []);
-
-  // Browse, then register. The picker returns "" when the user dismisses it,
-  // which ends the flow silently — a cancelled dialog is not a failure and must
-  // not leave an error on screen.
-  const handleAdd = useCallback(() => {
-    setProjectError(null);
-    void (async () => {
-      try {
-        const chosen = await registry.choose();
-        if (chosen === "") {
-          return;
-        }
-        const added = await registry.add(chosen);
-        await reload();
-        setActiveProject(added.name);
-      } catch (error: unknown) {
-        setProjectError(describe(error));
-      }
-    })();
-  }, [registry, reload]);
 
   const handleRemove = useCallback(
     (name: string) => {
@@ -190,20 +146,12 @@ export default function App({
       // reach them.
       terminals.closeProject(name);
       editors.closeProject(name);
-      setActiveProject((active) => selectionAfterRemove(projects, name, active));
-      void (async () => {
-        try {
-          await registry.remove(name);
-          await reload();
-        } catch (error: unknown) {
-          setProjectError(describe(error));
-        }
-      })();
+      projects.remove(name);
     },
-    [projects, registry, reload, terminals, editors],
+    [projects, terminals, editors],
   );
 
-  const active = findProject(projects, activeProject);
+  const active = projects.active;
   // One binding for both hooks: they take the same path, and computing it
   // twice is two more branches in a component that has a ceiling on them.
   const activePath = active?.path ?? null;
@@ -226,16 +174,22 @@ export default function App({
   return (
     <main className={`shell shell--${appearance}`}>
       <ProjectTabs
-        projects={projects}
-        activeName={activeProject}
-        onSelect={setActiveProject}
+        projects={projects.list}
+        activeName={projects.activeName}
+        pending={projects.pending}
+        onSelect={projects.select}
+        onRename={projects.rename}
+        onColor={projects.recolor}
+        onMove={projects.move}
         onRemove={handleRemove}
-        onAdd={handleAdd}
+        onAdd={projects.beginAdd}
+        onAddCommit={projects.commitAdd}
+        onAddCancel={projects.cancelAdd}
       />
 
-      {projectError !== null && (
+      {projects.error !== null && (
         <p className="shell__error" role="alert">
-          {projectError}
+          {projects.error}
         </p>
       )}
 
@@ -374,7 +328,7 @@ function Editor({ project, editors, appearance }: EditorProps) {
         ))}
         {editors.visible.length === 0 && (
           <p className="panes__empty">
-            No file open in {project.name}. Pick one from the tree to start editing.
+            No file open in {projectLabel(project)}. Pick one from the tree to start editing.
           </p>
         )}
       </div>
@@ -445,7 +399,7 @@ function Terminals({
         )}
         {stream !== null && terminals.visible.length === 0 && (
           <p className="panes__empty">
-            No terminals open in {project.name}. Open a shell to get started.
+            No terminals open in {projectLabel(project)}. Open a shell to get started.
           </p>
         )}
       </div>

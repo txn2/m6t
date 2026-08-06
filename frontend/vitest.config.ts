@@ -7,6 +7,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     include: ["src/**/*.test.{ts,tsx}"],
+    // The browser APIs Radix needs and jsdom lacks. See src/test-setup.ts.
+    setupFiles: ["src/test-setup.ts"],
     restoreMocks: true,
     onConsoleLog(log, type) {
       // xterm.js measures colours through a canvas when its module loads, and

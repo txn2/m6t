@@ -57,13 +57,20 @@ const attached = () =>
   });
 
 /** A project in the shape the generated binding produces. */
-function project(name: string, path = `/w/${name}`, context = ""): Project {
+function project(
+  name: string,
+  path = `/w/${name}`,
+  context = "",
+  rest: { displayName?: string; color?: string } = {},
+): Project {
   // createFrom rather than an object literal: the generated model is a class,
   // and a fixture that merely matched its fields would drift the moment the Go
   // struct gained one.
   return models.Project.createFrom({
     name,
     path,
+    displayName: rest.displayName ?? "",
+    color: rest.color ?? "",
     kube: { context, namespace: "", protected: false },
     helm: { defaultValues: [] },
   });
@@ -81,8 +88,10 @@ function fakeRegistry(initial: Project[] = []): Registry & {
     list: vi.fn(() => Promise.resolve([...state.projects])),
     // The picker: tests override this to stand in for what the user chose.
     choose: vi.fn(() => Promise.resolve("/w/infra")),
-    add: vi.fn((path: string) => {
-      const added = project(path.split("/").pop() ?? "repo", path);
+    add: vi.fn((path: string, name: string) => {
+      const added = project(path.split("/").pop() ?? "repo", path, "", {
+        displayName: name,
+      });
       state.projects = [...state.projects, added];
       return Promise.resolve(added);
     }),
@@ -90,9 +99,25 @@ function fakeRegistry(initial: Project[] = []): Registry & {
       state.projects = state.projects.filter((p) => p.name !== name);
       return Promise.resolve();
     }),
-    update: vi.fn((name: string) =>
-      Promise.resolve(project(name, `/w/${name}`)),
-    ),
+    // The registry's Update replaces the mutable half whole, so the fake does
+    // too: a test that renamed a project and got its old settings back would
+    // hide exactly the bug `settingsFor` exists to prevent.
+    update: vi.fn((name: string, settings: models.Settings) => {
+      const updated = project(name, `/w/${name}`, settings.kube.context, {
+        displayName: settings.displayName,
+        color: settings.color,
+      });
+      state.projects = state.projects.map((p) =>
+        p.name === name ? updated : p,
+      );
+      return Promise.resolve(updated);
+    }),
+    reorder: vi.fn((names: string[]) => {
+      state.projects = names.map(
+        (name) => state.projects.find((p) => p.name === name) as Project,
+      );
+      return Promise.resolve([...state.projects]);
+    }),
   };
 }
 
@@ -211,23 +236,64 @@ describe("the project strip", () => {
 });
 
 describe("adding a project", () => {
+  /** Runs the add flow to the point where the name field is on screen. */
+  async function nameField() {
+    open("+ Project");
+    return await screen.findByRole("textbox", { name: "project name" });
+  }
+
   // Choosing a checkout is a filesystem browse, so the button opens the OS
   // picker rather than asking the user to type a path they would have had to go
   // and find anyway.
   it("opens the directory picker and registers what was chosen", async () => {
     const { registry } = await renderWith([]);
 
-    open("+ Project");
+    const field = await nameField();
+    fireEvent.keyDown(field, { key: "Enter" });
 
     await waitFor(() => {
-      expect(registry.choose).toHaveBeenCalled();
-    });
-    await waitFor(() => {
-      expect(registry.add).toHaveBeenCalledWith("/w/infra");
+      expect(registry.add).toHaveBeenCalledWith("/w/infra", "infra");
     });
     expect((await screen.findByTestId("project-status")).textContent).toContain(
       "infra",
     );
+  });
+
+  // The acceptance criterion: almost every manifest repository is checked out
+  // as "k8s", so the directory name is a prefilled suggestion rather than the
+  // identity the user is stuck with (#41).
+  it("prefills the directory name and registers the one typed instead", async () => {
+    const registry = fakeRegistry();
+    registry.choose = vi.fn(() => Promise.resolve("/w/ops/k8s"));
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+
+    const field = await nameField();
+    expect((field as HTMLInputElement).value).toBe("k8s");
+    fireEvent.change(field, { target: { value: "Production infra" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(registry.add).toHaveBeenCalledWith("/w/ops/k8s", "Production infra");
+    });
+    expect(
+      await screen.findByRole("button", { name: "Production infra" }),
+    ).toBeDefined();
+  });
+
+  // Escape abandons the naming, and the abandoned pick must not be registered
+  // behind it — the field is removed from a focused state and its blur would
+  // otherwise commit what the user just backed out of.
+  it("registers nothing when the naming is abandoned", async () => {
+    const { registry } = await renderWith([]);
+
+    const field = await nameField();
+    fireEvent.keyDown(field, { key: "Escape" });
+    fireEvent.blur(field);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "project name" })).toBeNull();
+    });
+    expect(registry.add).not.toHaveBeenCalled();
   });
 
   // Dismissing the dialog is an ordinary outcome, not a failure. Registering
@@ -256,7 +322,7 @@ describe("adding a project", () => {
     );
     render(<App load={attached} endpoint={pending} backend={{ registry }} />);
 
-    open("+ Project");
+    fireEvent.keyDown(await nameField(), { key: "Enter" });
 
     expect((await screen.findByRole("alert")).textContent).toContain(
       "not a git repository",
@@ -275,6 +341,135 @@ describe("adding a project", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "window is not ready",
     );
+  });
+});
+
+describe("project tab identity (#41)", () => {
+  /** Opens a tab's context menu and returns the menu element. */
+  async function menuFor(label: string) {
+    fireEvent.contextMenu(screen.getByRole("button", { name: label }));
+    return await screen.findByRole("menu", { name: `${label} actions` });
+  }
+
+  it("shows the label rather than the registry key, with the path as the tooltip", async () => {
+    const registry = fakeRegistry([
+      project("k8s", "/w/ops/k8s", "", { displayName: "Production infra" }),
+    ]);
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+
+    const tab = await screen.findByRole("button", { name: "Production infra" });
+    expect(tab.getAttribute("title")).toBe("/w/ops/k8s");
+    expect(screen.getByTestId("project-status").textContent).toContain(
+      "Production infra",
+    );
+  });
+
+  it("falls back to the registry name when a project has no label", async () => {
+    await renderWith(["infra"]);
+
+    expect(screen.getByRole("button", { name: "infra" })).toBeDefined();
+  });
+
+  // The whole point of DisplayName being a setting rather than the key: the
+  // rename must not disturb the binding that decides what an apply applies to.
+  it("renames from the tab menu and keeps the kube binding", async () => {
+    const registry = fakeRegistry([project("k8s", "/w/k8s", "prod-us-west")]);
+    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    await screen.findByRole("button", { name: "k8s" });
+
+    await menuFor("k8s");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    // The menu goes with the click that started the rename, and the field
+    // arrives once it has: mounting the field under an open menu put it inside
+    // the inert region, where it took focus and lost it again — committing a
+    // rename the user had not typed.
+    const field = await screen.findByRole("textbox", { name: "rename k8s" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.change(field, { target: { value: "Production" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(registry.update).toHaveBeenCalledWith(
+        "k8s",
+        expect.objectContaining({
+          displayName: "Production",
+          kube: expect.objectContaining({ context: "prod-us-west" }),
+        }),
+      );
+    });
+    expect(
+      await screen.findByRole("button", { name: "Production" }),
+    ).toBeDefined();
+    expect(screen.getByTestId("project-status").textContent).toBe(
+      "Production — prod-us-west",
+    );
+  });
+
+  // The colour is a dot beside the name, not the tab's edge rule: the edge
+  // says which project is open, and a colour that took it over left that
+  // question unanswered.
+  it("sets a tab colour from the menu and marks it beside the name", async () => {
+    const { registry, container } = await renderWith(["infra"]);
+
+    await menuFor("infra");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "amber" }));
+
+    await waitFor(() => {
+      expect(registry.update).toHaveBeenCalledWith(
+        "infra",
+        expect.objectContaining({ color: "amber" }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        container.querySelector(".projects__dot")?.getAttribute("data-color"),
+      ).toBe("amber");
+    });
+    // Picking a colour is the end of the interaction; leaving the menu open
+    // over the tab hides the mark the user just chose.
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // A colour this build has no palette entry for — a projects.yaml someone
+  // edited by hand — must render as no colour rather than reaching the DOM.
+  it("ignores a stored colour it has no palette entry for", async () => {
+    const registry = fakeRegistry([
+      project("infra", "/w/infra", "", { color: "chartreuse" }),
+    ]);
+    const { container } = render(
+      <App load={attached} endpoint={pending} backend={{ registry }} />,
+    );
+    await screen.findByRole("button", { name: "infra" });
+
+    expect(container.querySelector(".projects__dot")).toBeNull();
+  });
+
+  // Reordering is dnd-kit's: the pointer sensor, the distance threshold, the
+  // transforms and the keyboard path are its code and its test suite. What
+  // this repo owns is that every tab is registered as a sortable item — the
+  // wiring that, if it were wrong, would leave a strip that simply does not
+  // drag while every unit test still passed. `orderAfterDrag` covers the other
+  // half, in lib/projects.test.ts.
+  it("registers every tab as a sortable item", async () => {
+    await renderWith(["alpha", "beta"]);
+
+    for (const name of ["alpha", "beta"]) {
+      const tab = screen.getByRole("button", { name });
+      expect(tab.getAttribute("aria-roledescription")).toBe("project tab");
+      // dnd-kit points this at its own keyboard instructions; without it the
+      // tab is not attached to a DndContext at all.
+      expect(tab.getAttribute("aria-describedby")).toBeTruthy();
+    }
+  });
+
+  // Selecting a project must survive the drag sensor sitting on the same
+  // button: a click that never moved is a click.
+  it("still selects a project on a plain click", async () => {
+    await renderWith(["alpha", "beta"]);
+
+    open("beta");
+
+    expect(screen.getByTestId("project-status").textContent).toContain("beta");
   });
 });
 

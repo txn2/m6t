@@ -34,7 +34,7 @@ func TestAddRegistersAnExistingCheckout(t *testing.T) {
 	r := newRegistry(t)
 	dir, resolved := fakeRepo(t, "infra")
 
-	added, err := r.Add(dir)
+	added, err := r.Add(dir, "")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestAddRejectsADirectoryThatIsNotARepository(t *testing.T) {
 		t.Fatalf("creating a plain directory: %v", err)
 	}
 
-	if _, err := r.Add(plain); !errors.Is(err, ErrNotRepository) {
+	if _, err := r.Add(plain, ""); !errors.Is(err, ErrNotRepository) {
 		t.Errorf("Add of a plain directory = %v, want ErrNotRepository", err)
 	}
 }
@@ -79,7 +79,7 @@ func TestAddAcceptsAWorktreeWhoseGitIsAFile(t *testing.T) {
 		t.Fatalf("writing the gitdir pointer: %v", err)
 	}
 
-	if _, err := r.Add(dir); err != nil {
+	if _, err := r.Add(dir, ""); err != nil {
 		t.Errorf("Add of a linked worktree: %v, want it accepted", err)
 	}
 }
@@ -87,10 +87,10 @@ func TestAddAcceptsAWorktreeWhoseGitIsAFile(t *testing.T) {
 func TestAddRejectsAMissingPathAndAnEmptyOne(t *testing.T) {
 	r := newRegistry(t)
 
-	if _, err := r.Add(filepath.Join(t.TempDir(), "nope")); err == nil {
+	if _, err := r.Add(filepath.Join(t.TempDir(), "nope"), ""); err == nil {
 		t.Error("Add of a missing path succeeded, want an error")
 	}
-	if _, err := r.Add("   "); err == nil {
+	if _, err := r.Add("   ", ""); err == nil {
 		t.Error("Add of a blank path succeeded, want an error")
 	}
 }
@@ -102,7 +102,7 @@ func TestAddRejectsAFile(t *testing.T) {
 		t.Fatalf("creating a file: %v", err)
 	}
 
-	if _, err := r.Add(file); !errors.Is(err, ErrNotRepository) {
+	if _, err := r.Add(file, ""); !errors.Is(err, ErrNotRepository) {
 		t.Errorf("Add of a regular file = %v, want ErrNotRepository", err)
 	}
 }
@@ -114,11 +114,11 @@ func TestAddIsIdempotentForTheSameCheckout(t *testing.T) {
 	r := newRegistry(t)
 	dir, resolved := fakeRepo(t, "infra")
 
-	first, err := r.Add(dir)
+	first, err := r.Add(dir, "")
 	if err != nil {
 		t.Fatalf("first Add: %v", err)
 	}
-	second, err := r.Add(dir)
+	second, err := r.Add(dir, "")
 	if err != nil {
 		t.Fatalf("second Add: %v", err)
 	}
@@ -144,14 +144,14 @@ func TestAddDisambiguatesCollidingNames(t *testing.T) {
 	second, _ := fakeRepo(t, "infra")
 	third, _ := fakeRepo(t, "infra")
 
-	if _, err := r.Add(first); err != nil {
+	if _, err := r.Add(first, ""); err != nil {
 		t.Fatalf("first Add: %v", err)
 	}
-	got2, err := r.Add(second)
+	got2, err := r.Add(second, "")
 	if err != nil {
 		t.Fatalf("second Add: %v", err)
 	}
-	got3, err := r.Add(third)
+	got3, err := r.Add(third, "")
 	if err != nil {
 		t.Fatalf("third Add: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestListPreservesInsertionOrderAcrossReload(t *testing.T) {
 
 	for _, name := range []string{"alpha", "beta", "gamma"} {
 		dir, _ := fakeRepo(t, name)
-		if _, err := r.Add(dir); err != nil {
+		if _, err := r.Add(dir, ""); err != nil {
 			t.Fatalf("Add %s: %v", name, err)
 		}
 	}
@@ -227,7 +227,7 @@ func TestListReportsAMalformedConfig(t *testing.T) {
 func TestRemoveDropsTheProjectAndLeavesTheWorkingTree(t *testing.T) {
 	r := newRegistry(t)
 	dir, _ := fakeRepo(t, "infra")
-	if _, err := r.Add(dir); err != nil {
+	if _, err := r.Add(dir, ""); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -252,7 +252,7 @@ func TestRemoveKeepsTheOtherProjects(t *testing.T) {
 	r := newRegistry(t)
 	for _, name := range []string{"alpha", "beta", "gamma"} {
 		dir, _ := fakeRepo(t, name)
-		if _, err := r.Add(dir); err != nil {
+		if _, err := r.Add(dir, ""); err != nil {
 			t.Fatalf("Add %s: %v", name, err)
 		}
 	}
@@ -284,7 +284,7 @@ func TestUpdateReplacesSettingsAndPersists(t *testing.T) {
 	dir := tempConfigDir(t)
 	r := New(dir)
 	repo, resolved := fakeRepo(t, "infra")
-	if _, err := r.Add(repo); err != nil {
+	if _, err := r.Add(repo, ""); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -320,7 +320,7 @@ func TestUpdateReplacesSettingsAndPersists(t *testing.T) {
 func TestUpdateLeavesIdentityAlone(t *testing.T) {
 	r := newRegistry(t)
 	dir, resolved := fakeRepo(t, "infra")
-	if _, err := r.Add(dir); err != nil {
+	if _, err := r.Add(dir, ""); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -347,6 +347,228 @@ func TestUpdateAndSettingsRejectUnknownProjects(t *testing.T) {
 	}
 }
 
+// The label the add flow collects has to arrive with the registration: a tab
+// that showed "k8s" until a follow-up rename landed is the problem the label
+// exists to solve (#41).
+func TestAddStoresTheDisplayNameWithoutTouchingTheKey(t *testing.T) {
+	dir := tempConfigDir(t)
+	r := New(dir)
+	repo, _ := fakeRepo(t, "k8s")
+
+	added, err := r.Add(repo, "  Production infra  ")
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if added.DisplayName != "Production infra" {
+		t.Errorf("display name = %q, want it trimmed to %q", added.DisplayName, "Production infra")
+	}
+	if added.Name != "k8s" {
+		t.Errorf("name = %q, want the key still derived from the directory", added.Name)
+	}
+
+	reloaded, err := New(dir).List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(reloaded) != 1 || reloaded[0].DisplayName != "Production infra" {
+		t.Errorf("after reload = %+v, want the display name persisted", reloaded)
+	}
+}
+
+// A project already registered keeps the label the user gave it. Re-adding a
+// checkout selects it; it does not rename the tab out from under them.
+func TestAddLeavesAnExistingProjectsLabelAlone(t *testing.T) {
+	r := newRegistry(t)
+	repo, _ := fakeRepo(t, "k8s")
+	if _, err := r.Add(repo, "Production"); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+
+	second, err := r.Add(repo, "Something else")
+	if err != nil {
+		t.Fatalf("second Add: %v", err)
+	}
+	if second.DisplayName != "Production" {
+		t.Errorf("display name after re-adding = %q, want the original %q", second.DisplayName, "Production")
+	}
+}
+
+// The label and the color are settings, so Update carries them — and carries
+// them without disturbing the binding that shares the struct.
+func TestUpdateRenamesAndColoursWithoutLosingTheBinding(t *testing.T) {
+	dir := tempConfigDir(t)
+	r := New(dir)
+	repo, _ := fakeRepo(t, "k8s")
+	if _, err := r.Add(repo, ""); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := r.Update("k8s", Settings{Kube: Kube{Context: "prod-us-west"}}); err != nil {
+		t.Fatalf("binding the context: %v", err)
+	}
+
+	updated, err := r.Update("k8s", Settings{
+		DisplayName: " Production ",
+		Color:       " amber ",
+		Kube:        Kube{Context: "prod-us-west"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.DisplayName != "Production" || updated.Color != "amber" {
+		t.Errorf("updated = %+v, want the label and color trimmed and stored", updated)
+	}
+
+	// The acceptance criterion: it survives a restart.
+	reloaded, err := New(dir).Settings("k8s")
+	if err != nil {
+		t.Fatalf("Settings after reload: %v", err)
+	}
+	if reloaded.DisplayName != "Production" || reloaded.Color != "amber" {
+		t.Errorf("settings after reload = %+v, want the label and color", reloaded)
+	}
+	if reloaded.Kube.Context != "prod-us-west" {
+		t.Errorf("kube context after a rename = %q, want it untouched", reloaded.Kube.Context)
+	}
+}
+
+// A registry written before this ticket has neither field. It must load as
+// defaults and must not gain keys it did not have.
+func TestARegistryWithoutTheNewFieldsRoundTrips(t *testing.T) {
+	dir := tempConfigDir(t)
+	const stored = "projects:\n    - name: infra\n      path: /w/infra\n"
+	if err := os.WriteFile(registryFile(dir), []byte(stored), configPerm); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	listed, err := New(dir).List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listed) != 1 || listed[0].DisplayName != "" || listed[0].Color != "" {
+		t.Errorf("List = %+v, want the new fields defaulted to empty", listed)
+	}
+
+	// A write that touches nothing else must reproduce the file as it was.
+	if _, err := New(dir).Reorder([]string{"infra"}); err != nil {
+		t.Fatalf("Reorder: %v", err)
+	}
+	raw, err := os.ReadFile(registryFile(dir))
+	if err != nil {
+		t.Fatalf("reading back: %v", err)
+	}
+	if string(raw) != stored {
+		t.Errorf("rewritten registry =\n%s\nwant it unchanged:\n%s", raw, stored)
+	}
+}
+
+// The stored order is the tab strip's order, so a drag is a rewrite of the
+// list — and the arrangement has to survive a restart.
+func TestReorderRewritesTheStoredOrder(t *testing.T) {
+	dir := tempConfigDir(t)
+	r := New(dir)
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		repo, _ := fakeRepo(t, name)
+		if _, err := r.Add(repo, ""); err != nil {
+			t.Fatalf("Add %s: %v", name, err)
+		}
+	}
+
+	ordered, err := r.Reorder([]string{"gamma", "alpha", "beta"})
+	if err != nil {
+		t.Fatalf("Reorder: %v", err)
+	}
+	if names(ordered) != "gamma,alpha,beta" {
+		t.Errorf("returned order = %v, want [gamma alpha beta]", names(ordered))
+	}
+	if ordered[0].Path != expand(ordered[0].Path) {
+		t.Errorf("returned path %q is not expanded", ordered[0].Path)
+	}
+
+	reloaded, err := New(dir).List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if names(reloaded) != "gamma,alpha,beta" {
+		t.Errorf("order after reload = %v, want [gamma alpha beta]", names(reloaded))
+	}
+}
+
+// projects.yaml is editable by hand while m6t runs, so a strip can order a list
+// that no longer exists. Applying it would drop whatever the registry gained in
+// the meantime, which is a project lost to a drag.
+func TestReorderRefusesAnOrderThatIsNotTheStoredSet(t *testing.T) {
+	setup := func(t *testing.T) *Registry {
+		t.Helper()
+		r := newRegistry(t)
+		for _, name := range []string{"alpha", "beta"} {
+			repo, _ := fakeRepo(t, name)
+			if _, err := r.Add(repo, ""); err != nil {
+				t.Fatalf("Add %s: %v", name, err)
+			}
+		}
+		return r
+	}
+
+	tests := map[string]struct {
+		order []string
+		want  error
+	}{
+		"a project the registry does not hold": {order: []string{"alpha", "beta", "ghost"}, want: ErrNotFound},
+		"a project named twice":                {order: []string{"alpha", "alpha"}, want: ErrNotFound},
+		"a project left out":                   {order: []string{"alpha"}, want: errIncompleteOrder},
+		"nothing at all":                       {order: nil, want: errIncompleteOrder},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := setup(t)
+			if _, err := r.Reorder(tt.order); !errors.Is(err, tt.want) {
+				t.Fatalf("Reorder(%v) = %v, want %v", tt.order, err, tt.want)
+			}
+			// A refused reorder must leave the registry exactly as it was.
+			listed, err := r.List()
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if names(listed) != "alpha,beta" {
+				t.Errorf("order after a refused reorder = %v, want it unchanged", names(listed))
+			}
+		})
+	}
+}
+
+func TestReorderReportsABrokenOrUnwritableRegistry(t *testing.T) {
+	broken := tempConfigDir(t)
+	if err := os.WriteFile(registryFile(broken), []byte("projects: [oh: dear: no\n"), configPerm); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+	if _, err := New(broken).Reorder([]string{"infra"}); err == nil {
+		t.Error("Reorder over a malformed config succeeded, want an error")
+	}
+
+	dir := tempConfigDir(t)
+	r := New(dir)
+	repo, _ := fakeRepo(t, "infra")
+	if _, err := r.Add(repo, ""); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, tempFile), 0o750); err != nil {
+		t.Fatalf("occupying the scratch name: %v", err)
+	}
+	if _, err := r.Reorder([]string{"infra"}); err == nil {
+		t.Error("Reorder with an unwritable registry succeeded, want an error")
+	}
+}
+
+// names renders a project list as a comparable string.
+func names(projects []Project) string {
+	got := make([]string, 0, len(projects))
+	for _, p := range projects {
+		got = append(got, p.Name)
+	}
+	return strings.Join(got, ",")
+}
+
 func TestUniqueNameSkipsEveryTakenSuffix(t *testing.T) {
 	projects := []Project{{Name: "infra"}, {Name: "infra-2"}, {Name: "infra-3"}}
 	if got := uniqueName(projects, "infra"); got != "infra-4" {
@@ -371,7 +593,7 @@ func TestConcurrentAddsAllLand(t *testing.T) {
 	errs := make(chan error, count)
 	for _, dir := range dirs {
 		go func() {
-			_, err := r.Add(dir)
+			_, err := r.Add(dir, "")
 			errs <- err
 		}()
 	}
@@ -411,7 +633,7 @@ func TestEveryOperationRefusesAMalformedConfig(t *testing.T) {
 
 	operations := map[string]func() error{
 		"List":     func() error { _, err := r.List(); return err },
-		"Add":      func() error { _, err := r.Add(repo); return err },
+		"Add":      func() error { _, err := r.Add(repo, ""); return err },
 		"Remove":   func() error { _, err := r.Remove("anything"); return err },
 		"Settings": func() error { _, err := r.Settings("anything"); return err },
 		"Update":   func() error { _, err := r.Update("anything", Settings{}); return err },
@@ -441,7 +663,7 @@ func TestAddReportsAnUnwritableRegistry(t *testing.T) {
 	repo, _ := fakeRepo(t, "infra")
 	r := New(filepath.Join(t.TempDir(), "absent-dir"))
 
-	if _, err := r.Add(repo); err == nil {
+	if _, err := r.Add(repo, ""); err == nil {
 		t.Error("Add against an unwritable registry succeeded, want an error")
 	}
 }
@@ -454,7 +676,7 @@ func TestWritesReportAFailedSave(t *testing.T) {
 	dir := tempConfigDir(t)
 	r := New(dir)
 	repo, _ := fakeRepo(t, "infra")
-	if _, err := r.Add(repo); err != nil {
+	if _, err := r.Add(repo, ""); err != nil {
 		t.Fatalf("seeding: %v", err)
 	}
 
@@ -465,7 +687,7 @@ func TestWritesReportAFailedSave(t *testing.T) {
 	}
 
 	writes := map[string]func() error{
-		"Add":    func() error { second, _ := fakeRepo(t, "other"); _, err := r.Add(second); return err },
+		"Add":    func() error { second, _ := fakeRepo(t, "other"); _, err := r.Add(second, ""); return err },
 		"Remove": func() error { _, err := r.Remove("infra"); return err },
 		"Update": func() error { _, err := r.Update("infra", Settings{Kube: Kube{Context: "x"}}); return err },
 	}

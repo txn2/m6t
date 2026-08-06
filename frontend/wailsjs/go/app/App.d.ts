@@ -6,7 +6,7 @@ import {watch} from '../models';
 import {stream} from '../models';
 import {buildinfo} from '../models';
 
-export function AddProject(arg1:string):Promise<project.Project>;
+export function AddProject(arg1:string,arg2:string):Promise<project.Project>;
 
 export function ChooseProjectDirectory():Promise<string>;
 
@@ -39,6 +39,8 @@ export function ReadPrefixes(arg1:string,arg2:Array<string>):Promise<Record<stri
 export function RemoveProject(arg1:string):Promise<void>;
 
 export function RenameEntry(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function ReorderProjects(arg1:Array<string>):Promise<Array<project.Project>>;
 
 export function StreamEndpoint():Promise<stream.Endpoint>;
 
