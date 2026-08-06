@@ -1,18 +1,21 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeRow } from "../lib/tree";
-import { ROOT, iconKind, parentPath, resolveIconKind, visibleRows } from "../lib/tree";
+import { ROOT, parentPath, visibleRows } from "../lib/tree";
+import type { Status } from "../lib/git";
 import type { Badges } from "../lib/gitStatus";
-import { badgeAt, badgeTitle } from "../lib/gitStatus";
-import { FileIcon, UiIcon } from "./Icon";
-import { CreateRow, InlineField } from "./InlineField";
+import { badgeAt, badgeTone, badgesFor, changedRows } from "../lib/gitStatus";
+import { UiIcon } from "./Icon";
+import { RowView } from "./FileTreeRow";
+import { CreateRow } from "./InlineField";
 
 export interface FileTreeProps {
   readonly tree: FileTreeController;
-  /** Git markers for this project's rows (#8), rolled up to directories.
-   * Empty until the first status read lands, which is why it is a value
-   * rather than an optional. */
-  readonly badges: Badges;
+  /** This project's git status (#8, #40): the marker and tint on every row,
+   * and the rows themselves in changed-only mode. Available-shaped and empty
+   * until the first read lands, which is why it is a value rather than an
+   * optional. */
+  readonly status: Status;
   /** The open-file intent (DESIGN.md §5, "selecting a file emits an
    * open-file intent"). #7's editor is what actually opens it; until then
    * this is passed through and dropped, the same way `terminals` is
@@ -35,8 +38,20 @@ interface Creating {
  * expanded — lazy loading, not virtualization, is what bounds it (see the
  * plan this ticket shipped against).
  */
-export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
-  const rows = visibleRows(tree.state);
+export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
+  // Both walk every changed path, and this component re-renders on state that
+  // has nothing to do with git — a keystroke in the editor, a terminal going
+  // busy. A status object is replaced only when a read lands, so this ties the
+  // work to the thing that actually changed.
+  const badges = useMemo(() => badgesFor(status), [status]);
+  const changed = useMemo(() => changedRows(status), [status]);
+
+  // Which of the two the tree is showing (#40). View state, so it lives here
+  // rather than in TreeState: nothing the backend returns depends on it, and
+  // it survives a project switch the way a sidebar width does.
+  const [changedOnly, setChangedOnly] = useState(false);
+
+  const rows = changedOnly ? changed : visibleRows(tree.state);
   // Root failing to list is the one directory failure worth a dedicated
   // message: every other directory's error stays local to its own row
   // (RowView never renders — a failed subdirectory just contributes no
@@ -124,6 +139,7 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
   };
 
   const rendered = withCreatingRow(rows, creating);
+  const activation: Activation = { tree, onOpenFile, badges, changedOnly };
 
   return (
     <div className="tree">
@@ -135,6 +151,21 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
         <button type="button" aria-label="new folder" onClick={() => { startCreating(ROOT, true); }}>
           <UiIcon name="plus" />
           folder
+        </button>
+        <button
+          type="button"
+          className="tree__mode-toggle"
+          aria-pressed={changedOnly}
+          aria-label={changedOnly ? "show all files" : "show changed files only"}
+          title={changedOnly ? "Show all files" : "Show changed files only"}
+          onClick={() => {
+            setChangedOnly((only) => !only);
+            // The two lists are different lengths and different orders; a
+            // cursor carried across means landing on an unrelated row.
+            setCursor(0);
+          }}
+        >
+          <UiIcon name="filter" />
         </button>
         <button
           type="button"
@@ -150,9 +181,9 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
         ref={containerRef}
         className="tree__rows"
         role="tree"
-        aria-label="File tree"
+        aria-label={changedOnly ? "Changed files" : "File tree"}
         onKeyDown={(event) => {
-          handleKeyDown(event, { rows, cursor, setCursor, tree, onOpenFile });
+          handleKeyDown(event, { ...activation, rows, cursor, setCursor });
         }}
       >
         {rendered.map((item, index) =>
@@ -173,7 +204,7 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
               badge={badgeAt(badges, item.row.path, item.row.isDir)}
               focused={rowIndexOf(rendered, index) === cursor}
               selected={tree.state.selected === item.row.path}
-              expanded={tree.state.expanded.has(item.row.path)}
+              expanded={changedOnly || tree.state.expanded.has(item.row.path)}
               menuOpen={menuFor === item.row.path}
               renaming={renaming === item.row.path}
               deleting={deleting === item.row.path}
@@ -189,7 +220,7 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
                 if (i !== null) {
                   setCursor(i);
                 }
-                activate(item.row, tree, onOpenFile);
+                activate(item.row, activation);
               }}
               onMenu={() => { setMenuFor(item.row.path); }}
               onCloseMenu={() => { setMenuFor(null); }}
@@ -205,9 +236,7 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
           ),
         )}
         {rows.length === 0 && creating === null && (
-          <p className="tree__empty">
-            {rootError !== null ? rootError : "No files in this project."}
-          </p>
+          <p className="tree__empty">{emptyMessage(changedOnly, rootError)}</p>
         )}
       </div>
     </div>
@@ -249,15 +278,31 @@ function rowIndexOf(rendered: RenderItem[], renderedIndex: number): number | nul
   return rendered[renderedIndex].kind === "entry" ? rowIndex : null;
 }
 
-/** The context arrow-key navigation acts over — bundled so the handlers
- * below stay under the parameter-count budget the rest of the frontend
- * holds to. */
-interface NavContext {
+/** What a row's message is, when there are no rows to show. */
+function emptyMessage(changedOnly: boolean, rootError: string | null): string {
+  if (changedOnly) {
+    // Deliberately not "not a git repository" or "git is missing": those are
+    // facts about the project, and the status bar states them for every mode
+    // rather than only for the one that happens to be empty because of them.
+    return "Nothing has changed in this project.";
+  }
+  return rootError ?? "No files in this project.";
+}
+
+/** What activating a row acts on — bundled so the handlers below stay under
+ * the parameter-count budget the rest of the frontend holds to. */
+interface Activation {
+  readonly tree: FileTreeController;
+  readonly onOpenFile: (path: string) => void;
+  readonly badges: Badges;
+  readonly changedOnly: boolean;
+}
+
+/** The context arrow-key navigation acts over. */
+interface NavContext extends Activation {
   readonly rows: TreeRow[];
   readonly cursor: number;
   readonly setCursor: (value: number) => void;
-  readonly tree: FileTreeController;
-  readonly onOpenFile: (path: string) => void;
 }
 
 function handleKeyDown(event: React.KeyboardEvent, nav: NavContext): void {
@@ -284,7 +329,7 @@ function handleKeyDown(event: React.KeyboardEvent, nav: NavContext): void {
       break;
     case "Enter":
       event.preventDefault();
-      activate(row, nav.tree, nav.onOpenFile);
+      activate(row, nav);
       break;
     default:
       break;
@@ -295,7 +340,7 @@ function moveRight(row: TreeRow, nav: NavContext): void {
   if (!row.isDir) {
     return;
   }
-  if (nav.tree.state.expanded.has(row.path)) {
+  if (isOpen(row, nav)) {
     nav.setCursor(Math.min(nav.cursor + 1, nav.rows.length - 1));
   } else {
     nav.tree.expand(row.path);
@@ -303,7 +348,7 @@ function moveRight(row: TreeRow, nav: NavContext): void {
 }
 
 function moveLeft(row: TreeRow, nav: NavContext): void {
-  if (row.isDir && nav.tree.state.expanded.has(row.path)) {
+  if (row.isDir && isOpen(row, nav) && !nav.changedOnly) {
     nav.tree.collapse(row.path);
     return;
   }
@@ -314,228 +359,37 @@ function moveLeft(row: TreeRow, nav: NavContext): void {
   }
 }
 
-function activate(row: TreeRow, tree: FileTreeController, onOpenFile: (path: string) => void): void {
+/** Whether a directory row's children are on screen beneath it. Every
+ * directory in changed-only mode is: the mode's rows are built with their
+ * ancestors already in place, and none of them is behind a listing the tree
+ * may not have fetched. */
+function isOpen(row: TreeRow, ctx: Activation): boolean {
+  return ctx.changedOnly || ctx.tree.state.expanded.has(row.path);
+}
+
+function activate(row: TreeRow, ctx: Activation): void {
   if (row.isDir) {
-    if (tree.state.expanded.has(row.path)) {
-      tree.collapse(row.path);
-    } else {
-      tree.expand(row.path);
+    // A twisty in changed-only mode would hide changes from the mode whose
+    // whole job is to show them, so there is nothing to toggle there.
+    if (!ctx.changedOnly) {
+      toggleDir(row, ctx.tree);
     }
     return;
   }
-  tree.select(row.path);
-  onOpenFile(row.path);
-}
-
-interface RowViewProps {
-  readonly row: TreeRow;
-  /** Whether content said this row is a Kubernetes manifest (#38). */
-  readonly isManifest: boolean;
-  /** This row's git marker, or null when git reports nothing for it. */
-  readonly badge: string | null;
-  readonly focused: boolean;
-  readonly selected: boolean;
-  readonly expanded: boolean;
-  readonly menuOpen: boolean;
-  readonly renaming: boolean;
-  readonly deleting: boolean;
-  readonly error: string | null;
-  readonly rowRef: (el: HTMLDivElement | null) => void;
-  onActivate: () => void;
-  onMenu: () => void;
-  onCloseMenu: () => void;
-  onNewFile: () => void;
-  onNewFolder: () => void;
-  onStartRename: () => void;
-  onCommitRename: (name: string) => void;
-  onCancelRename: () => void;
-  onStartDelete: () => void;
-  onConfirmDelete: () => void;
-  onCancelDelete: () => void;
-}
-
-function RowView({
-  row,
-  isManifest,
-  badge,
-  focused,
-  selected,
-  expanded,
-  menuOpen,
-  renaming,
-  deleting,
-  error,
-  rowRef,
-  onActivate,
-  onMenu,
-  onCloseMenu,
-  onNewFile,
-  onNewFolder,
-  onStartRename,
-  onCommitRename,
-  onCancelRename,
-  onStartDelete,
-  onConfirmDelete,
-  onCancelDelete,
-}: RowViewProps) {
-  if (deleting) {
-    return (
-      <div
-        className="tree__row tree__row--confirm"
-        style={{ "--depth": row.depth } as CSSProperties}
-        // A native button activates on Enter, and that keydown would
-        // otherwise also bubble to the tree's own handler and activate
-        // whatever row the cursor is on — this row is not it.
-        onKeyDown={(event) => { event.stopPropagation(); }}
-      >
-        <span>Delete {row.name}?</span>
-        <button type="button" onClick={onConfirmDelete}>
-          Delete
-        </button>
-        <button type="button" onClick={onCancelDelete}>
-          Cancel
-        </button>
-        {error !== null && <span className="tree__inline-error">{error}</span>}
-      </div>
-    );
+  // A deleted path is a row about a file that is not on disk. Opening it
+  // would be a file-not-found from the backend dressed up as an editor tab.
+  if (badgeTone(badgeAt(ctx.badges, row.path, false)) === "deleted") {
+    return;
   }
+  ctx.tree.select(row.path);
+  ctx.onOpenFile(row.path);
+}
 
-  if (renaming) {
-    return (
-      <InlineField
-        depth={row.depth}
-        initial={row.name}
-        ariaLabel={`rename ${row.name}`}
-        error={error}
-        onCommit={onCommitRename}
-        onCancel={onCancelRename}
-      />
-    );
+function toggleDir(row: TreeRow, tree: FileTreeController): void {
+  if (tree.state.expanded.has(row.path)) {
+    tree.collapse(row.path);
+  } else {
+    tree.expand(row.path);
   }
-
-  return (
-    <div
-      ref={rowRef}
-      role="treeitem"
-      aria-selected={selected}
-      aria-expanded={row.isDir ? expanded : undefined}
-      aria-level={row.depth + 1}
-      tabIndex={focused ? 0 : -1}
-      className={`tree__row${selected ? " tree__row--selected" : ""}`}
-      style={{ "--depth": row.depth } as CSSProperties}
-      onClick={onActivate}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onMenu();
-      }}
-    >
-      <RowIcons row={row} expanded={expanded} isManifest={isManifest} />
-      <span className="tree__name">{row.name}</span>
-      {badge !== null && (
-        // data-badge rather than a modifier class: a badge can be `?` or `•`,
-        // neither of which is usable in a class-selector name.
-        <span className="tree__badge" data-badge={badge} title={badgeTitle(badge)}>
-          {badge}
-        </span>
-      )}
-      <button
-        type="button"
-        className="tree__menu-button"
-        aria-label={`actions for ${row.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onMenu();
-        }}
-      >
-        <UiIcon name="menu" />
-      </button>
-      {menuOpen && (
-        <RowMenu
-          isDir={row.isDir}
-          onClose={onCloseMenu}
-          onNewFile={onNewFile}
-          onNewFolder={onNewFolder}
-          onRename={onStartRename}
-          onDelete={onStartDelete}
-        />
-      )}
-    </div>
-  );
 }
 
-interface RowIconsProps {
-  readonly row: TreeRow;
-  readonly expanded: boolean;
-  /** Whether this row's content said it is a Kubernetes manifest (#38);
-   * false both for "read, and it is not" and for "not read yet". */
-  readonly isManifest: boolean;
-}
-
-/**
- * A row's leading pair (#38): the twisty and the file-type mark.
- *
- * The twisty belongs to a directory alone, but a file still reserves its
- * width — without the empty span every file's icon would sit one twisty to
- * the left of the folder icons above it, and the tree would read as if
- * files were outdented from their own directory.
- */
-function RowIcons({ row, expanded, isManifest }: RowIconsProps) {
-  return (
-    <>
-      <span className="tree__twisty" aria-hidden="true">
-        {row.isDir && <UiIcon name={expanded ? "chevron-down" : "chevron-right"} />}
-      </span>
-      <span className="tree__icon">
-        <FileIcon
-          kind={resolveIconKind(iconKind(row.path, row.isDir), isManifest)}
-          expanded={expanded}
-        />
-      </span>
-    </>
-  );
-}
-
-interface RowMenuProps {
-  readonly isDir: boolean;
-  onClose: () => void;
-  onNewFile: () => void;
-  onNewFolder: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-}
-
-/**
- * The context menu scaffold the issue asks for: the real actions this
- * ticket implements, plus one honest placeholder line rather than a list of
- * git/kube entries with no behavior behind them yet (#8, #10, DESIGN.md §6,
- * §7).
- */
-function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }: RowMenuProps) {
-  useEffect(() => {
-    const closeOnOutsideClick = () => { onClose(); };
-    window.addEventListener("click", closeOnOutsideClick);
-    return () => { window.removeEventListener("click", closeOnOutsideClick); };
-  }, [onClose]);
-
-  return (
-    <div className="tree__menu" role="menu" onClick={(event) => { event.stopPropagation(); }}>
-      {isDir && (
-        <>
-          <button type="button" role="menuitem" onClick={onNewFile}>
-            New File
-          </button>
-          <button type="button" role="menuitem" onClick={onNewFolder}>
-            New Folder
-          </button>
-        </>
-      )}
-      <button type="button" role="menuitem" onClick={onRename}>
-        Rename
-      </button>
-      <button type="button" role="menuitem" onClick={onDelete}>
-        Delete
-      </button>
-      <span className="tree__menu-note">Git and Kubernetes actions arrive in later tickets</span>
-    </div>
-  );
-}

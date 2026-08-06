@@ -250,7 +250,7 @@ both ways from the UI without an explicit switch.
 
 v1 scope mirrors actual daily use, not a git client:
 
-- Status-driven tree badges and a changes list per project.
+- Status-driven change markers in the file tree: every changed path tinted and badged where it lives, and a tree-header toggle that filters the tree down to just those paths (deletions included, struck through, since they are in no directory listing). There is no separate changes list — a second list of the same paths cost a fixed share of the sidebar to say what the tree already knew.
 - Pull (rebase per repo config), push, current branch + ahead/behind in the status bar.
 - Diff viewer for working-tree changes and for a file's last commit.
 - Branch switching (existing branches). Branch creation, log browsing, stash,
@@ -260,8 +260,13 @@ v1 scope mirrors actual daily use, not a git client:
 work, running the user's own `git` in the user's own worktree — so m6t offers no commit
 box and no stage/unstage control, and its bound surface has no method that writes the
 index. Two writers of one index, only one of which the agent can see, is two tools
-disagreeing about one repository. The changes list still groups staged and unstaged
-separately, because that is what `git status` reports whoever put the paths there.
+disagreeing about one repository. A row's badge reports the worktree side when a path
+carries both, because the row is the file on disk.
+
+**Conflicts are resolved in the terminal.** v1 ships no merge tool, so a conflicted path
+gets the conflict tint and marker in the tree, and the status bar says where to go about
+it — the one instruction that has to be visible whatever the sidebar is showing, because
+an unmerged path stops a pull and a branch switch.
 
 All operations run the system `git`; failures surface stderr verbatim (the user
 knows how to read git errors — do not translate them).

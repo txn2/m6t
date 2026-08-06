@@ -15,11 +15,12 @@ import {
 import {
   badgeAt,
   badgeTitle,
+  badgeTone,
   badgesFor,
   branchSummary,
   changedCount,
+  changedRows,
   fileBadge,
-  groupChanges,
 } from "./gitStatus";
 
 /** One changed path, defaulting every field the case under test is not
@@ -47,7 +48,9 @@ describe("a file's badge", () => {
   });
 
   // The tree row shows the file on disk, so the working tree's state is what
-  // it reports. The changes panel is where both halves are visible.
+  // it reports. Which half of a doubly-changed file the letter came from is
+  // the one thing a single row cannot say, and it is the badge's tooltip and
+  // the terminal below that say it.
   it("prefers the worktree side when a staged file was edited again", () => {
     expect(fileBadge(file("a.yaml", { staged: ADDED, worktree: MODIFIED }))).toBe("M");
   });
@@ -127,6 +130,23 @@ describe("the directory rollup", () => {
     expect(badges.files.size).toBe(0);
     expect(badges.dirs.size).toBe(0);
   });
+
+  // `git status` collapses a directory whose every file is untracked into one
+  // record with a trailing slash — `? build/`. Filed under that name the badge
+  // would be on nothing: the tree's row for it is `build`.
+  it("badges a wholly untracked directory on the row that exists", () => {
+    const badges = badgesFor(statusOf([file("build/", { worktree: UNTRACKED })]));
+
+    expect(badgeAt(badges, "build", true)).toBe("?");
+    expect(badges.files.has("build/")).toBe(false);
+  });
+
+  it("rolls a wholly untracked directory up to the directory above it", () => {
+    const badges = badgesFor(statusOf([file("a/build/", { worktree: UNTRACKED })]));
+
+    expect(badgeAt(badges, "a/build", true)).toBe("?");
+    expect(badgeAt(badges, "a", true)).toBe("•");
+  });
 });
 
 describe("badge titles", () => {
@@ -148,43 +168,130 @@ describe("badge titles", () => {
   });
 });
 
-describe("the changes panel's groups", () => {
-  it("puts a staged file in the staged group only", () => {
-    const groups = groupChanges(statusOf([file("a.yaml", { staged: ADDED })]));
-
-    expect(groups.staged.map((f) => f.path)).toEqual(["a.yaml"]);
-    expect(groups.unstaged).toEqual([]);
-  });
-
-  it("puts an unstaged file in the unstaged group only", () => {
-    const groups = groupChanges(statusOf([file("a.yaml", { worktree: MODIFIED })]));
-
-    expect(groups.staged).toEqual([]);
-    expect(groups.unstaged.map((f) => f.path)).toEqual(["a.yaml"]);
-  });
-
-  // The reason there are two groups rather than one list: staging a file and
-  // then editing it again is a state a single row could not express.
-  it("puts a file staged and then edited again in both", () => {
-    const groups = groupChanges(statusOf([file("a.yaml", { staged: ADDED, worktree: MODIFIED })]));
-
-    expect(groups.staged.map((f) => f.path)).toEqual(["a.yaml"]);
-    expect(groups.unstaged.map((f) => f.path)).toEqual(["a.yaml"]);
-  });
-
-  // A conflict has no staged half to show: what git holds is three competing
-  // versions, not an index entry the user chose.
-  it("groups a conflict with the unstaged work", () => {
-    const groups = groupChanges(statusOf([file("a.yaml", { conflicted: true })]));
-
-    expect(groups.staged).toEqual([]);
-    expect(groups.unstaged.map((f) => f.path)).toEqual(["a.yaml"]);
-  });
-
+describe("counting changes", () => {
   it("counts every reported path once", () => {
     expect(
       changedCount(statusOf([file("a.yaml", { staged: ADDED, worktree: MODIFIED }), file("b.yaml")])),
     ).toBe(2);
+  });
+});
+
+describe("badge tones (#40)", () => {
+  it.each([
+    ["M", "modified"],
+    ["R", "modified"],
+    ["C", "modified"],
+    ["A", "added"],
+    ["?", "added"],
+    ["D", "deleted"],
+    ["U", "conflicted"],
+    ["\u2022", "contains"],
+  ])("draws %s in the %s tone", (badge, want) => {
+    expect(badgeTone(badge)).toBe(want);
+  });
+
+  it("has no tone for a row git said nothing about", () => {
+    expect(badgeTone(null)).toBeNull();
+  });
+
+  it("has no tone for a badge it does not know", () => {
+    expect(badgeTone("Z")).toBeNull();
+  });
+});
+
+describe("the changed-only rows (#40)", () => {
+  /** What the mode renders, as "path@depth" pairs — the two facts a row
+   * carries that a name alone would not catch. */
+  function shape(status: Status): string[] {
+    return changedRows(status).map((row) => `${row.path}@${String(row.depth)}`);
+  }
+
+  it("puts a change under every ancestor directory it lives in", () => {
+    expect(shape(statusOf([file("a/b/one.yaml", { worktree: MODIFIED })]))).toEqual([
+      "a@0",
+      "a/b@1",
+      "a/b/one.yaml@2",
+    ]);
+  });
+
+  it("names each row by its own segment rather than its path", () => {
+    expect(changedRows(statusOf([file("a/b/one.yaml", { worktree: MODIFIED })])).map((r) => r.name))
+      .toEqual(["a", "b", "one.yaml"]);
+  });
+
+  it("gives every ancestor exactly one row, however many changes it holds", () => {
+    const status = statusOf([
+      file("a/one.yaml", { worktree: MODIFIED }),
+      file("a/two.yaml", { worktree: MODIFIED }),
+    ]);
+
+    expect(shape(status)).toEqual(["a@0", "a/one.yaml@1", "a/two.yaml@1"]);
+  });
+
+  // The same order internal/watch.sortEntries lists a real directory in, so
+  // switching modes does not reshuffle the paths that appear in both.
+  it("orders directories before files, then case-insensitively by name", () => {
+    const status = statusOf([
+      file("Zebra.yaml", { worktree: MODIFIED }),
+      file("apple.yaml", { worktree: MODIFIED }),
+      file("dir/inner.yaml", { worktree: MODIFIED }),
+    ]);
+
+    expect(shape(status)).toEqual([
+      "dir@0",
+      "dir/inner.yaml@1",
+      "apple.yaml@0",
+      "Zebra.yaml@0",
+    ]);
+  });
+
+  // A deleted file is in no directory listing, which is the whole reason this
+  // mode builds its rows from the status rather than filtering the tree.
+  it("includes a path that is no longer on disk", () => {
+    expect(shape(statusOf([file("gone.yaml", { staged: DELETED })]))).toEqual(["gone.yaml@0"]);
+  });
+
+  // The tree's hidden toggle answers "what is in here"; hiding a changed
+  // dotfile from the list of changes answers a question nobody asked.
+  it("does not hide dotfiles", () => {
+    expect(shape(statusOf([file(".github/workflows/ci.yml", { worktree: MODIFIED })]))).toEqual([
+      ".github@0",
+      ".github/workflows@1",
+      ".github/workflows/ci.yml@2",
+    ]);
+  });
+
+  // Its source is gone and its destination is here; two rows would read as
+  // two changes where git reported one.
+  it("shows a rename once, at its destination", () => {
+    expect(shape(statusOf([file("new/a.yaml", { staged: RENAMED, origPath: "old/a.yaml" })])))
+      .toEqual(["new@0", "new/a.yaml@1"]);
+  });
+
+  // A submodule is a directory on disk and one entry to git. One row, and it
+  // is the directory — `badgeAt` is what puts git's own badge on it.
+  it("gives a path that is both a directory and an entry a single row", () => {
+    const status = statusOf([
+      file("sub", { staged: ADDED }),
+      file("sub/inner.yaml", { worktree: MODIFIED }),
+    ]);
+
+    expect(shape(status)).toEqual(["sub@0", "sub/inner.yaml@1"]);
+  });
+
+  it("has nothing to show for a clean repository", () => {
+    expect(changedRows(emptyStatus())).toEqual([]);
+  });
+
+  // One record for the whole directory (`? build/`), so one row — and it is a
+  // directory row, not a nameless file row under a directory of the same
+  // name, which is what the trailing slash produces if it is taken literally.
+  it("shows a wholly untracked directory as one directory row", () => {
+    const rows = changedRows(statusOf([file("a/build/", { worktree: UNTRACKED })]));
+
+    expect(rows.map((r) => `${r.path}@${String(r.depth)}`)).toEqual(["a@0", "a/build@1"]);
+    expect(rows.map((r) => r.name)).toEqual(["a", "build"]);
+    expect(rows.every((r) => r.isDir)).toBe(true);
   });
 });
 
@@ -233,5 +340,33 @@ describe("the status bar's branch line", () => {
 
   it("reports a normal status for the available state", () => {
     expect(branchSummary({ ...emptyStatus(), availability: AVAILABLE })).toContain("⎇");
+  });
+
+  // v1 ships no merge tool (DESIGN.md §7). The instruction used to sit above
+  // the changes panel's conflict group; with the panel gone (#40) it belongs
+  // where it is visible whatever the tree is showing.
+  it("says where to resolve a conflict", () => {
+    const status = statusOf(
+      [file("a.yaml", { conflicted: true }), file("b.yaml", { worktree: MODIFIED })],
+      { name: "main" },
+    );
+
+    expect(branchSummary(status)).toBe(
+      "⎇ main · 2 changed · 1 conflicted — resolve in the terminal",
+    );
+  });
+
+  it("counts every unmerged path", () => {
+    const status = statusOf(
+      [file("a.yaml", { conflicted: true }), file("b.yaml", { conflicted: true })],
+      { name: "main" },
+    );
+
+    expect(branchSummary(status)).toContain("2 conflicted");
+  });
+
+  it("says nothing about conflicts when there are none", () => {
+    expect(branchSummary(statusOf([file("a.yaml", { worktree: MODIFIED })], { name: "main" })))
+      .not.toContain("conflicted");
   });
 });

@@ -9,11 +9,14 @@ import {
   RENAMED,
   UNTRACKED,
 } from "./git";
-import { parentPath } from "./tree";
+import { conflictedFiles } from "./gitOps";
+import type { TreeEntry, TreeRow } from "./tree";
+import { ROOT, baseName, parentPath } from "./tree";
 
 /**
- * Turning a git status into what the workbench draws (DESIGN.md §5): a badge
- * per tree row, the changes panel's two groups, and the status bar's line.
+ * Turning a git status into what the workbench draws (DESIGN.md §5): the
+ * marker and the tint on every tree row, the rows the changed-only mode
+ * renders, and the status bar's line.
  *
  * Everything here is pure — `useGitStatus` owns the fetching, this owns the
  * shape of what it fetched — the same split `lib/tree.ts` and `useFileTree`
@@ -77,8 +80,8 @@ export function badgesFor(status: Status): Badges {
   const dirs = new Map<string, DirBadge>();
 
   for (const file of status.files) {
-    files.set(file.path, fileBadge(file));
-    markAncestors(dirs, file.path, file.conflicted);
+    files.set(pathOf(file), fileBadge(file));
+    markAncestors(dirs, pathOf(file), file.conflicted);
     // A rename's source is gone from where it used to be, so its old
     // directory has a change in it too — otherwise moving a file out of a
     // collapsed directory leaves that directory looking untouched.
@@ -88,6 +91,24 @@ export function badgesFor(status: Status): Badges {
   }
 
   return { files, dirs };
+}
+
+/**
+ * The path a status record names, as the tree spells it.
+ *
+ * `git status` collapses a directory whose every file is untracked into one
+ * record for the directory, with a trailing slash: `? build/`, not one record
+ * per file inside it. The slash is git saying "the whole directory", not part
+ * of the name — and the tree's row for that directory is `build`, so a badge
+ * filed under `build/` would be a badge on nothing.
+ */
+function pathOf(file: FileStatus): string {
+  return file.path.endsWith("/") ? file.path.slice(0, -1) : file.path;
+}
+
+/** Whether a status record is one of those whole-directory entries. */
+function isDirEntry(file: FileStatus): boolean {
+  return file.path.endsWith("/");
 }
 
 /** Marks every directory above path as containing a change, escalating to a
@@ -129,26 +150,135 @@ export function badgeTitle(badge: string): string {
   return BADGE_TITLES[badge] ?? badge;
 }
 
-/** The changes panel's two groups (DESIGN.md §7). */
-export interface ChangeGroups {
-  readonly staged: readonly FileStatus[];
-  readonly unstaged: readonly FileStatus[];
+/**
+ * The colour a row's name is drawn in (#40).
+ *
+ * Colour is the primary signal in the tree the way it is in JetBrains' —
+ * green for what git has never seen, blue for what has moved away from HEAD,
+ * red for what stops a merge — and the letter badge stays beside it as the
+ * signal that survives a colour-blind palette and a screen reader. A tone is
+ * a name rather than a colour: `style.css` owns which token each one draws
+ * in, in both themes.
+ */
+export type Tone = "added" | "modified" | "deleted" | "conflicted" | "contains";
+
+/**
+ * Which tone each badge takes.
+ *
+ * Untracked shares the added tone deliberately: to a user reading the tree,
+ * `?` and `A` are the same fact — this file is new — and the difference
+ * between them is whether someone has run `git add`, which the badge already
+ * says. Renames and copies share the modified tone for the same reason: the
+ * path has changed relative to HEAD.
+ */
+const BADGE_TONES: Readonly<Record<string, Tone>> = {
+  A: "added",
+  "?": "added",
+  M: "modified",
+  R: "modified",
+  C: "modified",
+  D: "deleted",
+  U: "conflicted",
+  "•": "contains",
+};
+
+/** The tone a badge draws in, or null when there is no badge to draw. */
+export function badgeTone(badge: string | null): Tone | null {
+  return badge === null ? null : BADGE_TONES[badge] ?? null;
 }
 
 /**
- * Splits a status into staged and unstaged.
+ * The rows the changed-only mode renders (#40): every path git reports, under
+ * the ancestor directories that hold them.
  *
- * A path can appear in both, and that is the point of showing two groups
- * rather than one list: staging a file and then editing it again is a state
- * git tracks and a single row could not express. Conflicts group with
- * unstaged — an unmerged path is work still to do, and it has no staged half
- * to show.
+ * Built from the status rather than filtered out of the loaded tree, which is
+ * what makes the mode answer the question it is for. A deleted file is not on
+ * disk and so is in no directory listing; a change three directories deep is
+ * invisible until each of those directories has been expanded and fetched.
+ * Both appear here the moment git reports them, with every ancestor already
+ * in place — there is nothing to expand, so nothing to auto-expand.
+ *
+ * Dotfiles are not filtered. The tree's hidden toggle answers "what is in
+ * here", and hiding a changed `.github/workflows/ci.yml` from the mode built
+ * to list changes would be answering a different question than the one asked.
+ *
+ * A rename contributes its destination only. Its source is gone, and a second
+ * struck-through row for the same file would read as two changes where git
+ * reported one — the `R` badge and its tooltip are where the move is said.
+ *
+ * A wholly untracked directory is one row for the directory, because that is
+ * how git reports it (see `pathOf`) — expanding it in the full tree is how to
+ * see what is inside.
  */
-export function groupChanges(status: Status): ChangeGroups {
-  return {
-    staged: status.files.filter((f) => !f.conflicted && f.staged !== ""),
-    unstaged: status.files.filter((f) => f.conflicted || f.worktree !== ""),
-  };
+export function changedRows(status: Status): TreeRow[] {
+  const children = new Map<string, TreeEntry[]>();
+  const placed = new Set<string>();
+  // Ancestors first, all of them, so that a path git reports which is also
+  // some other path's parent — a submodule — is one directory row carrying
+  // git's own badge, rather than a file row with orphaned descendants.
+  for (const file of status.files) {
+    for (const dir of ancestorsOf(pathOf(file))) {
+      place(children, placed, { name: baseName(dir), isDir: true, path: dir });
+    }
+  }
+  for (const file of status.files) {
+    const path = pathOf(file);
+    place(children, placed, { name: baseName(path), isDir: isDirEntry(file), path });
+  }
+  return flatten(children, ROOT, 0);
+}
+
+/** Every directory above a path, innermost first. */
+function ancestorsOf(path: string): string[] {
+  const dirs: string[] = [];
+  for (let dir = parentPath(path); dir !== ROOT; dir = parentPath(dir)) {
+    dirs.push(dir);
+  }
+  return dirs;
+}
+
+/** Files an entry under its parent, unless that path is already filed. */
+function place(
+  children: Map<string, TreeEntry[]>,
+  placed: Set<string>,
+  entry: TreeEntry,
+): void {
+  if (placed.has(entry.path)) {
+    return;
+  }
+  placed.add(entry.path);
+  const siblings = children.get(parentPath(entry.path));
+  if (siblings === undefined) {
+    children.set(parentPath(entry.path), [entry]);
+  } else {
+    siblings.push(entry);
+  }
+}
+
+/** One directory's entries and everything under them, depth-first. */
+function flatten(children: Map<string, TreeEntry[]>, dir: string, depth: number): TreeRow[] {
+  const rows: TreeRow[] = [];
+  for (const entry of [...(children.get(dir) ?? [])].sort(byTreeOrder)) {
+    rows.push({ ...entry, depth });
+    if (entry.isDir) {
+      rows.push(...flatten(children, entry.path, depth + 1));
+    }
+  }
+  return rows;
+}
+
+/** Directories before files, then case-insensitively by name — the order
+ * `internal/watch.sortEntries` lists a real directory in, so switching modes
+ * does not reshuffle the paths that appear in both. */
+function byTreeOrder(a: TreeEntry, b: TreeEntry): number {
+  if (a.isDir !== b.isDir) {
+    return a.isDir ? -1 : 1;
+  }
+  const [x, y] = [a.name.toLowerCase(), b.name.toLowerCase()];
+  if (x < y) {
+    return -1;
+  }
+  return x > y ? 1 : 0;
 }
 
 /** How many paths the status bar reports as changed. */
@@ -162,6 +292,13 @@ export function changedCount(status: Status): number {
  * Ahead/behind counts are omitted when the branch tracks nothing: git reports
  * no counts without an upstream, so printing `↑0 ↓0` there would be inventing
  * a comparison rather than reporting one.
+ *
+ * Conflicts get the tail of the line and the instruction that goes with them
+ * (#40). v1 ships no merge tool (DESIGN.md §7) and the terminal below is a
+ * real shell in this repository, so the honest thing to show is where to go.
+ * It is here rather than beside the conflicted rows because a conflict stops
+ * a pull and a branch switch whether or not the tree is showing that file —
+ * and this line is on screen either way.
  */
 export function branchSummary(status: Status): string {
   if (status.availability === NO_GIT) {
@@ -175,7 +312,13 @@ export function branchSummary(status: Status): string {
   if (status.branch.upstream !== "") {
     parts.push(`↑${String(status.branch.ahead)} ↓${String(status.branch.behind)}`);
   }
-  return `${parts.join(" ")} · ${changesLabel(changedCount(status))}`;
+
+  const line = `${parts.join(" ")} · ${changesLabel(changedCount(status))}`;
+  const conflicts = conflictedFiles(status).length;
+  if (conflicts === 0) {
+    return line;
+  }
+  return `${line} · ${String(conflicts)} conflicted — resolve in the terminal`;
 }
 
 /** What the branch is called, for a status bar that has to say something even
