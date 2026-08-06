@@ -140,6 +140,38 @@ export function basename(path: string): string {
   return index < 0 ? path : path.slice(index + 1);
 }
 
+/**
+ * The separator a project's own paths are written with.
+ *
+ * `path` is slash-separated everywhere inside the app — this package's
+ * convention, and `tree.ts`'s — but `root` is whatever the OS handed the
+ * registry, which on Windows is backslashes (DESIGN.md §1 targets it). A path
+ * the user copies is on its way into a shell or a file dialog, so it goes out
+ * in the platform's form rather than in the one only m6t uses.
+ */
+function separator(root: string): string {
+  return root.includes("\\") && !root.includes("/") ? "\\" : "/";
+}
+
+/** A tab's path relative to its project root, for the clipboard (#42). */
+export function relativePath(tab: EditorTab): string {
+  const sep = separator(tab.root);
+  return sep === "/" ? tab.path : tab.path.split("/").join(sep);
+}
+
+/**
+ * A tab's absolute path, for the clipboard (#42).
+ *
+ * The root's trailing separator is dropped before joining, so a project opened
+ * at a filesystem root — `/`, or `C:\` — produces one separator rather than
+ * two.
+ */
+export function absolutePath(tab: EditorTab): string {
+  const sep = separator(tab.root);
+  const root = tab.root.replace(/[/\\]+$/, "");
+  return `${root}${sep}${relativePath(tab)}`;
+}
+
 /** Creates a tab that has not yet asked the backend for its content. */
 export function newTab(
   key: string,

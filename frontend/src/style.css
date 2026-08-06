@@ -314,7 +314,11 @@ body {
    edges, Escape, click-outside, focus return and arrow-key navigation are all
    its. What is left here is the look, and the z-index that puts it over the
    workbench. */
-.projects__menu {
+/* One surface for both strips' context menus: the project tabs' (#41) and the
+   editor tabs' (#42). Grouped rather than copied — two menus a click apart
+   that drifted into two designs would read as two different applications. */
+.projects__menu,
+.tabs__menu {
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -326,7 +330,8 @@ body {
   box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
 }
 
-.projects__menu-item {
+.projects__menu-item,
+.tabs__menu-item {
   padding: var(--m6t-space-1) var(--m6t-space-3);
   border-radius: var(--m6t-radius);
   color: var(--m6t-fg);
@@ -337,8 +342,17 @@ body {
 /* One state, not two: Radix marks the item under the pointer AND the one the
    arrow keys are on with data-highlighted, so the keyboard and the mouse show
    the same thing. */
-.projects__menu-item[data-highlighted] {
+.projects__menu-item[data-highlighted],
+.tabs__menu-item[data-highlighted] {
   background: var(--m6t-panel-alt);
+}
+
+/* The line between the closes and the copies: two groups of items that do
+   unrelated things to the same tab. */
+.tabs__menu-rule {
+  height: 1px;
+  margin: var(--m6t-space-1) 0;
+  background: var(--m6t-border);
 }
 
 .projects__swatches {
@@ -641,13 +655,6 @@ body {
 
 .tree__menu button:hover {
   background: var(--m6t-panel-alt);
-}
-
-.tree__menu-note {
-  padding: var(--m6t-space-1) var(--m6t-space-3);
-  color: var(--m6t-muted);
-  font-size: var(--m6t-font-size-sm);
-  white-space: normal;
 }
 
 .tree__inline-field {

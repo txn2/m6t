@@ -284,14 +284,24 @@ describe("creating an entry", () => {
 });
 
 describe("the row context menu", () => {
-  it("opens on right-click and offers the real actions plus the deferred-scope note", () => {
+  it("opens on right-click and offers the actions that work", () => {
     renderTree({ tree: fakeController(loadedRoot()) });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
 
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeDefined();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDefined();
-    expect(screen.getByText(/Git and Kubernetes actions arrive in later tickets/)).toBeDefined();
+  });
+
+  // A menu does not advertise what a later ticket will add. Work announces
+  // itself by working, and a note about what is missing is something the user
+  // has to read past on every open.
+  it("says nothing about scope it does not have yet", () => {
+    renderTree({ tree: fakeController(loadedRoot()) });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
+
+    expect(screen.queryByText(/later ticket|coming soon|not yet/i)).toBeNull();
   });
 
   it("only offers New File/New Folder for a directory", () => {

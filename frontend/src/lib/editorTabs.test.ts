@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditorTab } from "./editorTabs";
 import {
+  absolutePath,
   basename,
   canSave,
   findTabKey,
@@ -11,6 +12,7 @@ import {
   newTab,
   patchTab,
   readOnlyNotice,
+  relativePath,
   removeTab,
   resolveKeepMine,
   resolveTakeDisk,
@@ -349,5 +351,47 @@ describe("the strip", () => {
 
   it("selects nothing when the last tab closes", () => {
     expect(selectionAfterClose(strip("a"), "k0", "k0")).toBeNull();
+  });
+});
+
+describe("the paths a tab can copy (#42)", () => {
+  /** A tab for `path` under `root`. */
+  const at = (root: string, path: string): EditorTab =>
+    newTab("k0", "infra", root, path, "yaml");
+
+  it("joins the root and the path for the absolute one", () => {
+    expect(absolutePath(at("/w/infra", "base/deploy.yaml"))).toBe(
+      "/w/infra/base/deploy.yaml",
+    );
+  });
+
+  it("gives the path as stored for the relative one", () => {
+    expect(relativePath(at("/w/infra", "base/deploy.yaml"))).toBe("base/deploy.yaml");
+  });
+
+  // A project opened at a filesystem root would otherwise produce "//deploy".
+  it("does not double the separator on a root that ends in one", () => {
+    expect(absolutePath(at("/", "deploy.yaml"))).toBe("/deploy.yaml");
+    expect(absolutePath(at("/w/infra/", "deploy.yaml"))).toBe("/w/infra/deploy.yaml");
+  });
+
+  // Paths are slash-separated inside the app, but a copied path is on its way
+  // into a shell or a file dialog on the platform the root came from.
+  it("writes a Windows root's paths with Windows separators", () => {
+    expect(absolutePath(at("C:\\work\\infra", "base/deploy.yaml"))).toBe(
+      "C:\\work\\infra\\base\\deploy.yaml",
+    );
+    expect(relativePath(at("C:\\work\\infra", "base/deploy.yaml"))).toBe(
+      "base\\deploy.yaml",
+    );
+    expect(absolutePath(at("C:\\", "deploy.yaml"))).toBe("C:\\deploy.yaml");
+  });
+
+  // A root the user typed with forward slashes on Windows is still a path
+  // whose own separator is the one it already uses.
+  it("keeps a forward-slash root on forward slashes", () => {
+    expect(absolutePath(at("C:/work/infra", "deploy.yaml"))).toBe(
+      "C:/work/infra/deploy.yaml",
+    );
   });
 });
