@@ -43,12 +43,28 @@ export interface TreeState {
   readonly expanded: ReadonlySet<string>;
   readonly selected: string | null;
   readonly showHidden: boolean;
+  /**
+   * Every plain-YAML path whose content has been read, mapped to whether it
+   * turned out to be a Kubernetes manifest (#38).
+   *
+   * A map rather than a set of the positives, because the two answers it
+   * distinguishes are "read, and it is not a manifest" and "not read yet",
+   * and only the second is worth another round trip. Absence is what makes
+   * the classification happen once per file for the life of the tree.
+   */
+  readonly manifests: ReadonlyMap<string, boolean>;
 }
 
 /** A tree with nothing loaded yet, root pre-expanded — the top level of any
  * file tree is always visible, not behind a click. */
 export function initialTree(): TreeState {
-  return { dirs: {}, expanded: new Set([ROOT]), selected: null, showHidden: false };
+  return {
+    dirs: {},
+    expanded: new Set([ROOT]),
+    selected: null,
+    showHidden: false,
+    manifests: new Map(),
+  };
 }
 
 /** Joins a child name onto a directory path in this package's convention. */
@@ -62,21 +78,181 @@ export function parentPath(path: string): string {
   return index < 0 ? ROOT : path.slice(0, index);
 }
 
-/** File-type icon bucket, by extension — DESIGN.md §5's yaml/md/other. */
-export type IconKind = "dir" | "yaml" | "md" | "file";
+/** The last path segment — a file's own name. */
+export function baseName(path: string): string {
+  const index = path.lastIndexOf("/");
+  return index < 0 ? path : path.slice(index + 1);
+}
 
-export function iconKind(entry: Pick<Entry, "name" | "isDir">): IconKind {
-  if (entry.isDir) {
+/**
+ * File-type icon bucket (issue #38). One row's bucket, not one row's picture:
+ * `components/Icon.tsx` owns which artwork each bucket maps to, so the tree,
+ * the editor tab strip and the changes rows can all classify with this and
+ * still render the same icon.
+ */
+export type IconKind =
+  | "dir"
+  | "kubernetes"
+  | "helm"
+  | "kustomize"
+  | "actions"
+  | "yaml"
+  | "md"
+  | "go"
+  | "ts"
+  | "tsx"
+  | "js"
+  | "json"
+  | "shell"
+  | "toml"
+  | "docker"
+  | "make"
+  | "file";
+
+/**
+ * Buckets an exact (lowercased) file name settles on its own.
+ *
+ * A Map rather than an object literal, and not as a style preference: an
+ * object literal inherits from `Object.prototype`, so a file named
+ * `constructor` or `toString` would look up as "present" and hand back a
+ * function where an `IconKind` was promised — which TypeScript cannot catch,
+ * because the index signature says the value is an `IconKind`. `Map.get`
+ * answers about the entries only.
+ */
+const BY_NAME: ReadonlyMap<string, IconKind> = new Map([
+  ["dockerfile", "docker"],
+  ["containerfile", "docker"],
+  ["makefile", "make"],
+  ["gnumakefile", "make"],
+  ["chart.yaml", "helm"],
+  ["chart.lock", "helm"],
+  ["kustomization.yaml", "kustomize"],
+  ["kustomization.yml", "kustomize"],
+] satisfies [string, IconKind][]);
+
+/** Buckets an extension settles on its own — every YAML suffix is absent
+ * here deliberately, because YAML needs the path to disambiguate. */
+const BY_EXTENSION: ReadonlyMap<string, IconKind> = new Map([
+  [".md", "md"],
+  [".markdown", "md"],
+  [".go", "go"],
+  [".ts", "ts"],
+  [".mts", "ts"],
+  [".cts", "ts"],
+  [".tsx", "tsx"],
+  [".js", "js"],
+  [".mjs", "js"],
+  [".cjs", "js"],
+  [".jsx", "js"],
+  [".json", "json"],
+  [".sh", "shell"],
+  [".bash", "shell"],
+  [".zsh", "shell"],
+  [".toml", "toml"],
+  [".dockerfile", "docker"],
+  [".mk", "make"],
+] satisfies [string, IconKind][]);
+
+/**
+ * The icon bucket a root-relative path has from its name alone.
+ *
+ * This never returns "kubernetes". A name cannot tell a manifest from any
+ * other YAML — only `apiVersion:` and `kind:` in the content can, which is
+ * what `looksLikeManifest` reads and `resolveIconKind` applies. Everything
+ * here is synchronous and free, so every YAML file has an icon the instant
+ * its row appears; the ones that turn out to be manifests upgrade when their
+ * heads arrive.
+ */
+export function iconKind(path: string, isDir: boolean): IconKind {
+  if (isDir) {
     return "dir";
   }
-  const lower = entry.name.toLowerCase();
-  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
-    return "yaml";
+  const name = baseName(path).toLowerCase();
+  const byName = BY_NAME.get(name);
+  if (byName !== undefined) {
+    return byName;
   }
-  if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
-    return "md";
+  const extension = extensionOf(name);
+  if (extension === ".yaml" || extension === ".yml") {
+    return yamlKind(path, name);
   }
-  return "file";
+  return BY_EXTENSION.get(extension) ?? "file";
+}
+
+/** A file name's suffix including the dot, or "" when it has none. A leading
+ * dot does not start an extension: `.gitignore` is a dotfile, not a file of
+ * type "gitignore", while `.golangci.yml` is still YAML. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot);
+}
+
+/**
+ * Which of the YAML dialects a `.yaml`/`.yml` file is, from its path.
+ *
+ * Only the two a path genuinely settles: a workflow lives at one known
+ * location, and a chart's values and templates are named by Helm itself.
+ * Everything else is plain YAML until its content says otherwise — a
+ * `docker-compose.yaml` and a Deployment are indistinguishable by name, and
+ * guessing from the directory above them dresses one of the two up as
+ * something it is not.
+ */
+function yamlKind(path: string, name: string): IconKind {
+  const dirs = parentPath(path).split("/").filter((segment) => segment !== "");
+  if (dirs[0] === ".github" && dirs[1] === "workflows") {
+    return "actions";
+  }
+  if (name.startsWith("values") || dirs.includes("templates")) {
+    return "helm";
+  }
+  return "yaml";
+}
+
+/**
+ * Whether a file's head says it is a Kubernetes manifest.
+ *
+ * The rule the API server itself applies: every object has an `apiVersion`
+ * and a `kind`, both at the top level. Both are required — a chart's
+ * `values.yaml` can carry a `kind:` of its own, and a bare `apiVersion:`
+ * with nothing under it is not an object.
+ *
+ * A column-0 match is what makes "top level" checkable without a YAML
+ * parser: nested mappings are indented, and a `kind:` under `spec:` or
+ * inside a list item never starts a line. Multi-document files match on any
+ * document, so a file opening with a comment block or a `---` still
+ * classifies.
+ *
+ * `head` is a prefix (watch.ReadPrefixes), so this can only be wrong in one
+ * direction: a manifest whose apiVersion and kind both sit past the cut
+ * keeps the plain YAML icon. That is the safe direction — the icon
+ * understates rather than lies.
+ */
+export function looksLikeManifest(head: string): boolean {
+  let apiVersion = false;
+  let kind = false;
+  // A UTF-8 BOM would sit in front of the first key and defeat the column-0
+  // match on the one line most likely to carry it.
+  for (const line of head.replace(/^\ufeff/, "").split("\n")) {
+    apiVersion ||= /^apiVersion:\s*\S/.test(line);
+    kind ||= /^kind:\s*\S/.test(line);
+    if (apiVersion && kind) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The icon a row actually shows: its name-derived bucket, upgraded to the
+ * Kubernetes wheel once the content has been read and said so.
+ *
+ * Only plain YAML is upgradeable. A chart's rendered `templates/` are
+ * genuine manifests and would pass the content test, but Helm is the more
+ * useful thing to say about them — a path rule that fired is a stronger
+ * statement than the content test, not a weaker one it can overrule.
+ */
+export function resolveIconKind(kind: IconKind, isManifest: boolean): IconKind {
+  return kind === "yaml" && isManifest ? "kubernetes" : kind;
 }
 
 /** Whether an entry is a dotfile — hidden unless the tree's toggle is on. */
@@ -115,6 +291,40 @@ export function withError(state: TreeState, dir: string, message: string): TreeS
 
 function withDir(state: TreeState, dir: string, next: DirState): TreeState {
   return { ...state, dirs: { ...state.dirs, [dir]: next } };
+}
+
+/**
+ * Records what a batch of file heads said (`looksLikeManifest`).
+ *
+ * Every path asked about is recorded, including the ones that came back
+ * without a head at all — a directory, a deleted file, a binary. Recording
+ * "not a manifest" for those is what stops the tree asking again on every
+ * listing refresh for a file that will never answer.
+ */
+export function withManifests(state: TreeState, heads: Readonly<Record<string, string>>, asked: readonly string[]): TreeState {
+  const manifests = new Map(state.manifests);
+  for (const path of asked) {
+    manifests.set(path, looksLikeManifest(heads[path] ?? ""));
+  }
+  return { ...state, manifests };
+}
+
+/**
+ * The plain-YAML paths in one directory listing: the files whose icon
+ * depends on content rather than name.
+ *
+ * Taken from the listing rather than from state, and without excluding what
+ * has already been classified, because a listing arrives on expand *and*
+ * every time the watcher says the directory changed — and a file edited into
+ * a manifest, or out of one, is exactly the case a cache keyed on path
+ * alone would keep showing the old answer for. The cost is one bounded read
+ * per YAML file in the directories actually open.
+ */
+export function yamlPaths(dir: string, entries: readonly Entry[]): string[] {
+  return entries
+    .filter((entry) => !entry.isDir)
+    .map((entry) => joinPath(dir, entry.name))
+    .filter((path) => iconKind(path, false) === "yaml");
 }
 
 /** Expands a directory, so its children render once loaded. */

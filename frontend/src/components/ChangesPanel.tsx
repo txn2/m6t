@@ -2,6 +2,8 @@ import type { FileStatus, Status } from "../lib/git";
 import { NOT_A_REPOSITORY, NO_GIT } from "../lib/git";
 import { fileBadge, groupChanges } from "../lib/gitStatus";
 import { conflictedFiles, pathsOf, pathsOfAll } from "../lib/gitOps";
+import { iconKind } from "../lib/tree";
+import { FileIcon } from "./Icon";
 
 /** What a row's action button does, which is the only thing that differs
  * between the two groups. */
@@ -226,6 +228,9 @@ function FileButton({
           not usable in a class-selector name. */}
       <span className="changes__badge" data-badge={fileBadge(file)} aria-hidden="true">
         {fileBadge(file)}
+      </span>
+      <span className="changes__icon">
+        <FileIcon kind={iconKind(file.path, false)} />
       </span>
       <span className="changes__path">{file.path}</span>
       {file.origPath !== "" && <span className="changes__origin">← {file.origPath}</span>}

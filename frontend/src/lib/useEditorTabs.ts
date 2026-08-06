@@ -124,7 +124,7 @@ export function useEditorTabs(
 
       keys.current += 1;
       const key = `editor-${String(keys.current)}`;
-      const kind = kindFromIcon(iconKind({ name: path, isDir: false }));
+      const kind = kindFromIcon(iconKind(path, false));
       setTabs((current) => [...current, newTab(key, project, root, path, kind)]);
       setActiveByProject((current) => ({ ...current, [project]: key }));
       load(key, root, path);

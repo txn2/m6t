@@ -61,8 +61,8 @@ describe("the terminal tab strip", () => {
   it("opens a shell and a Claude Code tab from separate actions", () => {
     const props = renderStrip({});
 
-    fireEvent.click(screen.getByRole("button", { name: "+ shell" }));
-    fireEvent.click(screen.getByRole("button", { name: "+ Claude Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "new shell" }));
+    fireEvent.click(screen.getByRole("button", { name: "new Claude Code session" }));
 
     expect(props.onCreate).toHaveBeenCalledTimes(1);
     expect(props.onCreateClaude).toHaveBeenCalledTimes(1);

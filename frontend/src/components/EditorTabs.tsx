@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { EditorTab } from "../lib/editorTabs";
 import { canSave, isDirty } from "../lib/editorTabs";
+import { iconKind, looksLikeManifest, resolveIconKind } from "../lib/tree";
+import { FileIcon, UiIcon } from "./Icon";
 
 /**
  * The editor tab strip: one tab per open file (DESIGN.md §5).
@@ -105,11 +107,19 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
           onSelect(tab.key);
         }}
       >
-        <span className={`tab__icon tab__icon--${tab.kind}`} aria-hidden="true" />
+        <span className="tab__icon">
+          {/* The tab already holds the file, so the same content rule the
+              tree runs against a 2 KiB head (#38) runs here for free —
+              which is what keeps a manifest's tab and its tree row from
+              disagreeing about what it is. */}
+          <FileIcon
+            kind={resolveIconKind(iconKind(tab.path, false), looksLikeManifest(tab.content))}
+          />
+        </span>
         {tab.title}
         {dirty && (
           <span className="tab__dirty" aria-label="unsaved changes">
-            ●
+            <UiIcon name="dirty" />
           </span>
         )}
       </button>
@@ -126,7 +136,7 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
             onPreview(tab.key, tab.mode !== "preview");
           }}
         >
-          {tab.mode === "preview" ? "✎" : "◉"}
+          <UiIcon name={tab.mode === "preview" ? "edit" : "preview"} />
         </button>
       )}
 
@@ -136,7 +146,7 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
         aria-label={`close ${tab.title}`}
         onClick={onRequestClose}
       >
-        ✕
+        <UiIcon name="close" />
       </button>
     </div>
   );

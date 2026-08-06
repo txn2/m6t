@@ -70,6 +70,10 @@ export function ReadFile(arg1, arg2) {
   return window['go']['app']['App']['ReadFile'](arg1, arg2);
 }
 
+export function ReadPrefixes(arg1, arg2) {
+  return window['go']['app']['App']['ReadPrefixes'](arg1, arg2);
+}
+
 export function RemoveProject(arg1) {
   return window['go']['app']['App']['RemoveProject'](arg1);
 }

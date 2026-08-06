@@ -348,9 +348,9 @@ describe("opening and closing terminal tabs", () => {
   it("numbers each kind of tab separately", async () => {
     await renderWith(["infra"]);
 
-    open("+ shell");
-    open("+ shell");
-    open("+ Claude Code");
+    open("new shell");
+    open("new shell");
+    open("new Claude Code session");
 
     expect(screen.getByRole("tab", { name: /shell 1/ })).toBeDefined();
     expect(screen.getByRole("tab", { name: /shell 2/ })).toBeDefined();
@@ -360,8 +360,8 @@ describe("opening and closing terminal tabs", () => {
   it("selects a newly opened tab", async () => {
     await renderWith(["infra"]);
 
-    open("+ shell");
-    open("+ shell");
+    open("new shell");
+    open("new shell");
 
     expect(
       screen.getByRole("tab", { name: /shell 2/ }).getAttribute("aria-selected"),
@@ -374,8 +374,8 @@ describe("opening and closing terminal tabs", () => {
   it("moves the selection to a neighbour when the active tab closes", async () => {
     await renderWith(["infra"]);
 
-    open("+ shell");
-    open("+ shell");
+    open("new shell");
+    open("new shell");
     fireEvent.click(screen.getByRole("button", { name: "close shell 2" }));
 
     expect(screen.queryByRole("tab", { name: /shell 2/ })).toBeNull();
@@ -387,7 +387,7 @@ describe("opening and closing terminal tabs", () => {
   it("renames a tab in place", async () => {
     await renderWith(["infra"]);
 
-    open("+ shell");
+    open("new shell");
     fireEvent.doubleClick(screen.getByRole("tab", { name: /shell 1/ }));
     const field = screen.getByRole("textbox", { name: "rename shell 1" });
     fireEvent.change(field, { target: { value: "cluster logs" } });
@@ -403,8 +403,8 @@ describe("terminals scoped to a project", () => {
   it("shows only the active project's tabs", async () => {
     await renderWith(["alpha", "beta"]);
 
-    open("+ shell");
-    open("+ shell");
+    open("new shell");
+    open("new shell");
     expect(screen.getAllByRole("tab")).toHaveLength(2);
 
     open("beta");
@@ -420,9 +420,9 @@ describe("terminals scoped to a project", () => {
   it("numbers each project's tabs from one", async () => {
     await renderWith(["alpha", "beta"]);
 
-    open("+ shell");
+    open("new shell");
     open("beta");
-    open("+ shell");
+    open("new shell");
 
     expect(screen.getByRole("tab", { name: /shell 1/ })).toBeDefined();
     expect(screen.queryByRole("tab", { name: /shell 2/ })).toBeNull();
@@ -433,8 +433,8 @@ describe("terminals scoped to a project", () => {
   it("restores the selection when a project is revisited", async () => {
     await renderWith(["alpha", "beta"]);
 
-    open("+ shell");
-    open("+ shell");
+    open("new shell");
+    open("new shell");
     fireEvent.click(screen.getByRole("tab", { name: /shell 1/ }));
     open("beta");
     open("alpha");

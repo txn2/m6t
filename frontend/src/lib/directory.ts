@@ -2,6 +2,7 @@ import {
   CreateEntry,
   DeleteEntry,
   ListDirectory,
+  ReadPrefixes,
   RenameEntry,
 } from "../../wailsjs/go/app/App";
 import type { Entry } from "./tree";
@@ -22,6 +23,9 @@ export interface Directory {
   create: (root: string, relPath: string, isDir: boolean) => Promise<void>;
   rename: (root: string, fromRelPath: string, toRelPath: string) => Promise<void>;
   remove: (root: string, relPath: string) => Promise<void>;
+  /** The head of each named file, keyed by the path asked for. Paths that
+   * cannot answer are absent — see internal/watch.ReadPrefixes. */
+  prefixes: (root: string, relPaths: string[]) => Promise<Record<string, string>>;
 }
 
 /** The directory seam backed by the generated Wails bindings. */
@@ -30,4 +34,5 @@ export const wailsDirectory: Directory = {
   create: (root, relPath, isDir) => CreateEntry(root, relPath, isDir),
   rename: (root, fromRelPath, toRelPath) => RenameEntry(root, fromRelPath, toRelPath),
   remove: (root, relPath) => DeleteEntry(root, relPath),
+  prefixes: (root, relPaths) => ReadPrefixes(root, relPaths),
 };

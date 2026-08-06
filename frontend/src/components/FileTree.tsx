@@ -1,18 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { FileTreeController } from "../lib/useFileTree";
-import type { IconKind, TreeRow } from "../lib/tree";
-import { ROOT, iconKind, parentPath, visibleRows } from "../lib/tree";
+import type { TreeRow } from "../lib/tree";
+import { ROOT, iconKind, parentPath, resolveIconKind, visibleRows } from "../lib/tree";
 import type { Badges } from "../lib/gitStatus";
 import { badgeAt, badgeTitle } from "../lib/gitStatus";
-
-/** The glyph shown for each icon bucket — text rather than an icon font, the
- * same minimal-dependency choice ProjectTabs' "×" already makes. */
-const ICON_GLYPH: Record<IconKind, string> = {
-  dir: "▸",
-  yaml: "◆",
-  md: "▤",
-  file: "▫",
-};
+import { FileIcon, UiIcon } from "./Icon";
+import { CreateRow, InlineField } from "./InlineField";
 
 export interface FileTreeProps {
   readonly tree: FileTreeController;
@@ -135,11 +128,13 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
   return (
     <div className="tree">
       <div className="tree__header">
-        <button type="button" onClick={() => { startCreating(ROOT, false); }}>
-          + file
+        <button type="button" aria-label="new file" onClick={() => { startCreating(ROOT, false); }}>
+          <UiIcon name="plus" />
+          file
         </button>
-        <button type="button" onClick={() => { startCreating(ROOT, true); }}>
-          + folder
+        <button type="button" aria-label="new folder" onClick={() => { startCreating(ROOT, true); }}>
+          <UiIcon name="plus" />
+          folder
         </button>
         <button
           type="button"
@@ -174,6 +169,7 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
             <RowView
               key={item.row.path}
               row={item.row}
+              isManifest={tree.state.manifests.get(item.row.path) ?? false}
               badge={badgeAt(badges, item.row.path, item.row.isDir)}
               focused={rowIndexOf(rendered, index) === cursor}
               selected={tree.state.selected === item.row.path}
@@ -333,6 +329,8 @@ function activate(row: TreeRow, tree: FileTreeController, onOpenFile: (path: str
 
 interface RowViewProps {
   readonly row: TreeRow;
+  /** Whether content said this row is a Kubernetes manifest (#38). */
+  readonly isManifest: boolean;
   /** This row's git marker, or null when git reports nothing for it. */
   readonly badge: string | null;
   readonly focused: boolean;
@@ -358,6 +356,7 @@ interface RowViewProps {
 
 function RowView({
   row,
+  isManifest,
   badge,
   focused,
   selected,
@@ -430,9 +429,7 @@ function RowView({
         onMenu();
       }}
     >
-      <span className={`tree__icon tree__icon--${iconKind(row)}`} aria-hidden="true">
-        {ICON_GLYPH[iconKind(row)]}
-      </span>
+      <RowIcons row={row} expanded={expanded} isManifest={isManifest} />
       <span className="tree__name">{row.name}</span>
       {badge !== null && (
         // data-badge rather than a modifier class: a badge can be `?` or `•`,
@@ -450,7 +447,7 @@ function RowView({
           onMenu();
         }}
       >
-        ⋮
+        <UiIcon name="menu" />
       </button>
       {menuOpen && (
         <RowMenu
@@ -463,6 +460,38 @@ function RowView({
         />
       )}
     </div>
+  );
+}
+
+interface RowIconsProps {
+  readonly row: TreeRow;
+  readonly expanded: boolean;
+  /** Whether this row's content said it is a Kubernetes manifest (#38);
+   * false both for "read, and it is not" and for "not read yet". */
+  readonly isManifest: boolean;
+}
+
+/**
+ * A row's leading pair (#38): the twisty and the file-type mark.
+ *
+ * The twisty belongs to a directory alone, but a file still reserves its
+ * width — without the empty span every file's icon would sit one twisty to
+ * the left of the folder icons above it, and the tree would read as if
+ * files were outdented from their own directory.
+ */
+function RowIcons({ row, expanded, isManifest }: RowIconsProps) {
+  return (
+    <>
+      <span className="tree__twisty" aria-hidden="true">
+        {row.isDir && <UiIcon name={expanded ? "chevron-down" : "chevron-right"} />}
+      </span>
+      <span className="tree__icon">
+        <FileIcon
+          kind={resolveIconKind(iconKind(row.path, row.isDir), isManifest)}
+          expanded={expanded}
+        />
+      </span>
+    </>
   );
 }
 
@@ -507,87 +536,6 @@ function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }:
         Delete
       </button>
       <span className="tree__menu-note">Git and Kubernetes actions arrive in later tickets</span>
-    </div>
-  );
-}
-
-interface CreateRowProps {
-  readonly depth: number;
-  readonly isDir: boolean;
-  readonly error: string | null;
-  onCommit: (name: string) => void;
-  onCancel: () => void;
-}
-
-function CreateRow({ depth, isDir, error, onCommit, onCancel }: CreateRowProps) {
-  return (
-    <InlineField
-      depth={depth}
-      initial=""
-      ariaLabel={isDir ? "new folder name" : "new file name"}
-      placeholder={isDir ? "folder name" : "file name"}
-      error={error}
-      onCommit={onCommit}
-      onCancel={onCancel}
-    />
-  );
-}
-
-interface InlineFieldProps {
-  readonly depth: number;
-  readonly initial: string;
-  readonly ariaLabel: string;
-  readonly placeholder?: string;
-  readonly error: string | null;
-  onCommit: (value: string) => void;
-  onCancel: () => void;
-}
-
-/**
- * A single text field standing in for a row: new-entry naming and rename
- * both edit a name in place rather than opening a separate dialog.
- *
- * Escape cancels; losing focus also cancels rather than committing, which is
- * the opposite of the terminal tab strip's rename field (TerminalTabs.tsx) —
- * deliberately, because creating or renaming a file is a filesystem write a
- * stray click should not trigger, where renaming a tab label is not.
- */
-function InlineField({ depth, initial, ariaLabel, placeholder, error, onCommit, onCancel }: InlineFieldProps) {
-  const [value, setValue] = useState(initial);
-  const field = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    field.current?.focus();
-    field.current?.select();
-  }, []);
-
-  return (
-    <div className="tree__row tree__row--editing" style={{ "--depth": depth } as CSSProperties}>
-      <input
-        ref={field}
-        type="text"
-        className="tree__inline-field"
-        value={value}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        onChange={(event) => { setValue(event.target.value); }}
-        onClick={(event) => { event.stopPropagation(); }}
-        onKeyDown={(event) => {
-          // Every keystroke stops here: without this, an arrow key typed
-          // while naming a file would also move the tree's cursor, and
-          // Enter would both commit the field and activate whatever row the
-          // cursor was already on — the container's own handleKeyDown must
-          // never see a key meant for this field.
-          event.stopPropagation();
-          if (event.key === "Enter" && value.trim() !== "") {
-            onCommit(value.trim());
-          } else if (event.key === "Escape") {
-            onCancel();
-          }
-        }}
-        onBlur={onCancel}
-      />
-      {error !== null && <span className="tree__inline-error">{error}</span>}
     </div>
   );
 }

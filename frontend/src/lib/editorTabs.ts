@@ -107,10 +107,25 @@ export function formatSize(bytes: number): string {
   return `${Math.round(bytes / 1024).toString()} KB`;
 }
 
-/** The file-type bucket a tab uses, from `tree.ts`'s extension-based
- * `IconKind` — no second copy of the extension list to keep in sync. */
+/**
+ * Every icon bucket that is a YAML file. `IconKind` splits YAML five ways so
+ * the tree can show a chart, a kustomization and a workflow as themselves
+ * (#38) — but all five get YAML syntax highlighting and YAML folding, so
+ * this maps them back together. Missing one would silently open `Chart.yaml`
+ * as plain text.
+ */
+const YAML_ICONS: ReadonlySet<IconKind> = new Set<IconKind>([
+  "yaml",
+  "kubernetes",
+  "helm",
+  "kustomize",
+  "actions",
+]);
+
+/** The file-type bucket a tab uses, from `tree.ts`'s path-based `IconKind` —
+ * no second copy of the extension list to keep in sync. */
 export function kindFromIcon(icon: IconKind): EditorTabKind {
-  if (icon === "yaml") {
+  if (YAML_ICONS.has(icon)) {
     return "yaml";
   }
   if (icon === "md") {

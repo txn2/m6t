@@ -37,6 +37,48 @@ function requestClose(name: string) {
   fireEvent.click(screen.getByRole("button", { name: `close ${name}` }));
 }
 
+describe("the tab's file icon (#38)", () => {
+  /** The icon the first tab is showing, by the name FileIcon stamps on it. */
+  function tabIcon(): string | null {
+    return document.querySelector(".tab__icon [data-icon]")?.getAttribute("data-icon") ?? null;
+  }
+
+  it("shows plain YAML for a file whose content is not a manifest", () => {
+    renderTabs([withLoaded(newTab("k0", "infra", "/w/infra", "deploy.yaml", "yaml"), file("a: 1\n"))]);
+    expect(tabIcon()).toBe("yaml");
+  });
+
+  it("shows Kubernetes for a manifest, from the content the tab already holds", () => {
+    // The tree reads a 2 KiB head to decide this; an open tab has the whole
+    // file, so the same rule runs here without a round trip — and the two
+    // surfaces cannot disagree about the same file.
+    renderTabs([
+      withLoaded(
+        newTab("k0", "infra", "/w/infra", "deploy.yaml", "yaml"),
+        file("apiVersion: apps/v1\nkind: Deployment\n"),
+      ),
+    ]);
+    expect(tabIcon()).toBe("kubernetes");
+  });
+
+  it("keeps a name-derived icon whatever the content says", () => {
+    renderTabs([
+      withLoaded(
+        newTab("k0", "infra", "/w/infra", "charts/api/values.yaml", "yaml"),
+        file("apiVersion: apps/v1\nkind: Deployment\n"),
+      ),
+    ]);
+    expect(tabIcon()).toBe("helm");
+  });
+
+  it("shows plain YAML while the file is still loading", () => {
+    // newTab has no content yet: the icon must be the name's answer rather
+    // than nothing at all.
+    renderTabs([newTab("k0", "infra", "/w/infra", "deploy.yaml", "yaml")]);
+    expect(tabIcon()).toBe("yaml");
+  });
+});
+
 describe("the strip", () => {
   it("shows a tab per open file, named by its basename", () => {
     renderTabs([

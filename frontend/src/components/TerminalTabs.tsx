@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { TerminalTab } from "../lib/tabs";
+import { UiIcon } from "./Icon";
 
 /**
  * The terminal tab strip: one tab per PTY session, plus the two ways to open
@@ -44,11 +45,13 @@ export function TerminalTabs({
           onRename={onRename}
         />
       ))}
-      <button type="button" className="tabs__add" onClick={onCreate}>
-        + shell
+      <button type="button" className="tabs__add" aria-label="new shell" onClick={onCreate}>
+        <UiIcon name="plus" />
+        shell
       </button>
-      <button type="button" className="tabs__add" onClick={onCreateClaude}>
-        + Claude Code
+      <button type="button" className="tabs__add" aria-label="new Claude Code session" onClick={onCreateClaude}>
+        <UiIcon name="plus" />
+        Claude Code
       </button>
     </div>
   );
@@ -110,7 +113,7 @@ function Tab({
           onClose(tab.key);
         }}
       >
-        ✕
+        <UiIcon name="close" />
       </button>
     </div>
   );

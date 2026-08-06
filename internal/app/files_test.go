@@ -97,3 +97,36 @@ func seed(t *testing.T, root, relPath, content string) {
 		t.Fatalf("seeding %s: %v", relPath, err)
 	}
 }
+
+func TestReadPrefixesCarriesHeadsAcrossTheBinding(t *testing.T) {
+	a := testApp(t)
+	root := repoDir(t, "infra")
+	seed(t, root, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+
+	prefixes, err := a.ReadPrefixes(root, []string{"deploy.yaml", "absent.yaml"})
+	if err != nil {
+		t.Fatalf("ReadPrefixes: %v", err)
+	}
+	if got := prefixes["deploy.yaml"]; !strings.Contains(got, "kind: Deployment") {
+		t.Errorf("deploy.yaml head = %q, want the file's content", got)
+	}
+	// A path that cannot answer is absent rather than fatal: the tree asks
+	// about a whole directory at once and a file deleted between the listing
+	// and the call must not cost the other answers.
+	if _, ok := prefixes["absent.yaml"]; ok {
+		t.Errorf("prefixes = %v, want the missing file omitted", prefixes)
+	}
+}
+
+func TestReadPrefixesWrapsTheUnderlyingErrorWithRoot(t *testing.T) {
+	a := testApp(t)
+	root := filepath.Join(t.TempDir(), "not-a-project")
+
+	_, err := a.ReadPrefixes(root, []string{"deploy.yaml"})
+	if err == nil {
+		t.Fatal("ReadPrefixes on a missing root succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), root) {
+		t.Errorf("ReadPrefixes error = %q, want it to name the project root", err)
+	}
+}

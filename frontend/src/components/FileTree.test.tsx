@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeState } from "../lib/tree";
-import { ROOT, expand, initialTree, withListing } from "../lib/tree";
+import { ROOT, expand, initialTree, withListing, withManifests } from "../lib/tree";
 import type { Badges } from "../lib/gitStatus";
 import { FileTree } from "./FileTree";
 
@@ -27,6 +27,11 @@ function noBadges(): Badges {
   return { files: new Map(), dirs: new Map() };
 }
 
+/** The icon a rendered row is showing, by the name `FileIcon` stamps on it. */
+function iconOf(row: HTMLElement): string | null {
+  return row.querySelector(".tree__icon [data-icon]")?.getAttribute("data-icon") ?? null;
+}
+
 function fakeController(
   state: TreeState,
   overrides: Partial<FileTreeController> = {},
@@ -48,8 +53,45 @@ describe("rendering the tree", () => {
   it("shows root's entries, directories first", () => {
     render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
 
-    const items = screen.getAllByRole("treeitem").map((el) => el.textContent);
-    expect(items).toEqual(["▸manifests⋮", "◆deploy.yaml⋮"]);
+    const items = screen.getAllByRole("treeitem");
+    expect(items.map((el) => el.textContent)).toEqual(["manifests", "deploy.yaml"]);
+    // With the text glyphs gone (#38) the icon is the row's only type
+    // signal, so asserting the names alone would pass over a tree that
+    // rendered no icons at all.
+    expect(items.map(iconOf)).toEqual(["dir", "yaml"]);
+  });
+
+  it("gives a directory the open folder once it is expanded", () => {
+    render(
+      <FileTree badges={noBadges()} tree={fakeController(loadedManifests(loadedRoot()))} onOpenFile={vi.fn()} />,
+    );
+
+    expect(iconOf(screen.getByRole("treeitem", { name: /manifests/ }))).toBe("dir-open");
+  });
+
+  it("shows YAML as plain until its content has been classified", () => {
+    // Nothing in a name says "manifest" (#38), so both rows start here and
+    // only the one whose head said apiVersion+kind moves.
+    render(
+      <FileTree badges={noBadges()} tree={fakeController(loadedManifests(loadedRoot()))} onOpenFile={vi.fn()} />,
+    );
+
+    expect(iconOf(screen.getByRole("treeitem", { name: /prod\.yaml/ }))).toBe("yaml");
+    expect(iconOf(screen.getByRole("treeitem", { name: /deploy\.yaml/ }))).toBe("yaml");
+  });
+
+  it("upgrades a row to Kubernetes once its content says so", () => {
+    const listed = loadedManifests(loadedRoot());
+    const classified = withManifests(
+      listed,
+      { "manifests/prod.yaml": "apiVersion: v1\nkind: Service\n", "deploy.yaml": "x: 1\n" },
+      ["manifests/prod.yaml", "deploy.yaml"],
+    );
+    render(<FileTree badges={noBadges()} tree={fakeController(classified)} onOpenFile={vi.fn()} />);
+
+    expect(iconOf(screen.getByRole("treeitem", { name: /prod\.yaml/ }))).toBe("kubernetes");
+    // Read, and it is not one — which must look the same as never read.
+    expect(iconOf(screen.getByRole("treeitem", { name: /deploy\.yaml/ }))).toBe("yaml");
   });
 
   it("shows an expanded directory's children beneath it", () => {
@@ -174,7 +216,7 @@ describe("creating an entry", () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []));
     render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "+ file" }));
+    fireEvent.click(screen.getByRole("button", { name: "new file" }));
     const field = screen.getByRole("textbox", { name: "new file name" });
     fireEvent.change(field, { target: { value: "values.yaml" } });
     fireEvent.keyDown(field, { key: "Enter" });
@@ -188,7 +230,7 @@ describe("creating an entry", () => {
     });
     render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "+ file" }));
+    fireEvent.click(screen.getByRole("button", { name: "new file" }));
     const field = screen.getByRole("textbox", { name: "new file name" });
     fireEvent.change(field, { target: { value: "deploy.yaml" } });
     fireEvent.keyDown(field, { key: "Enter" });
@@ -201,7 +243,7 @@ describe("creating an entry", () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []));
     render(<FileTree badges={noBadges()} tree={tree} onOpenFile={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "+ folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "new folder" }));
     const field = screen.getByRole("textbox", { name: "new folder name" });
     fireEvent.keyDown(field, { key: "Escape" });
 
@@ -356,7 +398,7 @@ describe("git badges (#8)", () => {
   it("leaves a row with no git state unmarked", () => {
     render(<FileTree badges={noBadges()} tree={fakeController(loadedRoot())} onOpenFile={vi.fn()} />);
 
-    expect(screen.getByRole("treeitem", { name: /deploy\.yaml/ }).textContent).toBe("◆deploy.yaml⋮");
+    expect(screen.getByRole("treeitem", { name: /deploy\.yaml/ }).textContent).toBe("deploy.yaml");
   });
 
   // A submodule is a directory on disk and one entry to git, so git's own

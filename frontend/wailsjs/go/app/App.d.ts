@@ -40,6 +40,8 @@ export function Projects():Promise<Array<project.Project>>;
 
 export function ReadFile(arg1:string,arg2:string):Promise<watch.FileContent>;
 
+export function ReadPrefixes(arg1:string,arg2:Array<string>):Promise<Record<string, string>>;
+
 export function RemoveProject(arg1:string):Promise<void>;
 
 export function RenameEntry(arg1:string,arg2:string,arg3:string):Promise<void>;
