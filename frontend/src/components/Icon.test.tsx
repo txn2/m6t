@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { IconKind } from "../lib/tree";
+import type { UiIconName } from "./Icon";
 import { FileIcon, UiIcon } from "./Icon";
 
 afterEach(cleanup);
@@ -91,8 +92,24 @@ describe("FileIcon", () => {
   });
 });
 
+/** Every chrome icon a call site can ask for, so one added without artwork
+ * behind it fails here rather than rendering nothing. */
+const UI_NAMES = [
+  "chevron-right",
+  "chevron-down",
+  "close",
+  "plus",
+  "menu",
+  "filter",
+  "dirty",
+  "edit",
+  "preview",
+  "up",
+  "down",
+] as const satisfies readonly UiIconName[];
+
 describe("UiIcon", () => {
-  it.each(["chevron-right", "chevron-down", "close", "plus", "menu", "dirty", "edit", "preview", "up", "down"] as const)(
+  it.each(UI_NAMES)(
     "renders %s in currentColor so its button can colour it",
     (name) => {
       render(<UiIcon name={name} />);
@@ -106,12 +123,12 @@ describe("UiIcon", () => {
 
   it("gives each name its own artwork", () => {
     const paths = new Set<string>();
-    for (const name of ["chevron-right", "chevron-down", "close", "plus", "menu", "dirty", "edit", "preview", "up", "down"] as const) {
+    for (const name of UI_NAMES) {
       const { unmount } = render(<UiIcon name={name} />);
       paths.add(iconElement().innerHTML);
       unmount();
     }
-    expect(paths.size).toBe(10);
+    expect(paths.size).toBe(UI_NAMES.length);
   });
 
   it("keeps the shared class when a call site adds its own", () => {

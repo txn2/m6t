@@ -13,7 +13,7 @@ import { project as models } from "../wailsjs/go/models";
 import type { Project, Registry } from "./lib/projects";
 import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
-import { MODIFIED, emptyStatus } from "./lib/git";
+import { MODIFIED, NOT_A_REPOSITORY, emptyStatus } from "./lib/git";
 
 /**
  * A full `Git` seam from the one or two calls a test actually cares about.
@@ -658,17 +658,17 @@ describe("the git operations (#9)", () => {
     await waitFor(() => {
       expect((button as HTMLButtonElement).disabled).toBe(false);
     });
-    expect(screen.getByRole("button", { name: "Unstaged: a.yaml" })).toBeDefined();
+    expect(screen.getByTestId("git-status").textContent).toContain("1 changed");
 
     fireEvent.click(button);
 
     await waitFor(() => {
       expect(pull).toHaveBeenCalledWith("/w/infra");
     });
-    // The row went away, which only happens if the operation triggered a
+    // The change went away, which only happens if the operation triggered a
     // re-read of the status.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Unstaged: a.yaml" })).toBeNull();
+      expect(screen.getByTestId("git-status").textContent).toContain("no changes");
     });
   });
 
@@ -685,18 +685,57 @@ describe("the git operations (#9)", () => {
       />,
     );
 
-    // A changed file on screen, so the panel is rendering rows rather than
-    // being absent for some unrelated reason.
-    await screen.findByRole("button", { name: "Unstaged: a.yaml" });
+    // A change on screen, so the sidebar is rendering a repository with work
+    // in it rather than being absent for some unrelated reason.
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toContain("1 changed");
+    });
 
-    // Exact names, not a prefix: a row's own accessible name starts with
-    // "Unstaged:", so a prefix match would find the row and pass for the wrong
-    // reason.
     for (const name of ["Stage a.yaml", "Unstage a.yaml", "Stage all", "Unstage all", "Commit"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expect(screen.queryByLabelText("Commit subject")).toBeNull();
     expect(screen.queryByLabelText("Commit body")).toBeNull();
+  });
+
+  // The changes panel is gone and its two degraded states went to the status
+  // bar with it (#40). This is the composition assertion for that move: the
+  // sidebar renders the tree and the branch bar, and nothing that used to say
+  // "Changes" above a second list of the same paths.
+  it("keeps the sidebar to the tree and the branch bar", async () => {
+    const { seam } = pullingGit();
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toContain("1 changed");
+    });
+
+    expect(screen.queryByRole("region", { name: "Changes" })).toBeNull();
+    expect(screen.getByRole("tree")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Pull" })).toBeDefined();
+  });
+
+  it("reports a repository git cannot read in the status bar", async () => {
+    const seam = stubGit({
+      status: () => Promise.resolve({ ...emptyStatus(), availability: NOT_A_REPOSITORY }),
+    });
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-status").textContent).toBe("not a git repository");
+    });
   });
 
   // A failed operation reaches the user with git's own words in it — the whole

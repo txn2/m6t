@@ -28,10 +28,13 @@
   --m6t-danger: #e06c75;
   --m6t-ok: #8cc265;
 
-  /* Git markers. Hue carries the meaning in both palettes; only lightness
-     changes between them. */
+  /* Git markers, and the tint on a changed row's name (#40). Hue carries the
+     meaning in both palettes — green for new, blue for changed, red for gone
+     or unmerged — and only lightness changes between them. style.test.ts
+     holds every one of these to 4.5:1 against all three surfaces a tree row
+     can sit on, in both palettes. */
   --m6t-git-added: #7ec699;
-  --m6t-git-modified: #e0b055;
+  --m6t-git-modified: #6cb6f5;
   --m6t-git-deleted: #e08585;
   --m6t-git-conflict: #f06d6d;
 
@@ -77,8 +80,8 @@
   --m6t-danger: #c04553;
   --m6t-ok: #4d8f2f;
 
-  --m6t-git-added: #2f7d4f;
-  --m6t-git-modified: #96660d;
+  --m6t-git-added: #2a7247;
+  --m6t-git-modified: #1f5fbf;
   --m6t-git-deleted: #b23a3a;
   --m6t-git-conflict: #c22b2b;
 
@@ -291,9 +294,9 @@ body {
 
 /* --- file tree --------------------------------------------------------- */
 
-/* The tree and the changes panel share the sidebar column. The tree takes
-   what is left after the panel has taken what it needs, so a repository with
-   one changed file does not give half the sidebar to a list of one. */
+/* The tree takes the sidebar column above the branch bar — all of it (#40).
+   The changes panel that used to take a share of it is gone; the changes are
+   in here now. */
 .tree {
   display: flex;
   flex-direction: column;
@@ -323,8 +326,20 @@ body {
   font-size: var(--m6t-font-size-sm);
 }
 
-.tree__hidden-toggle {
+/* The mode toggle is an icon and the dotfile toggle is words, so the icon
+   takes the square the other buttons' glyphs take rather than the width of a
+   label the header has no room for. */
+.tree__mode-toggle {
+  display: flex;
+  align-items: center;
   margin-left: auto;
+}
+
+.tree__mode-toggle[aria-pressed="true"] {
+  color: var(--m6t-accent);
+}
+
+.tree__hidden-toggle {
   white-space: nowrap;
 }
 
@@ -651,8 +666,8 @@ button:hover {
 
 /* --- icons (#38) ------------------------------------------------------- */
 
-/* One size for every icon, so a tab strip, a tree row and a changes row all
-   line up on the same grid. Two kinds sit under this class and they colour
+/* One size for every icon, so a tab strip and a tree row line up on the same
+   grid. Two kinds sit under this class and they colour
    differently on purpose (components/Icon.tsx): a vendored file-type SVG
    arrives as an <img> carrying its own brand colour, and a lucide chrome
    icon draws in currentColor so it inherits whatever token its button uses. */
@@ -957,8 +972,34 @@ button:hover {
 }
 
 /* =============================================================================
-   Git status: tree badges and the changes panel (#8)
+   Git status in the tree: tint and badge (#8, #40)
    ========================================================================== */
+
+/* Colour is the primary signal on a changed row, the way it is in JetBrains'
+   tree: the eye finds the changed paths without reading a column of letters.
+   The badge stays for what colour cannot say — which change, to a screen
+   reader or a monochrome display — and a directory takes the modified tint to
+   mean "something in here", which is the one thing that is true of every
+   change it could be holding. */
+.tree__name[data-tone="added"] {
+  color: var(--m6t-git-added);
+}
+
+.tree__name[data-tone="modified"],
+.tree__name[data-tone="contains"] {
+  color: var(--m6t-git-modified);
+}
+
+/* Deleted rows exist only in changed-only mode: the file is not in any
+   listing, and the rule above it is what says so at a glance. */
+.tree__name[data-tone="deleted"] {
+  color: var(--m6t-git-deleted);
+  text-decoration: line-through;
+}
+
+.tree__name[data-tone="conflicted"] {
+  color: var(--m6t-git-conflict);
+}
 
 /* The badge sits between the name and the actions button, and takes the space
    the button occupies on hover — so a row's width does not change when the
@@ -978,129 +1019,22 @@ button:hover {
 }
 
 .tree__badge[data-badge="A"],
-.changes__badge[data-badge="A"] {
+.tree__badge[data-badge="?"] {
   color: var(--m6t-git-added);
 }
 
 .tree__badge[data-badge="M"],
 .tree__badge[data-badge="R"],
 .tree__badge[data-badge="C"],
-.changes__badge[data-badge="M"],
-.changes__badge[data-badge="R"],
-.changes__badge[data-badge="C"] {
+.tree__badge[data-badge="•"] {
   color: var(--m6t-git-modified);
 }
 
-.tree__badge[data-badge="D"],
-.changes__badge[data-badge="D"] {
+.tree__badge[data-badge="D"] {
   color: var(--m6t-git-deleted);
 }
 
-.tree__badge[data-badge="U"],
-.changes__badge[data-badge="U"] {
-  color: var(--m6t-git-conflict);
-}
-
-.changes {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  /* Enough to read at a glance, never enough to crowd out the tree. */
-  max-height: 40%;
-  overflow: auto;
-  border-top: 1px solid var(--m6t-border);
-}
-
-/* Section headers are the same height as a list row and set in the small,
-   uppercase, tracked face every sidebar in this class of tool uses — it is
-   what makes a heading read as chrome rather than as content. */
-.changes__title,
-.changes__group {
-  display: flex;
-  align-items: center;
-  gap: var(--m6t-space-2);
-  margin: 0;
-  height: var(--m6t-row);
-  padding: 0 var(--m6t-space-3);
-  color: var(--m6t-muted);
-  font-size: var(--m6t-font-size-sm);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.changes__count {
-  padding: 0 var(--m6t-space-2);
-  border-radius: var(--m6t-radius);
-  background: var(--m6t-panel-alt);
-  font-variant-numeric: tabular-nums;
-}
-
-.changes__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.changes__icon {
-  display: flex;
-  flex: none;
-  align-items: center;
-}
-
-.changes__row {
-  display: flex;
-  align-items: center;
-  gap: var(--m6t-space-2);
-  width: 100%;
-  height: var(--m6t-row);
-  padding: 0 var(--m6t-space-3);
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.changes__row:hover,
-.changes__row:focus-visible {
-  background: var(--m6t-panel);
-  outline: none;
-}
-
-.changes__badge {
-  width: 1em;
-  color: var(--m6t-muted);
-  font-weight: 600;
-  text-align: center;
-}
-
-/* A long path is elided from the left: the file name is what identifies a
-   row, and it is at the end. */
-.changes__path {
-  overflow: hidden;
-  direction: rtl;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.changes__origin,
-.changes__empty,
-.changes__error {
-  color: var(--m6t-muted);
-  font-size: var(--m6t-font-size-sm);
-}
-
-.changes__empty,
-.changes__error {
-  margin: 0;
-  padding: var(--m6t-space-1) var(--m6t-space-3);
-}
-
-.changes__error {
+.tree__badge[data-badge="U"] {
   color: var(--m6t-git-conflict);
 }
 
@@ -1108,9 +1042,9 @@ button:hover {
    Git operations: the branch bar (#9, #39)
    ========================================================================== */
 
-/* The sidebar is one column of stacked sections. The changes list is the only
-   one that scrolls; the branch bar is fixed chrome beside it, so a long
-   changes list never pushes Pull and Push off the bottom. */
+/* The sidebar is the tree above and this below. The tree is what scrolls; the
+   branch bar is fixed chrome beneath it, so a repository with two thousand
+   files never pushes Pull and Push off the bottom. */
 .branchbar {
   display: flex;
   flex-wrap: wrap;
@@ -1196,13 +1130,3 @@ button:hover {
   font-size: var(--m6t-font-size-sm);
 }
 
-.changes__group--conflict {
-  color: var(--m6t-git-conflict);
-}
-
-.changes__hint {
-  margin: 0;
-  padding: 0 var(--m6t-space-3) var(--m6t-space-1);
-  color: var(--m6t-muted);
-  font-size: var(--m6t-font-size-sm);
-}

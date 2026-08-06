@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -8,13 +7,12 @@ import {
 } from "react";
 import { FileTree } from "./FileTree";
 import { BranchBar } from "./BranchBar";
-import { ChangesPanel } from "./ChangesPanel";
 import { PaneSeparator } from "./PaneSeparator";
 import type { Project } from "../lib/projects";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { GitStatusController } from "../lib/useGitStatus";
 import type { GitOpsController } from "../lib/useGitOps";
-import { badgesFor, branchSummary } from "../lib/gitStatus";
+import { branchSummary } from "../lib/gitStatus";
 import {
   EDITOR_MIN_HEIGHT,
   EDITOR_MIN_WIDTH,
@@ -27,7 +25,8 @@ import {
 export interface WorkbenchProps {
   /** The file tree's state and operations for this project (#6). */
   readonly tree: FileTreeController;
-  /** This project's git status (#8): tree badges and the changes list. */
+  /** This project's git status (#8, #40): the tree draws it, and the status
+   * bar reports what is wrong with it. */
   readonly git: GitStatusController;
   /** The mutating git loop for this project (#9): pull, push, branch switch.
    * Staging and committing are the terminal agent's, not m6t's (#39). */
@@ -45,6 +44,14 @@ export interface WorkbenchProps {
  *
  * All three are real: the tree is #6's, the editor is #7's, and the terminal
  * is #4's, rooted at this project's checkout.
+ *
+ * The sidebar is the tree and the branch bar, and nothing else (#40). The
+ * changes list that used to sit under them said what the tree already knew,
+ * in a second place, for a fixed share of the sidebar's height — the tree
+ * now colours the changed paths where they live and filters down to them on
+ * demand, and the two states the list also reported (no git, not a
+ * repository) are the status bar's, where they are visible whatever the
+ * sidebar is showing.
  */
 export function Workbench({
   tree,
@@ -54,12 +61,6 @@ export function Workbench({
   editor,
   terminals,
 }: WorkbenchProps) {
-  // The rollup walks every changed path's ancestors, and this component
-  // re-renders on unrelated state — a keystroke in the editor, a terminal
-  // status. A status object is replaced only when a read lands, so this ties
-  // the work to the thing that actually changed.
-  const badges = useMemo(() => badgesFor(git.status), [git.status]);
-
   const [sidebar, setSidebar] = useState(SIDEBAR_DEFAULT);
   const [terminalHeight, setTerminalHeight] = useState(TERMINAL_DEFAULT);
   const { extent, frame } = useExtent();
@@ -76,7 +77,7 @@ export function Workbench({
       }
     >
       <aside className="workbench__tree">
-        <FileTree tree={tree} badges={badges} onOpenFile={onOpenFile} />
+        <FileTree tree={tree} status={git.status} onOpenFile={onOpenFile} />
         <BranchBar
           status={git.status}
           branches={gitOps.branches}
@@ -88,7 +89,6 @@ export function Workbench({
           onPush={gitOps.push}
           onDismissError={gitOps.dismissError}
         />
-        <ChangesPanel status={git.status} error={git.error} onOpenFile={onOpenFile} />
       </aside>
 
       <PaneSeparator

@@ -74,7 +74,7 @@ function outsidePalettes(): string {
  * widening it is a visible edit to this file.
  */
 const MARKDOWN_START = "   Markdown preview";
-const MARKDOWN_END = "   Git status: tree badges";
+const MARKDOWN_END = "   Git status in the tree";
 
 function withoutMarkdown(): string {
   const start = css.indexOf(MARKDOWN_START);
@@ -211,9 +211,75 @@ describe("the style tokens", () => {
   });
 });
 
+/** A token's value in one palette block. */
+function tokenValue(block: string, name: string): string {
+  const match = new RegExp(`${name}:\\s*(#[0-9a-fA-F]{3,8})`).exec(block);
+  if (match === null) {
+    throw new Error(`${name} is not defined as a literal colour in this palette`);
+  }
+  return match[1];
+}
+
+/** Relative luminance, per WCAG 2.1 §relative-luminance. */
+function luminance(hex: string): number {
+  const channels = (hex.replace("#", "").match(/../g) ?? []).map((pair) => {
+    const value = parseInt(pair, 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+/** The WCAG contrast ratio between two colours, lighter over darker. */
+function contrast(a: string, b: string): number {
+  const [lighter, darker] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/**
+ * The contrast gate on the git tints (#40).
+ *
+ * Colour is the primary signal on a changed row, which makes its legibility a
+ * correctness property rather than a taste one: a tint nobody can read is a
+ * row that says nothing. Both palettes are checked against all three surfaces
+ * a tree row sits on — the plain background, the hover panel and the selected
+ * panel — because the selected row is the one a user is most likely to be
+ * reading, and it is also the lowest-contrast of the three.
+ *
+ * 4.5:1 is WCAG AA for text below 18pt, and every row here is 13px.
+ */
+describe("the git tints", () => {
+  const AA_NORMAL_TEXT = 4.5;
+  const TINTS = ["--m6t-git-added", "--m6t-git-modified", "--m6t-git-deleted", "--m6t-git-conflict"];
+  const SURFACES = ["--m6t-bg", "--m6t-panel", "--m6t-panel-alt"];
+
+  it.each([
+    ["dark", 0],
+    ["light", 1],
+  ])("clears AA against every row surface in the %s palette", (_name, index) => {
+    const palette = paletteBlocks[index];
+    const failures: string[] = [];
+    for (const tint of TINTS) {
+      for (const surface of SURFACES) {
+        const ratio = contrast(tokenValue(palette, tint), tokenValue(palette, surface));
+        if (ratio < AA_NORMAL_TEXT) {
+          failures.push(`${tint} on ${surface}: ${ratio.toFixed(2)}:1`);
+        }
+      }
+    }
+    expect(failures, failures.join("; ")).toEqual([]);
+  });
+
+  // The gate is worthless if its arithmetic does not fire: these are the two
+  // ends of the scale, and a broken luminance function fails both.
+  it("computes the ratios it is checking", () => {
+    expect(contrast("#ffffff", "#000000")).toBeCloseTo(21, 1);
+    expect(contrast("#808080", "#808080")).toBeCloseTo(1, 5);
+  });
+});
+
 describe("the IDE metrics", () => {
   it("sizes list rows, section headers and the status bar from one token", () => {
-    for (const rule of [".tree__row", ".changes__row", ".statusbar"]) {
+    for (const rule of [".tree__row", ".tree__header", ".statusbar"]) {
       expect(blockFor(rule), `${rule} must be one row token tall`).toContain(
         "height: var(--m6t-row)",
       );
