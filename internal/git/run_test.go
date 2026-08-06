@@ -221,6 +221,78 @@ func TestClassifyReportsATimeout(t *testing.T) {
 	}
 }
 
+// A mutating call must NOT carry --no-optional-locks. Nothing else fails when
+// it does — git accepts the flag on a write and the operation still works —
+// so without this the only symptom would be a subtly different locking
+// discipline on every write m6t makes.
+func TestMutatingInvocationsDoNotSuppressOptionalLocks(t *testing.T) {
+	writing := invocation{}.argv("/repo", []string{"add", "--", "a.yaml"})
+	for _, arg := range writing {
+		if arg == "--no-optional-locks" {
+			t.Fatalf("argv = %v, want no --no-optional-locks on a write", writing)
+		}
+	}
+	if writing[0] != "-C" || writing[1] != "/repo" {
+		t.Errorf("argv = %v, want -C first so git resolves the worktree", writing)
+	}
+
+	reading := invocation{readOnly: true}.argv("/repo", []string{"status"})
+	if reading[0] != "--no-optional-locks" {
+		t.Errorf("argv = %v, want --no-optional-locks first on a read", reading)
+	}
+}
+
+func TestNetworkInvocationsGetTheLongerDeadline(t *testing.T) {
+	if got := (invocation{}).deadline(); got != commandTimeout {
+		t.Errorf("local deadline = %s, want %s", got, commandTimeout)
+	}
+	if got := (invocation{network: true}).deadline(); got != networkTimeout {
+		t.Errorf("network deadline = %s, want %s", got, networkTimeout)
+	}
+	if networkTimeout <= commandTimeout {
+		t.Error("the network deadline is not longer than the local one")
+	}
+}
+
+// git does not always fail on stderr: `git commit` with an empty index exits
+// non-zero and explains itself on stdout. Reporting only stderr would hand the
+// user "exit status 1", which is the loss of detail DESIGN.md §7 forbids.
+func TestExplanationFallsBackToStdout(t *testing.T) {
+	if got := explanation("nothing to commit\n", ""); got != "nothing to commit\n" {
+		t.Errorf("explanation = %q, want stdout when stderr is empty", got)
+	}
+	if got := explanation("nothing to commit\n", "  \n"); got != "nothing to commit\n" {
+		t.Errorf("explanation = %q, want stdout when stderr is only whitespace", got)
+	}
+	if got := explanation("routine output\n", "the real reason\n"); got != "the real reason\n" {
+		t.Errorf("explanation = %q, want stderr to win when both are set", got)
+	}
+}
+
+// GIT_TERMINAL_PROMPT=0 is what turns an authentication prompt into a failure
+// rather than a hang: m6t runs git with no controlling terminal, so a prompt
+// has nowhere to appear. Nothing else in the suite would notice its removal —
+// the symptom is a call that never returns.
+func TestCommandEnvDisablesGitsOwnPrompting(t *testing.T) {
+	env := commandEnv()
+
+	var prompt, locale bool
+	for _, entry := range env {
+		switch entry {
+		case "GIT_TERMINAL_PROMPT=0":
+			prompt = true
+		case "LC_ALL=C":
+			locale = true
+		}
+	}
+	if !prompt {
+		t.Error("GIT_TERMINAL_PROMPT=0 is absent; a credential prompt would hang the call")
+	}
+	if !locale {
+		t.Error("LC_ALL=C is absent; notARepositoryMessage matches git's English text")
+	}
+}
+
 func TestClassifyOmitsAnEmptyStderr(t *testing.T) {
 	err := classify(context.Background(), errors.New("exit status 1"), []string{"status"}, "   ")
 	if err == nil {

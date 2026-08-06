@@ -130,7 +130,28 @@ const (
 	// (PROTOCOL.md §5) and the frontend calls this again. A future PR adding
 	// GitRefresh, or a binding per git subcommand, would be pushing work onto
 	// the bridge that the transport is already carrying.
-	maxAppMethods = 15
+	//
+	// 15 -> 23 in #9. The paragraph above forbids "a binding per git
+	// subcommand" as a way of bypassing the transport, and that is worth
+	// answering directly rather than around: the transport carries streams,
+	// and none of these is one. Stage, unstage, commit, pull, push, checkout
+	// and the two ref listings are each a request with an answer and no
+	// throughput — the same test OpenTerminal and the registry's five methods
+	// had to pass — so a socket frame per stage would be inventing a protocol
+	// for a call that completes once and returns nothing. What that paragraph
+	// was protecting against is a GitRefresh, and there still is not one: the
+	// frontend re-reads through GitStatus after an operation, which is why
+	// none of these eight returns a status of its own.
+	//
+	// This is the whole mutating half of a service landing at once, the same
+	// shape as #5's 3 -> 8, and like #8 it takes no field: internal/git still
+	// keeps nothing between calls, so maxAppFields stays at 6 while the
+	// service doubles its surface. GitBranches and GitRemotes stayed two
+	// methods rather than one GitRefs because the frontend degrades them
+	// independently — a repository whose `git remote` fails should still fill
+	// its branch dropdown — and one call returning both would make either
+	// failure take out both lists.
+	maxAppMethods = 23
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

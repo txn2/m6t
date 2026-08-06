@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -88,6 +89,187 @@ func TestGitStatusWrapsARealFailureWithTheProjectPath(t *testing.T) {
 	} else if !strings.Contains(err.Error(), missing) {
 		t.Errorf("error = %q, want it to name the project path", err)
 	}
+}
+
+// The mutating bindings, through the real binary against a real repository.
+// A stub here would prove only that this file calls internal/git — which the
+// one-line bodies already show — while these prove the operation reaches the
+// user's repository and that the status the UI reads back agrees with it.
+func TestGitStageAndUnstageMoveAPathThroughTheIndex(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
+
+	if err := a.GitStage(dir, []string{"deploy.yaml"}); err != nil {
+		t.Fatalf("GitStage: %v", err)
+	}
+	if got := stagedState(t, a, dir, "deploy.yaml"); got != git.StateAdded {
+		t.Fatalf("staged = %q, want %q", got, git.StateAdded)
+	}
+
+	if err := a.GitUnstage(dir, []string{"deploy.yaml"}); err != nil {
+		t.Fatalf("GitUnstage: %v", err)
+	}
+	if got := stagedState(t, a, dir, "deploy.yaml"); got != "" {
+		t.Errorf("staged = %q, want nothing staged", got)
+	}
+}
+
+func TestGitCommitClearsTheChangesList(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
+
+	if err := a.GitStage(dir, []string{"deploy.yaml"}); err != nil {
+		t.Fatalf("GitStage: %v", err)
+	}
+	if err := a.GitCommit(dir, "add the deployment"); err != nil {
+		t.Fatalf("GitCommit: %v", err)
+	}
+
+	status, err := a.GitStatus(dir)
+	if err != nil {
+		t.Fatalf("GitStatus: %v", err)
+	}
+	if len(status.Files) != 0 {
+		t.Errorf("files = %+v, want a clean tree", status.Files)
+	}
+}
+
+func TestGitBranchesAndCheckoutSwitchThroughTheBinding(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
+	if err := a.GitStage(dir, []string{"deploy.yaml"}); err != nil {
+		t.Fatalf("GitStage: %v", err)
+	}
+	if err := a.GitCommit(dir, "first"); err != nil {
+		t.Fatalf("GitCommit: %v", err)
+	}
+	runRepoGit(t, dir, "branch", "feature/x")
+
+	branches, err := a.GitBranches(dir)
+	if err != nil {
+		t.Fatalf("GitBranches: %v", err)
+	}
+	if strings.Join(branches, ",") != "feature/x,main" {
+		t.Fatalf("branches = %v, want [feature/x main]", branches)
+	}
+
+	if err := a.GitCheckout(dir, "feature/x"); err != nil {
+		t.Fatalf("GitCheckout: %v", err)
+	}
+	status, err := a.GitStatus(dir)
+	if err != nil {
+		t.Fatalf("GitStatus: %v", err)
+	}
+	if status.Branch.Name != "feature/x" {
+		t.Errorf("branch = %q, want feature/x", status.Branch.Name)
+	}
+}
+
+func TestGitRemotesReportsWhatIsConfigured(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+	runRepoGit(t, dir, "remote", "add", "origin", "https://example.invalid/r.git")
+
+	remotes, err := a.GitRemotes(dir)
+	if err != nil {
+		t.Fatalf("GitRemotes: %v", err)
+	}
+	if len(remotes) != 1 || remotes[0] != "origin" {
+		t.Errorf("remotes = %v, want [origin]", remotes)
+	}
+}
+
+// A failing operation reaches the frontend with git's own words in it. The
+// binding wraps; it does not summarize (DESIGN.md §7).
+func TestGitOperationsSurfaceGitsOwnWords(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+
+	err := a.GitCommit(dir, "nothing is staged")
+	if err == nil {
+		t.Fatal("GitCommit succeeded with an empty index")
+	}
+	if !strings.Contains(err.Error(), "nothing to commit") {
+		t.Errorf("error = %q, want git's own explanation", err)
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("error = %q, want it to name the repository", err)
+	}
+}
+
+// The bound surface is a public API (CLAUDE.md), so it is checked here and not
+// only in the UI that normally calls it.
+func TestGitStageRejectsAPathOutsideTheRepository(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+
+	if err := a.GitStage(dir, []string{"../../etc/hosts"}); !errors.Is(err, git.ErrOutsideRoot) {
+		t.Errorf("GitStage(..) = %v, want ErrOutsideRoot", err)
+	}
+	if err := a.GitCheckout(dir, "--orphan"); !errors.Is(err, git.ErrInvalidRef) {
+		t.Errorf("GitCheckout(--orphan) = %v, want ErrInvalidRef", err)
+	}
+	if err := a.GitPush(dir, "--mirror", true); !errors.Is(err, git.ErrInvalidRef) {
+		t.Errorf("GitPush(--mirror) = %v, want ErrInvalidRef", err)
+	}
+}
+
+// GitPull reaches git rather than short-circuiting: with no remote configured
+// git is the thing that says so.
+//
+// The message is asserted in two halves because it is built in two places: the
+// binding says which button was pressed, and internal/git carries what git
+// said. Matching only the second would pass on git's hint text alone.
+func TestGitPullReachesGit(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+
+	err := a.GitPull(dir)
+	if err == nil {
+		t.Fatal("GitPull succeeded with no remote configured")
+	}
+	if !strings.HasPrefix(err.Error(), "pulling in "+dir+":") {
+		t.Errorf("error = %q, want it to open with the operation and the project", err)
+	}
+	if !strings.Contains(err.Error(), "no tracking information") {
+		t.Errorf("error = %q, want git's own explanation", err)
+	}
+}
+
+// writeManifest drops a file into a fixture repository.
+func writeManifest(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		t.Fatalf("writing %s: %v", name, err)
+	}
+}
+
+// runRepoGit runs one git command while building a fixture.
+func runRepoGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("fixture: git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// stagedState reads one path's index-side state back through the binding, so
+// the assertion goes through the same call the UI makes.
+func stagedState(t *testing.T, a *App, dir, path string) git.State {
+	t.Helper()
+	status, err := a.GitStatus(dir)
+	if err != nil {
+		t.Fatalf("GitStatus: %v", err)
+	}
+	for _, f := range status.Files {
+		if f.Path == path {
+			return f.Staged
+		}
+	}
+	return ""
 }
 
 // The composition test for #8's wiring.

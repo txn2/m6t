@@ -14,7 +14,23 @@ export function CreateEntry(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function DeleteEntry(arg1:string,arg2:string):Promise<void>;
 
+export function GitBranches(arg1:string):Promise<Array<string>>;
+
+export function GitCheckout(arg1:string,arg2:string):Promise<void>;
+
+export function GitCommit(arg1:string,arg2:string):Promise<void>;
+
+export function GitPull(arg1:string):Promise<void>;
+
+export function GitPush(arg1:string,arg2:string,arg3:boolean):Promise<void>;
+
+export function GitRemotes(arg1:string):Promise<Array<string>>;
+
+export function GitStage(arg1:string,arg2:Array<string>):Promise<void>;
+
 export function GitStatus(arg1:string):Promise<git.Status>;
+
+export function GitUnstage(arg1:string,arg2:Array<string>):Promise<void>;
 
 export function ListDirectory(arg1:string,arg2:string):Promise<Array<watch.Entry>>;
 

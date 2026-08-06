@@ -1,4 +1,14 @@
-import { GitStatus } from "../../wailsjs/go/app/App";
+import {
+  GitBranches,
+  GitCheckout,
+  GitCommit,
+  GitPull,
+  GitPush,
+  GitRemotes,
+  GitStage,
+  GitStatus,
+  GitUnstage,
+} from "../../wailsjs/go/app/App";
 
 /**
  * The frontend's view of `internal/git`'s status types.
@@ -66,17 +76,38 @@ export const UNTRACKED = "untracked";
  * `lib/directory.ts`'s `Directory` already takes: an interface a component or
  * hook can be tested against without a Wails runtime.
  *
- * There is one operation, and it is a read. The backend never pushes a status
- * — the `/events` channel only says a project's status may be stale
- * (PROTOCOL.md §5) — so "ask again" is the whole protocol from this side.
+ * Only `status` and the two list calls answer with anything. The mutations
+ * resolve with nothing on success and reject with git's own message on
+ * failure, because the backend does not return a status from an operation:
+ * the write changes `.git`, the watcher publishes a `git` event for it
+ * (PROTOCOL.md §5), and the status is read back through `status`. One source
+ * for what the repository looks like, not two that can disagree.
  */
 export interface Git {
   status: (root: string) => Promise<Status>;
+  stage: (root: string, paths: string[]) => Promise<void>;
+  unstage: (root: string, paths: string[]) => Promise<void>;
+  commit: (root: string, message: string) => Promise<void>;
+  pull: (root: string) => Promise<void>;
+  /** `remote` takes effect only when `setUpstream` is true; otherwise the
+   * repository's own push configuration decides where the branch goes. */
+  push: (root: string, remote: string, setUpstream: boolean) => Promise<void>;
+  checkout: (root: string, branch: string) => Promise<void>;
+  branches: (root: string) => Promise<string[]>;
+  remotes: (root: string) => Promise<string[]>;
 }
 
 /** The git seam backed by the generated Wails bindings. */
 export const wailsGit: Git = {
   status: (root) => GitStatus(root),
+  stage: (root, paths) => GitStage(root, paths),
+  unstage: (root, paths) => GitUnstage(root, paths),
+  commit: (root, message) => GitCommit(root, message),
+  pull: (root) => GitPull(root),
+  push: (root, remote, setUpstream) => GitPush(root, remote, setUpstream),
+  checkout: (root, branch) => GitCheckout(root, branch),
+  branches: (root) => GitBranches(root),
+  remotes: (root) => GitRemotes(root),
 };
 
 /** A status for a project nothing has been read for yet: available-shaped and

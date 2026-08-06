@@ -15,6 +15,28 @@ import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
 import { MODIFIED, emptyStatus } from "./lib/git";
 
+/**
+ * A full `Git` seam from the one or two calls a test actually cares about.
+ *
+ * The mutations resolve with nothing rather than throwing: a test asserting on
+ * the status line should not fail because a control it never touched has no
+ * backend behind it.
+ */
+function stubGit(overrides: Partial<Git> = {}): Git {
+  return {
+    status: () => Promise.resolve(emptyStatus()),
+    stage: () => Promise.resolve(),
+    unstage: () => Promise.resolve(),
+    commit: () => Promise.resolve(),
+    pull: () => Promise.resolve(),
+    push: () => Promise.resolve(),
+    checkout: () => Promise.resolve(),
+    branches: () => Promise.resolve([]),
+    remotes: () => Promise.resolve([]),
+    ...overrides,
+  };
+}
+
 afterEach(cleanup);
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -491,9 +513,10 @@ describe("appearance (#33)", () => {
 });
 
 describe("the git line in the status bar (#8)", () => {
-  /** A Git seam answering per project root. */
+  /** A Git seam answering per project root. The mutations are inert: these
+   * tests exercise the status line, and #9's operations have their own. */
   function fakeGit(byRoot: Record<string, Status>): Git {
-    return { status: (root) => Promise.resolve(byRoot[root] ?? emptyStatus()) };
+    return stubGit({ status: (root) => Promise.resolve(byRoot[root] ?? emptyStatus()) });
   }
 
   function changedOn(branch: string, paths: string[]): Status {
@@ -572,17 +595,114 @@ describe("the git line in the status bar (#8)", () => {
         endpoint={pending}
         backend={{
           registry,
-          git: {
+          git: stubGit({
             status: () => {
               throw new Error("no Wails runtime");
             },
-          },
+          }),
         }}
       />,
     );
 
     await waitFor(() => {
       expect(screen.getByTestId("git-status").textContent).toBe("no Wails runtime");
+    });
+  });
+});
+
+describe("the git operations (#9)", () => {
+  /** A repository whose status changes when the seam is written to, so the
+   * refresh-after-an-operation contract is observable rather than asserted on
+   * a call count. */
+  function stagingGit() {
+    let staged = false;
+    const empty = emptyStatus();
+    const branch = { ...empty.branch, name: "main", upstream: "origin/main" };
+    const status = () =>
+      Promise.resolve({
+        ...empty,
+        branch,
+        files: [
+          {
+            path: "a.yaml",
+            staged: staged ? MODIFIED : "",
+            worktree: staged ? "" : MODIFIED,
+            conflicted: false,
+            origPath: "",
+          },
+        ],
+      });
+    const stage = vi.fn(() => {
+      staged = true;
+      return Promise.resolve();
+    });
+    return { seam: stubGit({ status, stage, branches: () => Promise.resolve(["main"]) }), stage };
+  }
+
+  // The composition test: the panel's button, the ops hook, the seam, and the
+  // status re-read that makes the row move. Each of those has its own unit
+  // test; this is the only thing that fails when they are wired to each other
+  // wrongly.
+  it("stages a file from the changes panel and shows the result", async () => {
+    const { seam, stage } = stagingGit();
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+      />,
+    );
+
+    const button = await screen.findByRole("button", { name: "Stage a.yaml" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(stage).toHaveBeenCalledWith("/w/infra", ["a.yaml"]);
+    });
+    // The row moved groups, which only happens if the operation triggered a
+    // re-read of the status.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Staged: a.yaml" })).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: "Unstaged: a.yaml" })).toBeNull();
+  });
+
+  // A failed operation reaches the user with git's own words in it — the whole
+  // path from the binding's rejection to the alert on screen (DESIGN.md §7).
+  it("shows a failed operation's stderr verbatim", async () => {
+    const seam = stubGit({
+      status: () =>
+        Promise.resolve({
+          ...emptyStatus(),
+          branch: { ...emptyStatus().branch, name: "main", upstream: "origin/main" },
+        }),
+      branches: () => Promise.resolve(["main"]),
+      pull: () =>
+        Promise.reject(
+          new Error("git pull in /w/infra: error: Your local changes would be overwritten"),
+        ),
+    });
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+      />,
+    );
+
+    // The button renders disabled first — the initial status has no upstream
+    // — and only becomes usable once the real one lands. Clicking the disabled
+    // render would assert nothing at all.
+    const pull = await screen.findByRole("button", { name: "Pull" });
+    await waitFor(() => {
+      expect((pull as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(pull);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain(
+        "error: Your local changes would be overwritten",
+      );
     });
   });
 });

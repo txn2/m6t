@@ -29,3 +29,90 @@ func (*App) GitStatus(root string) (git.Status, error) {
 	}
 	return status, nil
 }
+
+// The mutating half of DESIGN.md §7. Each of these is one operation the
+// changes panel or the branch bar puts a control on, and each is a thin pass
+// through to internal/git — the binding layer composes services, it does not
+// implement them.
+//
+// None of them returns a status. The mutation changes .git, the watcher
+// publishes a `git` event for it (PROTOCOL.md §5), and the frontend reads the
+// new status through GitStatus. Returning one here would give the UI two
+// sources for the same fact that could disagree — the operation's answer and
+// the watcher's — and no rule for which to believe.
+//
+// Each names what the user asked for and the project it was asked in, then
+// hands over what internal/git returned — the argv that failed and git's own
+// stderr, unedited (DESIGN.md §7). It is the shape GitStatus above already
+// takes, and the reason the message starts with an English verb rather than
+// with git's: the first line a user reads should say which button they
+// pressed, and git's explanation should be the rest of it.
+
+// GitStage adds paths to the index.
+func (*App) GitStage(root string, paths []string) error {
+	if err := git.Stage(root, paths); err != nil {
+		return fmt.Errorf("staging in %s: %w", root, err)
+	}
+	return nil
+}
+
+// GitUnstage removes paths from the index, leaving the working tree alone.
+func (*App) GitUnstage(root string, paths []string) error {
+	if err := git.Unstage(root, paths); err != nil {
+		return fmt.Errorf("unstaging in %s: %w", root, err)
+	}
+	return nil
+}
+
+// GitCommit records the index under message.
+func (*App) GitCommit(root, message string) error {
+	if err := git.Commit(root, message); err != nil {
+		return fmt.Errorf("committing in %s: %w", root, err)
+	}
+	return nil
+}
+
+// GitPull integrates the upstream branch, honoring the repository's own
+// rebase configuration.
+func (*App) GitPull(root string) error {
+	if err := git.Pull(root); err != nil {
+		return fmt.Errorf("pulling in %s: %w", root, err)
+	}
+	return nil
+}
+
+// GitPush publishes the current branch. remote is used only when setUpstream
+// is true; otherwise the repository's push configuration decides.
+func (*App) GitPush(root, remote string, setUpstream bool) error {
+	if err := git.Push(root, remote, setUpstream); err != nil {
+		return fmt.Errorf("pushing in %s: %w", root, err)
+	}
+	return nil
+}
+
+// GitCheckout switches to an existing local branch.
+func (*App) GitCheckout(root, branch string) error {
+	if err := git.Checkout(root, branch); err != nil {
+		return fmt.Errorf("switching to %s in %s: %w", branch, root, err)
+	}
+	return nil
+}
+
+// GitBranches lists local branches, for the switcher's dropdown.
+func (*App) GitBranches(root string) ([]string, error) {
+	branches, err := git.Branches(root)
+	if err != nil {
+		return nil, fmt.Errorf("listing branches in %s: %w", root, err)
+	}
+	return branches, nil
+}
+
+// GitRemotes lists configured remotes, so the push prompt offers the ones this
+// repository actually has rather than assuming an "origin".
+func (*App) GitRemotes(root string) ([]string, error) {
+	remotes, err := git.Remotes(root)
+	if err != nil {
+		return nil, fmt.Errorf("listing remotes in %s: %w", root, err)
+	}
+	return remotes, nil
+}

@@ -18,8 +18,40 @@ export function DeleteEntry(arg1, arg2) {
   return window['go']['app']['App']['DeleteEntry'](arg1, arg2);
 }
 
+export function GitBranches(arg1) {
+  return window['go']['app']['App']['GitBranches'](arg1);
+}
+
+export function GitCheckout(arg1, arg2) {
+  return window['go']['app']['App']['GitCheckout'](arg1, arg2);
+}
+
+export function GitCommit(arg1, arg2) {
+  return window['go']['app']['App']['GitCommit'](arg1, arg2);
+}
+
+export function GitPull(arg1) {
+  return window['go']['app']['App']['GitPull'](arg1);
+}
+
+export function GitPush(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GitPush'](arg1, arg2, arg3);
+}
+
+export function GitRemotes(arg1) {
+  return window['go']['app']['App']['GitRemotes'](arg1);
+}
+
+export function GitStage(arg1, arg2) {
+  return window['go']['app']['App']['GitStage'](arg1, arg2);
+}
+
 export function GitStatus(arg1) {
   return window['go']['app']['App']['GitStatus'](arg1);
+}
+
+export function GitUnstage(arg1, arg2) {
+  return window['go']['app']['App']['GitUnstage'](arg1, arg2);
 }
 
 export function ListDirectory(arg1, arg2) {
