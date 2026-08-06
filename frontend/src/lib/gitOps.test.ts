@@ -6,24 +6,17 @@ import {
   MODIFIED,
   NOT_A_REPOSITORY,
   NO_GIT,
-  RENAMED,
   UNTRACKED,
   emptyStatus,
 } from "./git";
 import {
   checkoutBlockedReason,
-  commitBlockedReason,
-  commitMessage,
   conflictedFiles,
   defaultRemote,
-  hasMessage,
   isDirty,
   needsUpstream,
-  pathsOf,
-  pathsOfAll,
   pullBlockedReason,
   pushBlockedReason,
-  stagedPaths,
 } from "./gitOps";
 
 function file(path: string, overrides: Partial<FileStatus> = {}): FileStatus {
@@ -35,123 +28,19 @@ function statusOf(files: FileStatus[], branch: Partial<Branch> = {}): Status {
   return { ...empty, branch: { ...empty.branch, name: "main", ...branch }, files };
 }
 
-describe("building the commit message", () => {
-  it("separates the subject from the body with a blank line", () => {
-    expect(commitMessage({ subject: "add the deployment", body: "Because X." })).toBe(
-      "add the deployment\n\nBecause X.",
-    );
-  });
-
-  // A subject with two trailing newlines makes `git log --format=%b` report a
-  // body of whitespace where there is none.
-  it("is just the subject when there is no body", () => {
-    expect(commitMessage({ subject: "add the deployment", body: "   \n" })).toBe(
-      "add the deployment",
-    );
-  });
-
-  it("trims each field", () => {
-    expect(commitMessage({ subject: "  subject  ", body: "  body  " })).toBe("subject\n\nbody");
-  });
-
-  // The body alone is not a message: a commit with a blank subject shows up as
-  // an empty row in every log.
-  it("needs a subject", () => {
-    expect(hasMessage({ subject: "", body: "a body" })).toBe(false);
-    expect(hasMessage({ subject: "   ", body: "a body" })).toBe(false);
-    expect(hasMessage({ subject: "s", body: "" })).toBe(true);
-  });
-});
-
-describe("what is staged", () => {
-  it("lists the paths whose index side differs", () => {
-    const status = statusOf([
-      file("staged.yaml", { staged: ADDED }),
-      file("edited.yaml", { worktree: MODIFIED }),
-      file("both.yaml", { staged: ADDED, worktree: MODIFIED }),
-    ]);
-
-    expect(stagedPaths(status)).toEqual(["staged.yaml", "both.yaml"]);
-  });
-
-  // An unmerged path has no index-versus-HEAD split to report, so counting it
-  // as staged would enable a commit of a half-merged tree.
-  it("excludes conflicted paths", () => {
-    expect(stagedPaths(statusOf([file("a.yaml", { conflicted: true })]))).toEqual([]);
-  });
-
-  it("collects the conflicted paths on their own", () => {
+describe("the conflicted paths", () => {
+  it("collects them on their own", () => {
     const status = statusOf([
       file("a.yaml", { conflicted: true }),
       file("b.yaml", { worktree: MODIFIED }),
+      file("c.yaml", { staged: ADDED }),
     ]);
 
     expect(conflictedFiles(status).map((f) => f.path)).toEqual(["a.yaml"]);
   });
-});
 
-describe("the paths a row's action acts on", () => {
-  it("is just the path for an ordinary change", () => {
-    expect(pathsOf(file("a.yaml", { worktree: MODIFIED }))).toEqual(["a.yaml"]);
-  });
-
-  // Unstaging only `new.yaml` after a `git mv` leaves `old.yaml` staged as a
-  // deletion — a change the user did not ask for, sitting in the index, that
-  // the next commit would carry out.
-  it("includes a rename's source, so half a rename is never left staged", () => {
-    expect(pathsOf(file("new.yaml", { staged: RENAMED, origPath: "old.yaml" }))).toEqual([
-      "new.yaml",
-      "old.yaml",
-    ]);
-  });
-
-  // A rename's source can also be another row's path, and passing the same
-  // pathspec twice is a pointless argument rather than a wrong one — but the
-  // group action is the one place it would happen every time.
-  it("deduplicates across a group", () => {
-    const files = [
-      file("new.yaml", { staged: RENAMED, origPath: "old.yaml" }),
-      file("old.yaml", { staged: DELETED }),
-    ];
-
-    expect(pathsOfAll(files)).toEqual(["new.yaml", "old.yaml"]);
-  });
-});
-
-describe("blocking a commit", () => {
-  it("allows one with a subject and something staged", () => {
-    const status = statusOf([file("a.yaml", { staged: ADDED })]);
-
-    expect(commitBlockedReason(status, { subject: "add a", body: "" })).toBeNull();
-  });
-
-  it("blocks with nothing staged", () => {
-    const status = statusOf([file("a.yaml", { worktree: MODIFIED })]);
-
-    expect(commitBlockedReason(status, { subject: "add a", body: "" })).toBe(
-      "Stage something to commit.",
-    );
-  });
-
-  it("blocks with no subject", () => {
-    const status = statusOf([file("a.yaml", { staged: ADDED })]);
-
-    expect(commitBlockedReason(status, { subject: "  ", body: "a body" })).toBe(
-      "A commit needs a subject line.",
-    );
-  });
-
-  // Committing a half-merged tree is the mistake worth naming first, so a
-  // conflict outranks the other two reasons.
-  it("blocks on a conflict even when something else is staged and typed", () => {
-    const status = statusOf([
-      file("a.yaml", { conflicted: true }),
-      file("b.yaml", { staged: ADDED }),
-    ]);
-
-    expect(commitBlockedReason(status, { subject: "ship it", body: "" })).toBe(
-      "Resolve the conflicted files before committing.",
-    );
+  it("is empty on a tree with nothing unmerged", () => {
+    expect(conflictedFiles(statusOf([file("a.yaml", { worktree: MODIFIED })]))).toEqual([]);
   });
 });
 

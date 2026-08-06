@@ -161,7 +161,15 @@ const (
 	// ceiling cares about: folding the heads into ListDirectory's reply would
 	// have made every directory expansion pay for file reads it usually does
 	// not need, which is the cost the lazy classification exists to avoid.
-	maxAppMethods = 24
+	//
+	// 24 -> 21 in #39, the first time this ceiling has come down. GitStage,
+	// GitUnstage and GitCommit are gone because the UI they existed for is
+	// gone: what records work in m6t is the agent in the terminal, running
+	// the user's own git. The #9 note above argued that each of the eight was
+	// a request with an answer and no throughput, which was true and is not
+	// the test these three failed — they failed the older one, that the bound
+	// surface is only what the UI calls.
+	maxAppMethods = 21
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

@@ -30,9 +30,6 @@ function renderPanel(props: Partial<ChangesPanelProps> = {}) {
     status: emptyStatus(),
     error: null,
     onOpenFile: vi.fn(),
-    onStage: vi.fn(),
-    onUnstage: vi.fn(),
-    busy: false,
     ...props,
   };
   render(<ChangesPanel {...merged} />);
@@ -92,80 +89,45 @@ describe("the changes list", () => {
   });
 });
 
-describe("staging from the panel", () => {
-  it("stages one file from its unstaged row", () => {
-    const { onStage } = renderPanel({
-      status: statusOf([file("a.yaml", { worktree: MODIFIED })]),
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Stage a.yaml" }));
-
-    expect(onStage).toHaveBeenCalledWith(["a.yaml"]);
-  });
-
-  it("unstages one file from its staged row", () => {
-    const { onUnstage } = renderPanel({
-      status: statusOf([file("a.yaml", { staged: ADDED })]),
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Unstage a.yaml" }));
-
-    expect(onUnstage).toHaveBeenCalledWith(["a.yaml"]);
-  });
-
-  // The group action sends every path in that group in one call, so the whole
-  // group moves in one git invocation rather than one per row.
-  it("stages a whole group at once", () => {
-    const { onStage } = renderPanel({
+describe("what the panel does not do", () => {
+  // The panel reports; the agent in the terminal writes (#39). A button here
+  // would be a second writer of the index that the agent cannot see.
+  it("offers no staging control on any row", () => {
+    renderPanel({
       status: statusOf([
         file("a.yaml", { worktree: MODIFIED }),
-        file("b.yaml", { worktree: UNTRACKED }),
+        file("b.yaml", { staged: ADDED }),
+        file("new.yaml", { staged: RENAMED, origPath: "old.yaml" }),
       ]),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
-
-    expect(onStage).toHaveBeenCalledWith(["a.yaml", "b.yaml"]);
+    // Exact names, not a prefix: every row's own accessible name starts with
+    // "Staged:" or "Unstaged:", so a prefix match would find the rows and pass
+    // for the wrong reason.
+    for (const name of [
+      "Stage a.yaml",
+      "Unstage b.yaml",
+      "Unstage new.yaml",
+      "Stage all",
+      "Unstage all",
+    ]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 
-  // A file staged and then edited again is one row in each group, and each
-  // row's action moves only its own side.
-  it("offers both actions for a file that is in both groups", () => {
-    const { onStage, onUnstage } = renderPanel({
-      status: statusOf([file("a.yaml", { staged: ADDED, worktree: MODIFIED })]),
+  // Every row is the button that opens its file, and nothing else is.
+  it("renders one button per row", () => {
+    renderPanel({
+      status: statusOf([
+        file("a.yaml", { worktree: MODIFIED }),
+        file("b.yaml", { staged: ADDED }),
+      ]),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Stage a.yaml" }));
-    fireEvent.click(screen.getByRole("button", { name: "Unstage a.yaml" }));
-
-    expect(onStage).toHaveBeenCalledWith(["a.yaml"]);
-    expect(onUnstage).toHaveBeenCalledWith(["a.yaml"]);
-  });
-
-  // A rename is one row and two paths. Unstaging only the new name after a
-  // `git mv` leaves the old one staged as a deletion, which the next commit
-  // would carry out.
-  it("unstages both halves of a rename", () => {
-    const { onUnstage } = renderPanel({
-      status: statusOf([file("new.yaml", { staged: RENAMED, origPath: "old.yaml" })]),
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Unstage new.yaml" }));
-
-    expect(onUnstage).toHaveBeenCalledWith(["new.yaml", "old.yaml"]);
-  });
-
-  // git serializes on the index, so a second click during an operation buys a
-  // lock error rather than a second operation.
-  it("disables every action while an operation is in flight", () => {
-    const { onStage } = renderPanel({
-      status: statusOf([file("a.yaml", { worktree: MODIFIED })]),
-      busy: true,
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Stage a.yaml" }));
-
-    expect(onStage).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Staged: b.yaml",
+      "Unstaged: a.yaml",
+    ]);
   });
 });
 
@@ -179,12 +141,12 @@ describe("conflicts", () => {
     expect(screen.getByRole("status").textContent).toContain("Resolve these in the terminal");
   });
 
-  // `git add` on a conflicted file means "I have resolved this". A user who
-  // has not should not be one misclick from claiming so.
-  it("gives a conflicted row no staging action", () => {
+  // A conflicted path groups with unstaged for badge purposes, but it belongs
+  // to its own section here: an unmerged file is not an ordinary edit waiting
+  // to be listed beside one.
+  it("keeps a conflicted path out of the unstaged group", () => {
     renderPanel({ status: statusOf([file("a.yaml", { conflicted: true })]) });
 
-    expect(screen.queryByRole("button", { name: "Stage a.yaml" })).toBeNull();
     expect(screen.queryByText("Unstaged")).toBeNull();
   });
 

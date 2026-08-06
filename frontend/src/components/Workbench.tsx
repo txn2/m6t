@@ -9,7 +9,6 @@ import {
 import { FileTree } from "./FileTree";
 import { BranchBar } from "./BranchBar";
 import { ChangesPanel } from "./ChangesPanel";
-import { CommitBox } from "./CommitBox";
 import { PaneSeparator } from "./PaneSeparator";
 import type { Project } from "../lib/projects";
 import type { FileTreeController } from "../lib/useFileTree";
@@ -30,8 +29,8 @@ export interface WorkbenchProps {
   readonly tree: FileTreeController;
   /** This project's git status (#8): tree badges and the changes list. */
   readonly git: GitStatusController;
-  /** The mutating git loop for this project (#9): stage, commit, pull, push,
-   * branch switch. */
+  /** The mutating git loop for this project (#9): pull, push, branch switch.
+   * Staging and committing are the terminal agent's, not m6t's (#39). */
   readonly gitOps: GitOpsController;
   /** The open-file intent a tree selection emits; the editor strip acts on it. */
   readonly onOpenFile: (path: string) => void;
@@ -89,15 +88,7 @@ export function Workbench({
           onPush={gitOps.push}
           onDismissError={gitOps.dismissError}
         />
-        <ChangesPanel
-          status={git.status}
-          error={git.error}
-          onOpenFile={onOpenFile}
-          onStage={gitOps.stage}
-          onUnstage={gitOps.unstage}
-          busy={gitOps.busy}
-        />
-        <CommitBox status={git.status} onCommit={gitOps.commit} busy={gitOps.busy} />
+        <ChangesPanel status={git.status} error={git.error} onOpenFile={onOpenFile} />
       </aside>
 
       <PaneSeparator

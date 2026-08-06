@@ -47,8 +47,16 @@ var structuralPins = map[string]packagePin{
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/git": {
-		loc: 1000, exported: 27,
-		why: "git service: both halves of DESIGN.md §7 over the system git — porcelain v2 status with its two degraded states reported as values rather than errors, and the daily loop that writes (stage, unstage, commit, pull, push, branch switch)",
+		// 27 -> 21 exported and 1000 -> 900 LOC in #39. Stage, Unstage,
+		// Commit and the three argument errors only they could return
+		// (ErrNoPaths, ErrOutsideRoot, ErrEmptyMessage) are gone: the UI has
+		// no control that writes the index, so under the no-vaporware rule
+		// the service methods behind those controls are not "kept for #35",
+		// they are unreachable code. Both figures ratchet down rather than
+		// standing still, because a ceiling left where a package used to be
+		// is room for the next thing to move in unnoticed.
+		loc: 900, exported: 21,
+		why: "git service: both halves of DESIGN.md §7 over the system git — porcelain v2 status with its two degraded states reported as values rather than errors, and the writes the terminal is a bad place for (pull, push, branch switch)",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,

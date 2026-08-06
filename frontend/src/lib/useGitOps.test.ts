@@ -20,9 +20,6 @@ type SpiedGit = { [K in keyof Git]: Mock<Git[K]> };
 function fakeGit(overrides: Partial<Git> = {}): SpiedGit {
   const seam: SpiedGit = {
     status: vi.fn(() => Promise.resolve(emptyStatus())),
-    stage: vi.fn(() => Promise.resolve()),
-    unstage: vi.fn(() => Promise.resolve()),
-    commit: vi.fn(() => Promise.resolve()),
     pull: vi.fn(() => Promise.resolve()),
     push: vi.fn(() => Promise.resolve()),
     checkout: vi.fn(() => Promise.resolve()),
@@ -46,16 +43,16 @@ async function mount(git: ReturnType<typeof fakeGit>, onChanged = vi.fn()) {
 }
 
 describe("running an operation", () => {
-  it("stages the paths it is given", async () => {
+  it("checks out the branch it is given", async () => {
     const git = fakeGit();
     const { result } = await mount(git);
 
     act(() => {
-      result.current.stage(["a.yaml", "b.yaml"]);
+      result.current.checkout("feature/x");
     });
 
     await waitFor(() => {
-      expect(git.stage).toHaveBeenCalledWith("/w/infra", ["a.yaml", "b.yaml"]);
+      expect(git.checkout).toHaveBeenCalledWith("/w/infra", "feature/x");
     });
   });
 
@@ -79,7 +76,7 @@ describe("running an operation", () => {
     const { result, onChanged } = await mount(git);
 
     act(() => {
-      result.current.unstage(["a.yaml"]);
+      result.current.push("", false);
     });
 
     await waitFor(() => {
@@ -106,36 +103,19 @@ describe("running an operation", () => {
 
   it("carries git's own message verbatim", async () => {
     const git = fakeGit({
-      commit: vi.fn(() =>
-        Promise.reject(new Error("git commit in /w/infra: nothing to commit, working tree clean")),
+      push: vi.fn(() =>
+        Promise.reject(new Error("git push in /w/infra: failed to push some refs")),
       ),
     });
     const { result } = await mount(git);
 
-    await act(async () => {
-      await result.current.commit("subject");
+    act(() => {
+      result.current.push("", false);
     });
 
-    expect(result.current.error).toBe(
-      "git commit in /w/infra: nothing to commit, working tree clean",
-    );
-  });
-
-  it("reports whether a commit was recorded, so the editor keeps a failed draft", async () => {
-    const git = fakeGit({ commit: vi.fn(() => Promise.reject(new Error("nothing to commit"))) });
-    const { result } = await mount(git);
-
-    let committed: boolean | null = null;
-    await act(async () => {
-      committed = await result.current.commit("subject");
+    await waitFor(() => {
+      expect(result.current.error).toBe("git push in /w/infra: failed to push some refs");
     });
-    expect(committed).toBe(false);
-
-    git.commit.mockImplementation(() => Promise.resolve());
-    await act(async () => {
-      committed = await result.current.commit("subject");
-    });
-    expect(committed).toBe(true);
   });
 
   it("clears a previous failure when the next operation succeeds", async () => {
@@ -150,7 +130,7 @@ describe("running an operation", () => {
     });
 
     act(() => {
-      result.current.stage(["a.yaml"]);
+      result.current.checkout("main");
     });
     await waitFor(() => {
       expect(result.current.error).toBeNull();
@@ -207,10 +187,10 @@ describe("running an operation", () => {
     const { result } = renderHook(() => useGitOps(null, vi.fn(), git));
 
     act(() => {
-      result.current.stage(["a.yaml"]);
+      result.current.pull();
     });
 
-    expect(git.stage).not.toHaveBeenCalled();
+    expect(git.pull).not.toHaveBeenCalled();
     expect(git.branches).not.toHaveBeenCalled();
   });
 });

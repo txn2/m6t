@@ -95,57 +95,15 @@ func TestGitStatusWrapsARealFailureWithTheProjectPath(t *testing.T) {
 // A stub here would prove only that this file calls internal/git — which the
 // one-line bodies already show — while these prove the operation reaches the
 // user's repository and that the status the UI reads back agrees with it.
-func TestGitStageAndUnstageMoveAPathThroughTheIndex(t *testing.T) {
-	a := testApp(t)
-	dir := gitRepoDir(t)
-	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
-
-	if err := a.GitStage(dir, []string{"deploy.yaml"}); err != nil {
-		t.Fatalf("GitStage: %v", err)
-	}
-	if got := stagedState(t, a, dir, "deploy.yaml"); got != git.StateAdded {
-		t.Fatalf("staged = %q, want %q", got, git.StateAdded)
-	}
-
-	if err := a.GitUnstage(dir, []string{"deploy.yaml"}); err != nil {
-		t.Fatalf("GitUnstage: %v", err)
-	}
-	if got := stagedState(t, a, dir, "deploy.yaml"); got != "" {
-		t.Errorf("staged = %q, want nothing staged", got)
-	}
-}
-
-func TestGitCommitClearsTheChangesList(t *testing.T) {
-	a := testApp(t)
-	dir := gitRepoDir(t)
-	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
-
-	if err := a.GitStage(dir, []string{"deploy.yaml"}); err != nil {
-		t.Fatalf("GitStage: %v", err)
-	}
-	if err := a.GitCommit(dir, "add the deployment"); err != nil {
-		t.Fatalf("GitCommit: %v", err)
-	}
-
-	status, err := a.GitStatus(dir)
-	if err != nil {
-		t.Fatalf("GitStatus: %v", err)
-	}
-	if len(status.Files) != 0 {
-		t.Errorf("files = %+v, want a clean tree", status.Files)
-	}
-}
-
+//
+// The commit the fixture needs is made with runRepoGit, the way the terminal
+// agent makes one: there is no commit binding to make it with (#39).
 func TestGitBranchesAndCheckoutSwitchThroughTheBinding(t *testing.T) {
 	a := testApp(t)
 	dir := gitRepoDir(t)
 	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
-	if err := a.GitStage(dir, []string{"deploy.yaml"}); err != nil {
-		t.Fatalf("GitStage: %v", err)
-	}
-	if err := a.GitCommit(dir, "first"); err != nil {
-		t.Fatalf("GitCommit: %v", err)
-	}
+	runRepoGit(t, dir, "add", "-A")
+	runRepoGit(t, dir, "commit", "-qm", "first")
 	runRepoGit(t, dir, "branch", "feature/x")
 
 	branches, err := a.GitBranches(dir)
@@ -188,11 +146,11 @@ func TestGitOperationsSurfaceGitsOwnWords(t *testing.T) {
 	a := testApp(t)
 	dir := gitRepoDir(t)
 
-	err := a.GitCommit(dir, "nothing is staged")
+	err := a.GitPush(dir, "", false)
 	if err == nil {
-		t.Fatal("GitCommit succeeded with an empty index")
+		t.Fatal("GitPush succeeded with no remote configured")
 	}
-	if !strings.Contains(err.Error(), "nothing to commit") {
+	if !strings.Contains(err.Error(), "No configured push destination") {
 		t.Errorf("error = %q, want git's own explanation", err)
 	}
 	if !strings.Contains(err.Error(), dir) {
@@ -202,13 +160,10 @@ func TestGitOperationsSurfaceGitsOwnWords(t *testing.T) {
 
 // The bound surface is a public API (CLAUDE.md), so it is checked here and not
 // only in the UI that normally calls it.
-func TestGitStageRejectsAPathOutsideTheRepository(t *testing.T) {
+func TestGitOperationsRejectRefsGitWouldReadAsOptions(t *testing.T) {
 	a := testApp(t)
 	dir := gitRepoDir(t)
 
-	if err := a.GitStage(dir, []string{"../../etc/hosts"}); !errors.Is(err, git.ErrOutsideRoot) {
-		t.Errorf("GitStage(..) = %v, want ErrOutsideRoot", err)
-	}
 	if err := a.GitCheckout(dir, "--orphan"); !errors.Is(err, git.ErrInvalidRef) {
 		t.Errorf("GitCheckout(--orphan) = %v, want ErrInvalidRef", err)
 	}
@@ -254,22 +209,6 @@ func runRepoGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("fixture: git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
-}
-
-// stagedState reads one path's index-side state back through the binding, so
-// the assertion goes through the same call the UI makes.
-func stagedState(t *testing.T, a *App, dir, path string) git.State {
-	t.Helper()
-	status, err := a.GitStatus(dir)
-	if err != nil {
-		t.Fatalf("GitStatus: %v", err)
-	}
-	for _, f := range status.Files {
-		if f.Path == path {
-			return f.Staged
-		}
-	}
-	return ""
 }
 
 // The composition test for #8's wiring.

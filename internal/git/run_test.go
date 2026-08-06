@@ -257,6 +257,10 @@ func TestNetworkInvocationsGetTheLongerDeadline(t *testing.T) {
 // git does not always fail on stderr: `git commit` with an empty index exits
 // non-zero and explains itself on stdout. Reporting only stderr would hand the
 // user "exit status 1", which is the loss of detail DESIGN.md §7 forbids.
+//
+// This is the only test of the stdout branch since #39 took `git commit` out
+// of the package — no remaining subcommand was observed picking stdout for a
+// failure. See explanation's own comment for why the branch stays.
 func TestExplanationFallsBackToStdout(t *testing.T) {
 	if got := explanation("nothing to commit\n", ""); got != "nothing to commit\n" {
 		t.Errorf("explanation = %q, want stdout when stderr is empty", got)

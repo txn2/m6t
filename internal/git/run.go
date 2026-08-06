@@ -59,8 +59,8 @@ var (
 
 // invocation is how one git call differs from the default one.
 //
-// The zero value is a mutating, local call with no input — the shape every
-// operation in ops.go wants — so only the exceptions have to say anything.
+// The zero value is a mutating, local call — the shape Checkout wants — so
+// only the exceptions have to say anything.
 type invocation struct {
 	// readOnly adds --no-optional-locks, which stops git from refreshing the
 	// index as a side effect of reading it. It is what keeps the status
@@ -68,17 +68,13 @@ type invocation struct {
 	// watches .git, so a read that wrote .git/index would publish a change,
 	// which would trigger another read, forever.
 	//
-	// A mutating call must NOT set it. Those write the index on purpose, and
-	// the resulting event is the notification the UI needs to refresh.
+	// A mutating call must NOT set it. Those change .git on purpose, and the
+	// resulting event is the notification the UI needs to refresh.
 	readOnly bool
 
 	// network extends the deadline to networkTimeout for a call that talks to
 	// a remote.
 	network bool
-
-	// stdin is fed to git and closed. It carries a commit message, which is
-	// the one input too large and too free-form to be an argv element.
-	stdin string
 }
 
 // runGit invokes git inside root as a read-only call and returns its standard
@@ -93,9 +89,7 @@ func runGit(root string, args ...string) (string, error) {
 // so a worktree path containing shell metacharacters is inert
 // (.semgrep/go-security.yml enforces the no-shell half of this). The argv is
 // logged, as CLAUDE.md requires of every external binary: what the app ran on
-// the user's repository is the first thing anyone debugging it needs. stdin is
-// deliberately not logged — it is a commit message, which is the user's prose
-// and not part of what was run.
+// the user's repository is the first thing anyone debugging it needs.
 func runWith(root string, call invocation, args ...string) (string, error) {
 	binary, err := exec.LookPath(binaryName)
 	if err != nil {
@@ -110,11 +104,12 @@ func runWith(root string, call invocation, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(ctx, binary, argv...)
 	cmd.Env = commandEnv()
-	// Always a reader, never the inherited stdin: a git that reached the
+	// An empty reader, never the inherited stdin: a git that reached the
 	// user's terminal would be reading keystrokes meant for a shell in
-	// another pane. An operation with no input gets an empty one, which is
-	// what makes a remote asking for a password fail instead of hang.
-	cmd.Stdin = strings.NewReader(call.stdin)
+	// another pane. Nothing here has input to give it — no operation writes
+	// the index (#39) — and an empty stdin is what makes a remote asking for
+	// a password fail instead of hang.
+	cmd.Stdin = strings.NewReader("")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -135,6 +130,14 @@ func runWith(root string, call invocation, args ...string) (string, error) {
 // which is exactly the loss of detail DESIGN.md §7 forbids. stderr still wins
 // when both are set — when git has something to say about a failure, that is
 // where it says it.
+//
+// That instance is no longer reachable: this package stopped running `git
+// commit` in #39, and none of pull, push or checkout was observed choosing
+// stdout for a failure. It stays anyway, because which stream carries the
+// reason is git's decision per subcommand rather than this package's, and the
+// failure mode of guessing wrong is silent — an error box with "exit status 1"
+// in it and no way to find out what happened. Five lines and a unit test is
+// the cheaper side of that trade.
 func explanation(stdout, stderr string) string {
 	if strings.TrimSpace(stderr) != "" {
 		return stderr

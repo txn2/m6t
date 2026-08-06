@@ -1105,12 +1105,12 @@ button:hover {
 }
 
 /* =============================================================================
-   Git operations: branch bar, row actions, commit box (#9)
+   Git operations: the branch bar (#9, #39)
    ========================================================================== */
 
 /* The sidebar is one column of stacked sections. The changes list is the only
-   one that scrolls; the branch bar and the commit box are fixed chrome around
-   it, so a long changes list never pushes the Commit button off the bottom. */
+   one that scrolls; the branch bar is fixed chrome beside it, so a long
+   changes list never pushes Pull and Push off the bottom. */
 .branchbar {
   display: flex;
   flex-wrap: wrap;
@@ -1196,64 +1196,6 @@ button:hover {
   font-size: var(--m6t-font-size-sm);
 }
 
-/* The group-level action sits at the far end of its heading, where it reads as
-   belonging to the group rather than to the first row under it. */
-.changes__all {
-  margin-left: auto;
-  padding: 0 var(--m6t-space-2);
-  border: none;
-  background: none;
-  color: var(--m6t-muted);
-  font: inherit;
-  font-size: var(--m6t-font-size-sm);
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.changes__all:hover:not(:disabled) {
-  color: var(--m6t-accent);
-}
-
-.changes__item {
-  display: flex;
-  align-items: center;
-}
-
-/* The row takes the space; the action keeps its own and appears on hover, the
-   same discipline the tree's menu button follows — so the list reads as paths
-   rather than as a column of buttons. */
-.changes__item .changes__row {
-  min-width: 0;
-  flex: 1;
-}
-
-.changes__action {
-  flex: none;
-  width: var(--m6t-space-6);
-  height: var(--m6t-row);
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: var(--m6t-muted);
-  opacity: 0;
-}
-
-.changes__item:hover .changes__action,
-.changes__item:focus-within .changes__action {
-  opacity: 1;
-}
-
-.changes__action:hover:not(:disabled) {
-  color: var(--m6t-accent);
-}
-
-.changes__action:disabled,
-.changes__all:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
 .changes__group--conflict {
   color: var(--m6t-git-conflict);
 }
@@ -1263,68 +1205,4 @@ button:hover {
   padding: 0 var(--m6t-space-3) var(--m6t-space-1);
   color: var(--m6t-muted);
   font-size: var(--m6t-font-size-sm);
-}
-
-.commit {
-  display: flex;
-  flex-direction: column;
-  gap: var(--m6t-space-2);
-  flex: none;
-  padding: var(--m6t-space-3);
-  border-top: 1px solid var(--m6t-border);
-}
-
-.commit__subject,
-.commit__body {
-  padding: var(--m6t-space-2);
-  border: 1px solid var(--m6t-border);
-  border-radius: var(--m6t-radius);
-  background: var(--m6t-bg);
-  color: inherit;
-  font: inherit;
-  font-size: var(--m6t-font-size-sm);
-}
-
-.commit__subject:focus-visible,
-.commit__body:focus-visible {
-  border-color: var(--m6t-accent);
-  outline: none;
-}
-
-/* The body is prose the user may have pasted a manifest into, so it resizes
-   vertically and never horizontally — a sidebar that widens itself would move
-   the editor out from under the pointer. */
-.commit__body {
-  resize: vertical;
-  font-family: var(--m6t-font-mono);
-}
-
-.commit__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--m6t-space-3);
-}
-
-.commit__submit {
-  height: var(--m6t-row);
-  font-size: var(--m6t-font-size-sm);
-}
-
-.commit__submit:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.commit__submit:disabled:hover {
-  border-color: var(--m6t-border);
-}
-
-.commit__staged,
-.commit__blocked {
-  color: var(--m6t-muted);
-  font-size: var(--m6t-font-size-sm);
-}
-
-.commit__blocked {
-  margin: 0;
 }

@@ -16,6 +16,11 @@ import { wailsGit } from "./git";
  * fails. A failed pull is the case that makes this necessary rather than
  * cosmetic: it exits non-zero *and* leaves conflicted files behind, so the
  * panel that has to show them is only correct if a failure refreshes too.
+ *
+ * The three operations that write the index — stage, unstage, commit — are
+ * not here (#39). They belong to the agent in the terminal, which runs the
+ * user's own git; two writers of one index, only one of which the agent can
+ * see, is a disagreement waiting to happen.
  */
 export interface GitOpsController {
   /** An operation is in flight. Every control disables on it: git serializes
@@ -29,12 +34,6 @@ export interface GitOpsController {
   /** Configured remotes, for the first-push prompt. */
   readonly remotes: readonly string[];
   readonly dismissError: () => void;
-  readonly stage: (paths: readonly string[]) => void;
-  readonly unstage: (paths: readonly string[]) => void;
-  /** Resolves true when the commit was recorded, so the caller can clear the
-   * message editor — and only then. A draft thrown away on a failed commit is
-   * a draft the user has to retype. */
-  readonly commit: (message: string) => Promise<boolean>;
   readonly pull: () => void;
   readonly push: (remote: string, setUpstream: boolean) => void;
   readonly checkout: (branch: string) => void;
@@ -94,7 +93,12 @@ export function useGitOps(
   }, [root, listRefs]);
 
   /**
-   * Runs one operation and reports whether it succeeded.
+   * Runs one operation, leaving its outcome in `error`.
+   *
+   * Nothing is returned. The three operations left all report the same way —
+   * git's own message in `error`, the new state through the status re-read
+   * below — so a success flag would be a second channel for what `error`
+   * already says, and no caller has anything to do with it.
    *
    * The busy flag is not a lock. Two operations cannot overlap through the UI
    * because everything disables on it, and if they somehow did, git's own
@@ -103,23 +107,21 @@ export function useGitOps(
    * repository.
    */
   const run = useCallback(
-    async (operation: (root: string) => Promise<void>): Promise<boolean> => {
+    async (operation: (root: string) => Promise<void>): Promise<void> => {
       const reading = target.current;
       if (reading === null) {
-        return false;
+        return;
       }
       setBusy(true);
       setError(null);
       try {
         await operation(reading);
-        return true;
       } catch (failure: unknown) {
         // Dropped when the project changed underneath: the message would name
         // a repository that is no longer on screen.
         if (target.current === reading) {
           setError(describeError(failure));
         }
-        return false;
       } finally {
         // Unconditional, unlike the error above. `busy` belongs to the
         // controller, not to the project: gating it on the project still
@@ -135,25 +137,6 @@ export function useGitOps(
       }
     },
     [listRefs],
-  );
-
-  const stage = useCallback(
-    (paths: readonly string[]) => {
-      void run((at) => seam.current.stage(at, [...paths]));
-    },
-    [run],
-  );
-
-  const unstage = useCallback(
-    (paths: readonly string[]) => {
-      void run((at) => seam.current.unstage(at, [...paths]));
-    },
-    [run],
-  );
-
-  const commit = useCallback(
-    (message: string) => run((at) => seam.current.commit(at, message)),
-    [run],
   );
 
   const pull = useCallback(() => {
@@ -184,9 +167,6 @@ export function useGitOps(
     branches,
     remotes,
     dismissError,
-    stage,
-    unstage,
-    commit,
     pull,
     push,
     checkout,
