@@ -9,90 +9,16 @@ import { AVAILABLE, UNTRACKED } from "./git";
  * deciding what may be called. The split is the one `gitStatus.ts` already
  * uses, and it is what lets "a dirty worktree blocks a branch switch" be a
  * test over a value instead of a test that renders a dropdown.
- */
-
-/** A commit message, as the two fields the editor shows. */
-export interface CommitDraft {
-  readonly subject: string;
-  readonly body: string;
-}
-
-export const EMPTY_DRAFT: CommitDraft = { subject: "", body: "" };
-
-/**
- * Joins a draft into the message git receives: subject, a blank line, body —
- * the convention every git tool reads a commit by.
  *
- * A draft with no body produces just the subject rather than a subject with
- * two trailing newlines, so `git log --format=%b` on it is empty instead of
- * whitespace.
+ * Nothing here decides anything about staging or committing (#39). The UI has
+ * no control for either, so a rule about when one would be allowed would be a
+ * rule with no control to gate.
  */
-export function commitMessage(draft: CommitDraft): string {
-  const subject = draft.subject.trim();
-  const body = draft.body.trim();
-  return body === "" ? subject : `${subject}\n\n${body}`;
-}
-
-/** Whether a draft has enough in it to be a commit message. The body alone is
- * not enough: a commit whose subject line is blank shows up as an empty row in
- * every log. */
-export function hasMessage(draft: CommitDraft): boolean {
-  return draft.subject.trim() !== "";
-}
-
-/**
- * The paths one row's action has to act on.
- *
- * A rename is one row and two paths, and sending only the one the row is named
- * after leaves the other half of the rename behind. Unstaging `new.yaml` alone
- * after a `git mv` leaves `old.yaml` **staged as a deletion** — a change the
- * user did not ask for, sitting in the index, that a later commit would carry
- * out. Staging has the mirror problem: the new name arrives without the old
- * one's removal.
- *
- * A copy's source is unchanged in the index, so including it is a no-op rather
- * than a special case worth branching on.
- */
-export function pathsOf(file: FileStatus): string[] {
-  return file.origPath === "" ? [file.path] : [file.path, file.origPath];
-}
-
-/** Every path a group's action has to act on, deduplicated: a rename's source
- * can also be another row's path. */
-export function pathsOfAll(files: readonly FileStatus[]): string[] {
-  return [...new Set(files.flatMap(pathsOf))];
-}
-
-/** The paths staged for commit. */
-export function stagedPaths(status: Status): readonly string[] {
-  return status.files.filter((f) => !f.conflicted && f.staged !== "").map((f) => f.path);
-}
 
 /** Every unmerged path. These get their own group and their own instruction:
  * v1 has no in-app merge tool, and resolution happens in the terminal. */
 export function conflictedFiles(status: Status): readonly FileStatus[] {
   return status.files.filter((f) => f.conflicted);
-}
-
-/**
- * Why the commit button is disabled, or null when it is not.
- *
- * A reason rather than a boolean because a disabled control with no
- * explanation is the thing users file bugs about. The order is the order a
- * user hits them: a conflict outranks an empty index, because committing a
- * half-merged tree is the mistake worth naming first.
- */
-export function commitBlockedReason(status: Status, draft: CommitDraft): string | null {
-  if (conflictedFiles(status).length > 0) {
-    return "Resolve the conflicted files before committing.";
-  }
-  if (stagedPaths(status).length === 0) {
-    return "Stage something to commit.";
-  }
-  if (!hasMessage(draft)) {
-    return "A commit needs a subject line.";
-  }
-  return null;
 }
 
 /**
@@ -113,7 +39,8 @@ export function isDirty(status: Status): boolean {
  * Why the branch switcher is disabled, or null when it is not.
  *
  * The dirty check is m6t's, made before git runs, so the message names what to
- * do about it. git would refuse a checkout that overwrote a change on its own,
+ * do about it — in the terminal, which is where committing and stashing both
+ * happen (#39). git would refuse a checkout that overwrote a change on its own,
  * but only for the files that collide — a switch that silently carried half
  * the user's edits onto another branch is the case this closes.
  */

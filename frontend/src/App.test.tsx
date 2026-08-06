@@ -25,9 +25,6 @@ import { MODIFIED, emptyStatus } from "./lib/git";
 function stubGit(overrides: Partial<Git> = {}): Git {
   return {
     status: () => Promise.resolve(emptyStatus()),
-    stage: () => Promise.resolve(),
-    unstage: () => Promise.resolve(),
-    commit: () => Promise.resolve(),
     pull: () => Promise.resolve(),
     push: () => Promise.resolve(),
     checkout: () => Promise.resolve(),
@@ -614,37 +611,39 @@ describe("the git operations (#9)", () => {
   /** A repository whose status changes when the seam is written to, so the
    * refresh-after-an-operation contract is observable rather than asserted on
    * a call count. */
-  function stagingGit() {
-    let staged = false;
+  function pullingGit() {
+    let pulled = false;
     const empty = emptyStatus();
     const branch = { ...empty.branch, name: "main", upstream: "origin/main" };
     const status = () =>
       Promise.resolve({
         ...empty,
         branch,
-        files: [
-          {
-            path: "a.yaml",
-            staged: staged ? MODIFIED : "",
-            worktree: staged ? "" : MODIFIED,
-            conflicted: false,
-            origPath: "",
-          },
-        ],
+        files: pulled
+          ? []
+          : [
+              {
+                path: "a.yaml",
+                staged: "",
+                worktree: MODIFIED,
+                conflicted: false,
+                origPath: "",
+              },
+            ],
       });
-    const stage = vi.fn(() => {
-      staged = true;
+    const pull = vi.fn(() => {
+      pulled = true;
       return Promise.resolve();
     });
-    return { seam: stubGit({ status, stage, branches: () => Promise.resolve(["main"]) }), stage };
+    return { seam: stubGit({ status, pull, branches: () => Promise.resolve(["main"]) }), pull };
   }
 
-  // The composition test: the panel's button, the ops hook, the seam, and the
-  // status re-read that makes the row move. Each of those has its own unit
-  // test; this is the only thing that fails when they are wired to each other
-  // wrongly.
-  it("stages a file from the changes panel and shows the result", async () => {
-    const { seam, stage } = stagingGit();
+  // The composition test: the branch bar's button, the ops hook, the seam, and
+  // the status re-read that makes the row go away. Each of those has its own
+  // unit test; this is the only thing that fails when they are wired to each
+  // other wrongly.
+  it("pulls from the branch bar and shows the result", async () => {
+    const { seam, pull } = pullingGit();
     render(
       <App
         load={attached}
@@ -653,18 +652,51 @@ describe("the git operations (#9)", () => {
       />,
     );
 
-    const button = await screen.findByRole("button", { name: "Stage a.yaml" });
+    // The button renders disabled first — the initial status has no upstream —
+    // and only becomes usable once the real one lands.
+    const button = await screen.findByRole("button", { name: "Pull" });
+    await waitFor(() => {
+      expect((button as HTMLButtonElement).disabled).toBe(false);
+    });
+    expect(screen.getByRole("button", { name: "Unstaged: a.yaml" })).toBeDefined();
+
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(stage).toHaveBeenCalledWith("/w/infra", ["a.yaml"]);
+      expect(pull).toHaveBeenCalledWith("/w/infra");
     });
-    // The row moved groups, which only happens if the operation triggered a
+    // The row went away, which only happens if the operation triggered a
     // re-read of the status.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Staged: a.yaml" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Unstaged: a.yaml" })).toBeNull();
     });
-    expect(screen.queryByRole("button", { name: "Unstaged: a.yaml" })).toBeNull();
+  });
+
+  // The commit box and the stage/unstage controls are gone (#39): what records
+  // work is the agent in the terminal, and this is the assertion that fails if
+  // one of them comes back through a component the workbench still renders.
+  it("offers no control anywhere that writes the index", async () => {
+    const { seam } = pullingGit();
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+      />,
+    );
+
+    // A changed file on screen, so the panel is rendering rows rather than
+    // being absent for some unrelated reason.
+    await screen.findByRole("button", { name: "Unstaged: a.yaml" });
+
+    // Exact names, not a prefix: a row's own accessible name starts with
+    // "Unstaged:", so a prefix match would find the row and pass for the wrong
+    // reason.
+    for (const name of ["Stage a.yaml", "Unstage a.yaml", "Stage all", "Unstage all", "Commit"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.queryByLabelText("Commit subject")).toBeNull();
+    expect(screen.queryByLabelText("Commit body")).toBeNull();
   });
 
   // A failed operation reaches the user with git's own words in it — the whole

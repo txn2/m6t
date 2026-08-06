@@ -1,13 +1,10 @@
 import {
   GitBranches,
   GitCheckout,
-  GitCommit,
   GitPull,
   GitPush,
   GitRemotes,
-  GitStage,
   GitStatus,
-  GitUnstage,
 } from "../../wailsjs/go/app/App";
 
 /**
@@ -82,12 +79,14 @@ export const UNTRACKED = "untracked";
  * the write changes `.git`, the watcher publishes a `git` event for it
  * (PROTOCOL.md §5), and the status is read back through `status`. One source
  * for what the repository looks like, not two that can disagree.
+ *
+ * Staging and committing are absent, and the absence is the decision (#39):
+ * what records work in m6t is the agent in the terminal below, running the
+ * user's own git in the user's own worktree. A seam method for it would be a
+ * second writer of the index that the agent cannot see.
  */
 export interface Git {
   status: (root: string) => Promise<Status>;
-  stage: (root: string, paths: string[]) => Promise<void>;
-  unstage: (root: string, paths: string[]) => Promise<void>;
-  commit: (root: string, message: string) => Promise<void>;
   pull: (root: string) => Promise<void>;
   /** `remote` takes effect only when `setUpstream` is true; otherwise the
    * repository's own push configuration decides where the branch goes. */
@@ -100,9 +99,6 @@ export interface Git {
 /** The git seam backed by the generated Wails bindings. */
 export const wailsGit: Git = {
   status: (root) => GitStatus(root),
-  stage: (root, paths) => GitStage(root, paths),
-  unstage: (root, paths) => GitUnstage(root, paths),
-  commit: (root, message) => GitCommit(root, message),
   pull: (root) => GitPull(root),
   push: (root, remote, setUpstream) => GitPush(root, remote, setUpstream),
   checkout: (root, branch) => GitCheckout(root, branch),

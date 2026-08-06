@@ -3,15 +3,20 @@ package git
 import (
 	"errors"
 	"fmt"
-	"io/fs"
-	"path"
-	"path/filepath"
 	"strings"
 )
 
-// The daily git loop (DESIGN.md §7): stage, unstage, commit, pull, push and
-// branch switch. status.go is the reading half of the same section; this is
-// the half that writes.
+// The daily git loop (DESIGN.md §7): pull, push and branch switch. status.go
+// is the reading half of the same section; this is the half that writes.
+//
+// Staging and committing are not here, and their absence is a decision rather
+// than an omission (#39). m6t's answer to "record this work" is the agent in
+// the embedded terminal, running the user's own git in the user's own
+// worktree; a second writer of the index, driven from the UI and invisible to
+// that agent, is two tools disagreeing about one repository. What survives is
+// what the branch bar still puts a button on, and none of it writes the index:
+// pull and push move refs, and a checkout is gated behind a dirty-worktree
+// rule the UI computes from the status it already holds.
 //
 // Every operation here is one invocation of the system git with an argv slice.
 // Nothing is composed out of several calls behind the user's back, because a
@@ -24,85 +29,19 @@ import (
 // process would protect against only one of the two writers while implying it
 // protected against both. A lock collision surfaces as git's own message.
 
-// Argument failures. These are rejections, not git failures: no subprocess
-// runs. They exist because the bound surface is a public API (CLAUDE.md) and
-// the frontend is not the only thing that can reach it — a path argument is
-// checked here rather than trusted because it came from a status this package
-// produced.
-var (
-	// ErrNoPaths is an operation given nothing to act on.
-	ErrNoPaths = errors.New("no paths given")
+// ErrInvalidRef is a branch or remote name git could read as an option or as
+// something other than a ref.
+//
+// It is a rejection, not a git failure: no subprocess runs. It exists because
+// the bound surface is a public API (CLAUDE.md) and the frontend is not the
+// only thing that can reach it — a ref argument is checked here rather than
+// trusted because it came from a list this package produced.
+var ErrInvalidRef = errors.New("not a valid branch or remote name")
 
-	// ErrOutsideRoot is a path that does not name something inside the
-	// worktree: absolute, containing "..", or naming .git itself.
-	ErrOutsideRoot = errors.New("path is outside the repository")
-
-	// ErrEmptyMessage is a commit whose message has no content. git refuses
-	// this too; catching it here keeps the UI's disabled-button rule and the
-	// backend's rule from being able to disagree.
-	ErrEmptyMessage = errors.New("commit message is empty")
-
-	// ErrInvalidRef is a branch or remote name git could read as an option or
-	// as something other than a ref.
-	ErrInvalidRef = errors.New("not a valid branch or remote name")
-)
-
-// gitDir is the one directory inside a worktree no operation may name.
-const gitDir = ".git"
-
-// rejectedFormat is the shape of every argument rejection above: what was
-// given, then why. One constant because revive counts repeats of a literal,
-// and because the four rejections should read alike when a user hits one.
+// rejectedFormat is the shape of an argument rejection: what was given, then
+// why. One constant because revive counts repeats of a literal, and because
+// every rejection should read alike when a user hits one.
 const rejectedFormat = "resolving %s: %w"
-
-// Stage adds paths to the index — the "stage" half of the changes panel.
-//
-// A deleted path stages its deletion and a conflicted path is marked
-// resolved, both of which are `git add`'s own behavior and both of which are
-// what the button means where it appears.
-func Stage(root string, paths []string) error {
-	specs, err := pathspecs(paths)
-	if err != nil {
-		return err
-	}
-	return mutate(root, invocation{}, append([]string{"add", "--"}, specs...)...)
-}
-
-// Unstage removes paths from the index, leaving the working tree alone.
-//
-// `git reset` rather than `git restore --staged`: restore resolves HEAD, so on
-// a repository with no commits yet it fails outright, and the first thing a
-// user does in a fresh repository is stage the wrong file.
-func Unstage(root string, paths []string) error {
-	specs, err := pathspecs(paths)
-	if err != nil {
-		return err
-	}
-	// -q because reset prints the unstaged paths to stdout on success and
-	// nothing reads them.
-	return mutate(root, invocation{}, append([]string{"reset", "-q", "--"}, specs...)...)
-}
-
-// Commit records the index under message.
-//
-// The message goes in on stdin rather than as `-m`: it is multi-line prose of
-// no bounded length, and stdin is the one channel that cannot run into an argv
-// limit or end up in the log line runWith writes.
-//
-// Nothing is passed about signing. Whether a commit is signed is
-// `commit.gpgsign` in the user's own config, and this is the user's own git —
-// a flag here would override a repository policy m6t has no business having an
-// opinion about.
-func Commit(root, message string) error {
-	if strings.TrimSpace(message) == "" {
-		return ErrEmptyMessage
-	}
-	// --cleanup=whitespace is what `default` already does for a message given
-	// on stdin; saying it outright means a future change to git's default
-	// cannot silently start stripping lines that begin with "#" out of a
-	// message the user typed.
-	return mutate(root, invocation{stdin: message}, "commit", "--cleanup=whitespace", "-F", "-")
-}
 
 // Pull integrates the upstream branch, honoring the repository's own
 // pull.rebase and branch.<name>.rebase configuration (DESIGN.md §7). No
@@ -200,48 +139,6 @@ func lines(out string) []string {
 		}
 	}
 	return found
-}
-
-// pathspecs turns caller paths into pathspecs git will treat as literal file
-// names.
-//
-// The `:(literal)` prefix is the load-bearing part. A bare path is a *glob*:
-// git reads `weird[1].yaml` as a character class and stages nothing, and a
-// path beginning with `-` is read as an option even after `--`, because `--`
-// separates revisions from pathspecs and does not stop magic from being
-// parsed. `:(literal)` says the rest of the string is the name, exactly.
-func pathspecs(paths []string) ([]string, error) {
-	if len(paths) == 0 {
-		return nil, ErrNoPaths
-	}
-	specs := make([]string, 0, len(paths))
-	for _, p := range paths {
-		clean, err := relative(p)
-		if err != nil {
-			return nil, err
-		}
-		specs = append(specs, ":(literal)"+clean)
-	}
-	return specs, nil
-}
-
-// relative validates one caller path and returns its slash-separated form.
-//
-// fs.ValidPath is the authoritative syntactic check — the same one
-// internal/watch validates against — and it refuses absolute paths, ".." and
-// the other shapes fs.FS forbids on every platform. "." is refused on top of
-// it: it names the whole worktree, and an operation that quietly staged
-// everything when given an empty-looking argument is the kind of thing a user
-// discovers after committing it.
-func relative(relPath string) (string, error) {
-	clean := path.Clean(filepath.ToSlash(relPath))
-	if !fs.ValidPath(clean) || clean == "." {
-		return "", fmt.Errorf(rejectedFormat, relPath, ErrOutsideRoot)
-	}
-	if clean == gitDir || strings.HasPrefix(clean, gitDir+"/") {
-		return "", fmt.Errorf(rejectedFormat, relPath, ErrOutsideRoot)
-	}
-	return clean, nil
 }
 
 // validateRef rejects a branch or remote name git could read as something

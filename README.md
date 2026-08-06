@@ -17,7 +17,8 @@ Managing fleets of manifest repos doesn't need an IDE — it needs a small set o
 things done extremely well:
 
 - **Projects** — each cloned manifest repo is a top-level tab.
-- **Git** — status badges in the file tree, pull / commit / push, proper diffs.
+- **Git** — status badges in the file tree, pull / push, proper diffs. Committing
+  is the terminal agent's job, not m6t's (DESIGN.md §7).
 - **Editing** — CodeMirror-based YAML with Kubernetes schema diagnostics, and
   markdown preview. Light by design.
 - **Apply** — every cluster mutation goes validate → diff → confirm → apply,

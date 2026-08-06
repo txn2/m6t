@@ -6,7 +6,7 @@ Kubernetes plugin + built-in terminal) with a purpose-built tool that does exact
 five things well:
 
 1. One tab per project, where a project is a cloned git repository of manifests.
-2. A file tree with git change awareness, plus pull / commit / push and diffs.
+2. A file tree with git change awareness, plus pull / push and diffs.
 3. Light, schema-aware YAML editing and markdown viewing/editing.
 4. Diff-before-apply Kubernetes workflows for plain YAML and Helm charts.
 5. A first-class embedded terminal for running Claude Code per project.
@@ -102,7 +102,8 @@ One process, three layers:
 - **Project registry** — the list of managed repos and their per-project settings
   (§4). Owns lifecycle: add (clone or point at existing checkout), open, remove.
 - **Git service** — wraps `git` invocations per project: `status --porcelain=v2`,
-  `diff`, `log`, `pull`, `push`, `commit`, branch info. Emits change events.
+  `diff`, `log`, `pull`, `push`, branch info. Emits change events. Nothing here
+  writes the index — see §7.
 - **FS watcher** — fsnotify on each open project's worktree and `.git/HEAD` /
   `.git/refs`; debounced events drive tree badges and editor reload prompts.
   Polling fallback where fsnotify is unreliable (network mounts).
@@ -125,7 +126,7 @@ One process, three layers:
 
 Two channels, chosen by payload profile:
 
-- **Wails bindings** for RPC (open file, git commit, run apply, get project
+- **Wails bindings** for RPC (open file, git pull, run apply, get project
   list): request/response, typed, low volume.
 - **Loopback WebSocket server** (127.0.0.1, random port, per-launch bearer token
   required on connect) for streams: PTY input/output (binary frames), live
@@ -250,11 +251,17 @@ both ways from the UI without an explicit switch.
 v1 scope mirrors actual daily use, not a git client:
 
 - Status-driven tree badges and a changes list per project.
-- Stage/unstage, commit (with message editor), pull (rebase per repo config),
-  push, current branch + ahead/behind in the status bar.
+- Pull (rebase per repo config), push, current branch + ahead/behind in the status bar.
 - Diff viewer for working-tree changes and for a file's last commit.
 - Branch switching (existing branches). Branch creation, log browsing, stash,
   and history tooling are v1.x (§10).
+
+**Staging and committing are not m6t's.** The agent in the terminal (§5) does that
+work, running the user's own `git` in the user's own worktree — so m6t offers no commit
+box and no stage/unstage control, and its bound surface has no method that writes the
+index. Two writers of one index, only one of which the agent can see, is two tools
+disagreeing about one repository. The changes list still groups staged and unstaged
+separately, because that is what `git status` reports whoever put the paths there.
 
 All operations run the system `git`; failures surface stderr verbatim (the user
 knows how to read git errors — do not translate them).

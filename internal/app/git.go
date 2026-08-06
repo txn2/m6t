@@ -31,9 +31,17 @@ func (*App) GitStatus(root string) (git.Status, error) {
 }
 
 // The mutating half of DESIGN.md §7. Each of these is one operation the
-// changes panel or the branch bar puts a control on, and each is a thin pass
-// through to internal/git — the binding layer composes services, it does not
-// implement them.
+// branch bar puts a control on, and each is a thin pass through to
+// internal/git — the binding layer composes services, it does not implement
+// them.
+//
+// Staging and committing are deliberately absent (#39). The bound surface is
+// the API (CLAUDE.md) and it is only what the UI calls; the UI has no control
+// that writes the index, because m6t's answer to "record this work" is the
+// agent in the terminal, running the user's own git in the user's own
+// worktree. A binding kept for a caller that does not exist would be a second
+// writer of the index, reachable from the bridge, that the agent cannot see.
+// What is left is what the branch bar still puts a button on.
 //
 // None of them returns a status. The mutation changes .git, the watcher
 // publishes a `git` event for it (PROTOCOL.md §5), and the frontend reads the
@@ -47,30 +55,6 @@ func (*App) GitStatus(root string) (git.Status, error) {
 // takes, and the reason the message starts with an English verb rather than
 // with git's: the first line a user reads should say which button they
 // pressed, and git's explanation should be the rest of it.
-
-// GitStage adds paths to the index.
-func (*App) GitStage(root string, paths []string) error {
-	if err := git.Stage(root, paths); err != nil {
-		return fmt.Errorf("staging in %s: %w", root, err)
-	}
-	return nil
-}
-
-// GitUnstage removes paths from the index, leaving the working tree alone.
-func (*App) GitUnstage(root string, paths []string) error {
-	if err := git.Unstage(root, paths); err != nil {
-		return fmt.Errorf("unstaging in %s: %w", root, err)
-	}
-	return nil
-}
-
-// GitCommit records the index under message.
-func (*App) GitCommit(root, message string) error {
-	if err := git.Commit(root, message); err != nil {
-		return fmt.Errorf("committing in %s: %w", root, err)
-	}
-	return nil
-}
 
 // GitPull integrates the upstream branch, honoring the repository's own
 // rebase configuration.
