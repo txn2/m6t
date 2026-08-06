@@ -1,10 +1,14 @@
+import type { UniqueIdentifier } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
 import {
   AddProject,
   ChooseProjectDirectory,
   Projects,
   RemoveProject,
+  ReorderProjects,
   UpdateProject,
 } from "../../wailsjs/go/app/App";
+import { project as models } from "../../wailsjs/go/models";
 import type { project } from "../../wailsjs/go/models";
 
 /**
@@ -23,7 +27,7 @@ import type { project } from "../../wailsjs/go/models";
  */
 export type Project = project.Project;
 
-/** A project's mutable half — the kube binding and helm defaults. */
+/** A project's mutable half — its label, its tab colour and its bindings. */
 export type Settings = project.Settings;
 
 /**
@@ -35,19 +39,142 @@ export interface Registry {
   list: () => Promise<Project[]>;
   /** Opens the OS directory picker; resolves to "" if the user cancels. */
   choose: () => Promise<string>;
-  add: (path: string) => Promise<Project>;
+  add: (path: string, name: string) => Promise<Project>;
   remove: (name: string) => Promise<void>;
   update: (name: string, settings: Settings) => Promise<Project>;
+  /** Rewrites the stored order, and answers with the registry as it stands. */
+  reorder: (names: string[]) => Promise<Project[]>;
 }
 
 /** The registry backed by the Wails bindings. */
 export const wailsRegistry: Registry = {
   list: () => Projects(),
   choose: () => ChooseProjectDirectory(),
-  add: (path) => AddProject(path),
+  add: (path, name) => AddProject(path, name),
   remove: (name) => RemoveProject(name),
   update: (name, settings) => UpdateProject(name, settings),
+  reorder: (names) => ReorderProjects(names),
 };
+
+/**
+ * The tab colours a project can carry (#41), as names rather than values.
+ *
+ * The registry stores the name and this list is what resolves it, which is why
+ * a colour never reaches the DOM as a value: the tab carries `data-color` and
+ * the stylesheet holds the palette, so a projects.yaml edited by hand can no
+ * more inject a colour than it can inject a rule.
+ */
+export const PROJECT_COLORS = [
+  "blue",
+  "green",
+  "amber",
+  "red",
+  "purple",
+  "cyan",
+] as const;
+
+export type ProjectColor = (typeof PROJECT_COLORS)[number];
+
+/** The palette entry a stored colour names, or null when this build has none. */
+export function projectColor(stored: string | undefined): ProjectColor | null {
+  return PROJECT_COLORS.find((color) => color === stored) ?? null;
+}
+
+/**
+ * What a project's tab says.
+ *
+ * `name` is the registry key — derived from the directory, and almost always
+ * "k8s" for a manifest repository, which is the whole reason a label exists.
+ * The fallback is what every registry written before #41 has, and what a
+ * project added without typing a name keeps.
+ *
+ * The `?? ""` is not defensive noise: the generated model copies keys straight
+ * out of the bridge payload, so a record produced without the field is
+ * `undefined` here rather than "".
+ */
+export function projectLabel(project: Project): string {
+  const label = (project.displayName ?? "").trim();
+  return label === "" ? project.name : label;
+}
+
+/**
+ * The settings to send when changing a project's label or colour.
+ *
+ * `Update` replaces the whole mutable half, so the kube binding and the helm
+ * defaults have to be carried through a rename. Sending only what changed would
+ * unbind the cluster of any project the user renamed — which is the failure
+ * DESIGN.md §4 is most emphatic about not having.
+ */
+export function settingsFor(
+  project: Project,
+  patch: { displayName?: string; color?: string },
+): Settings {
+  return models.Settings.createFrom({
+    displayName: patch.displayName ?? project.displayName,
+    color: patch.color ?? project.color,
+    kube: project.kube,
+    helm: project.helm,
+  });
+}
+
+/**
+ * The name to prefill the add-project field with: the chosen directory's own
+ * name, which is the best guess available and the one the user is most likely
+ * to replace.
+ *
+ * Both separators are split on because the path comes from the OS picker and
+ * m6t runs on Windows too.
+ */
+export function directoryName(path: string): string {
+  const segments = path.split(/[/\\]+/).filter((segment) => segment !== "");
+  return segments.length === 0 ? path : segments[segments.length - 1];
+}
+
+/**
+ * The order a finished tab drag settled on, or null when it changed nothing.
+ *
+ * This is the whole of what the strip does with a drag: dnd-kit reports which
+ * tab was lifted and which it was dropped over, `arrayMove` puts it there, and
+ * the result is what gets persisted. A drop outside the strip has no `over` and
+ * is not a reorder — nor is a tab dropped back on itself, which is what every
+ * click that drifted past the threshold looks like.
+ */
+export function orderAfterDrag(
+  names: readonly string[],
+  active: UniqueIdentifier,
+  over: UniqueIdentifier | undefined,
+): string[] | null {
+  if (over === undefined || active === over) {
+    return null;
+  }
+  const from = names.indexOf(String(active));
+  const to = names.indexOf(String(over));
+  if (from < 0 || to < 0) {
+    return null;
+  }
+  return arrayMove([...names], from, to);
+}
+
+/**
+ * The projects in the order `names` gives.
+ *
+ * Anything the order does not mention keeps its place at the end rather than
+ * disappearing: the names come from a drag that started against a list which
+ * may since have gained a project — projects.yaml is editable by hand while
+ * m6t runs (DESIGN.md §4) — and a strip that dropped the tab it had not heard
+ * of would be losing a project to a gesture. A name that no longer matches a
+ * project is skipped for the same reason in reverse.
+ */
+export function orderProjects(
+  projects: readonly Project[],
+  names: readonly string[],
+): Project[] {
+  const named = names
+    .map((name) => projects.find((p) => p.name === name))
+    .filter((project): project is Project => project !== undefined);
+  const rest = projects.filter((project) => !named.includes(project));
+  return [...named, ...rest];
+}
 
 /**
  * The project to select after `name` is removed.

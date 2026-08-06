@@ -22,6 +22,13 @@ var (
 	ErrNotRepository = errors.New("not a git repository")
 )
 
+// errIncompleteOrder reports a reorder that does not name every stored project.
+//
+// It is unexported because nothing outside this package branches on it: the
+// binding layer wraps it and the UI shows the sentence, which is all a stale
+// tab strip needs to hear before it reloads.
+var errIncompleteOrder = errors.New("the stored list holds projects the new order does not name")
+
 // Registry is the persistent list of projects, backed by projects.yaml.
 //
 // It holds no cached copy of the file. Every operation reads, acts and writes,
@@ -68,12 +75,18 @@ func (r *Registry) List() ([]Project, error) {
 	return projects, nil
 }
 
-// Add registers an existing checkout at path.
+// Add registers an existing checkout at path under the label displayName.
 //
 // The path must be a git worktree. That check is the whole validation: m6t
 // works on manifest repositories, and a directory that is not one would fail
 // later at every git call with a worse message than this one.
-func (r *Registry) Add(path string) (Project, error) {
+//
+// displayName is a label, not the key: the project is still filed under a name
+// derived from its directory (see uniqueName), and a blank label means the
+// project is shown under that name. The label is taken here rather than left to
+// a follow-up Update so that a project never appears in the strip under a name
+// the user has already replaced.
+func (r *Registry) Add(path, displayName string) (Project, error) {
 	resolved, err := resolve(path)
 	if err != nil {
 		return Project{}, err
@@ -84,11 +97,11 @@ func (r *Registry) Add(path string) (Project, error) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.append(resolved)
+	return r.append(resolved, strings.TrimSpace(displayName))
 }
 
 // append adds a validated absolute path to the registry. The caller holds mu.
-func (r *Registry) append(resolved string) (Project, error) {
+func (r *Registry) append(resolved, displayName string) (Project, error) {
 	projects, err := load(r.dir)
 	if err != nil {
 		return Project{}, err
@@ -98,6 +111,10 @@ func (r *Registry) append(resolved string) (Project, error) {
 	// added twice. Adding the same checkout under two names would give it two
 	// independent kube bindings, and the second one is how a manifest reaches
 	// the cluster the user thought they had unbound.
+	//
+	// It keeps the label it already has, too: adding a repository that is
+	// registered is a no-op that selects it, and silently renaming the tab the
+	// user named last week is not what "add" promised.
 	for _, p := range projects {
 		if expand(p.Path) == resolved {
 			p.Path = resolved
@@ -105,7 +122,11 @@ func (r *Registry) append(resolved string) (Project, error) {
 		}
 	}
 
-	added := Project{Name: uniqueName(projects, filepath.Base(resolved)), Path: abbreviate(resolved)}
+	added := Project{
+		Name:        uniqueName(projects, filepath.Base(resolved)),
+		Path:        abbreviate(resolved),
+		DisplayName: displayName,
+	}
 	if err := save(r.dir, append(projects, added)); err != nil {
 		return Project{}, err
 	}
@@ -152,6 +173,57 @@ func (r *Registry) Remove(name string) (Project, error) {
 	}
 	removed.Path = expand(removed.Path)
 	return removed, nil
+}
+
+// Reorder rewrites the stored order to the one names gives.
+//
+// The order in projects.yaml IS the order of the tab strip (see List), so
+// dragging a tab is a rewrite of the list and nothing else: no project is
+// added, removed, renamed or rebound by one.
+//
+// names must be exactly the registered set. A request that names something else
+// is refused rather than reconciled: projects.yaml is editable by hand while
+// m6t is running (DESIGN.md §4), so a mismatch means the strip is ordering a
+// list that no longer exists, and applying it would silently drop whatever the
+// registry gained in the meantime. The caller reloads and the user drags again,
+// which costs a gesture; the alternative costs a project.
+func (r *Registry) Reorder(names []string) ([]Project, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	projects, err := load(r.dir)
+	if err != nil {
+		return nil, err
+	}
+
+	remaining := make(map[string]Project, len(projects))
+	for _, p := range projects {
+		remaining[p.Name] = p
+	}
+
+	ordered := make([]Project, 0, len(projects))
+	for _, name := range names {
+		p, ok := remaining[name]
+		if !ok {
+			// Either the name is not registered or it appeared twice; both are
+			// the same broken request, and both are caught by the delete below
+			// having already run.
+			return nil, fmt.Errorf("reordering %s: %w", name, ErrNotFound)
+		}
+		delete(remaining, name)
+		ordered = append(ordered, p)
+	}
+	if len(remaining) != 0 {
+		return nil, fmt.Errorf("reordering projects: %w", errIncompleteOrder)
+	}
+
+	if err := save(r.dir, ordered); err != nil {
+		return nil, err
+	}
+	for i := range ordered {
+		ordered[i].Path = expand(ordered[i].Path)
+	}
+	return ordered, nil
 }
 
 // Settings returns the named project's kube binding and helm defaults.

@@ -47,7 +47,7 @@ func TestAddProjectAndProjectsRoundTripThroughTheBinding(t *testing.T) {
 	a := testApp(t)
 	dir := repoDir(t, "infra")
 
-	added, err := a.AddProject(dir)
+	added, err := a.AddProject(dir, "")
 	if err != nil {
 		t.Fatalf("AddProject: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestProjectBindingsPreserveTheRegistrySentinels(t *testing.T) {
 		},
 		"AddProject": {
 			call: func() error {
-				_, err := a.AddProject(t.TempDir())
+				_, err := a.AddProject(t.TempDir(), "")
 				return err
 			},
 			want: project.ErrNotRepository,
@@ -116,14 +116,14 @@ func TestProjectBindingErrorsNameTheirSubject(t *testing.T) {
 		t.Errorf("RemoveProject error = %v, want it to name the project", err)
 	}
 	plain := t.TempDir()
-	if _, err := a.AddProject(plain); err == nil || !strings.Contains(err.Error(), plain) {
+	if _, err := a.AddProject(plain, ""); err == nil || !strings.Contains(err.Error(), plain) {
 		t.Errorf("AddProject error = %v, want it to name the path", err)
 	}
 }
 
 func TestUpdateProjectPersistsSettings(t *testing.T) {
 	a := testApp(t)
-	if _, err := a.AddProject(repoDir(t, "infra")); err != nil {
+	if _, err := a.AddProject(repoDir(t, "infra"), ""); err != nil {
 		t.Fatalf("AddProject: %v", err)
 	}
 
@@ -145,10 +145,65 @@ func TestUpdateProjectPersistsSettings(t *testing.T) {
 	}
 }
 
+// The add flow collects a label because the directory name is a bad identity —
+// almost every manifest repository is checked out as "k8s" (#41).
+func TestAddProjectCarriesTheLabelItWasGiven(t *testing.T) {
+	a := testApp(t)
+
+	added, err := a.AddProject(repoDir(t, "k8s"), "Production infra")
+	if err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+	if added.DisplayName != "Production infra" {
+		t.Errorf("display name = %q, want the label the flow collected", added.DisplayName)
+	}
+	if added.Name != "k8s" {
+		t.Errorf("name = %q, want the registry key still derived from the directory", added.Name)
+	}
+}
+
+func TestReorderProjectsRewritesTheStripOrder(t *testing.T) {
+	a := testApp(t)
+	for _, name := range []string{"alpha", "beta"} {
+		if _, err := a.AddProject(repoDir(t, name), ""); err != nil {
+			t.Fatalf("AddProject %s: %v", name, err)
+		}
+	}
+
+	ordered, err := a.ReorderProjects([]string{"beta", "alpha"})
+	if err != nil {
+		t.Fatalf("ReorderProjects: %v", err)
+	}
+	if len(ordered) != 2 || ordered[0].Name != "beta" || ordered[1].Name != "alpha" {
+		t.Errorf("returned order = %+v, want [beta alpha]", ordered)
+	}
+
+	// The returned list is what the strip renders, so it has to agree with what
+	// the next read would give.
+	listed, err := a.Projects()
+	if err != nil {
+		t.Fatalf("Projects: %v", err)
+	}
+	if len(listed) != 2 || listed[0].Name != "beta" {
+		t.Errorf("Projects after reorder = %+v, want [beta alpha]", listed)
+	}
+}
+
+func TestReorderProjectsReportsAnOrderTheRegistryRejects(t *testing.T) {
+	a := testApp(t)
+	if _, err := a.AddProject(repoDir(t, "alpha"), ""); err != nil {
+		t.Fatalf("AddProject: %v", err)
+	}
+
+	if _, err := a.ReorderProjects([]string{"ghost"}); !errors.Is(err, project.ErrNotFound) {
+		t.Errorf("ReorderProjects of an unregistered name = %v, want ErrNotFound", err)
+	}
+}
+
 func TestRemoveProjectLeavesTheWorkingTree(t *testing.T) {
 	a := testApp(t)
 	dir := repoDir(t, "infra")
-	if _, err := a.AddProject(dir); err != nil {
+	if _, err := a.AddProject(dir, ""); err != nil {
 		t.Fatalf("AddProject: %v", err)
 	}
 

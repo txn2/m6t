@@ -9,6 +9,7 @@ import { FileTree } from "./FileTree";
 import { BranchBar } from "./BranchBar";
 import { PaneSeparator } from "./PaneSeparator";
 import type { Project } from "../lib/projects";
+import { projectLabel } from "../lib/projects";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { GitStatusController } from "../lib/useGitStatus";
 import type { GitOpsController } from "../lib/useGitOps";
@@ -184,12 +185,16 @@ export function ProjectStatus({ project, git }: ProjectStatusProps) {
     return <span data-testid="project-status">no project selected</span>;
   }
   const context = project.kube.context;
+  // The label, not the key: the status bar names the project the user named,
+  // and the registry's own name for it is a directory basename they never
+  // chose (#41).
+  const label = projectLabel(project);
   return (
     <>
       <span data-testid="project-status">
         {context === ""
-          ? `${project.name} — no context bound`
-          : `${project.name} — ${context}`}
+          ? `${label} — no context bound`
+          : `${label} — ${context}`}
       </span>
       <span data-testid="git-status">
         {git.error ?? branchSummary(git.status)}

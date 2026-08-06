@@ -295,4 +295,26 @@ describe("the IDE metrics", () => {
   it("indents the tree by a token per level rather than a font-relative unit", () => {
     expect(blockFor(".tree__row")).toContain("var(--m6t-indent) * var(--depth");
   });
+
+  /**
+   * A tree row has exactly one flexible item, and it is the name.
+   *
+   * The git badge and the row's menu button both used to carry
+   * `margin-left: auto`. Flexbox splits free space equally between auto
+   * margins, so the badge landed at a different x on every row — a column of
+   * dots that drifted with the length of the name beside it and moved again
+   * whenever anything else in the row changed width. One flexible item is what
+   * makes everything after it a fixed column.
+   */
+  it("puts the tree's badge and row menu in a fixed right-hand column", () => {
+    expect(blockFor(".tree__name")).toContain("flex: 1");
+
+    for (const rule of [".tree__badge", ".tree__menu-button"]) {
+      expect(
+        blockFor(rule),
+        `${rule} must not claim free space: a second auto margin in the row ` +
+          "makes the badge's position depend on the name's length",
+      ).not.toContain("margin-left: auto");
+    }
+  });
 });

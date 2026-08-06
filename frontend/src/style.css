@@ -38,6 +38,18 @@
   --m6t-git-deleted: #e08585;
   --m6t-git-conflict: #f06d6d;
 
+  /* Project tab accents (#41). A project tab is coloured by name, not by
+     value: projects.yaml stores "amber" and this is the only place that says
+     what amber is, so a hand-edited registry cannot put a colour of its own
+     into the window. Six is a palette a user can tell apart at a 2px edge
+     strip; a wider one is a colour picker, which is a settings dialog's job. */
+  --m6t-project-blue: #61afef;
+  --m6t-project-green: #8cc265;
+  --m6t-project-amber: #d9a441;
+  --m6t-project-red: #e06c75;
+  --m6t-project-purple: #b57edc;
+  --m6t-project-cyan: #4fc1c9;
+
   /* Spacing, on a 4px grid. There is no --m6t-space-0: zero is 0. */
   --m6t-space-1: 2px;
   --m6t-space-2: 4px;
@@ -84,6 +96,13 @@
   --m6t-git-modified: #1f5fbf;
   --m6t-git-deleted: #b23a3a;
   --m6t-git-conflict: #c22b2b;
+
+  --m6t-project-blue: #2f6fd0;
+  --m6t-project-green: #4d8f2f;
+  --m6t-project-amber: #a8710d;
+  --m6t-project-red: #c04553;
+  --m6t-project-purple: #7d51c4;
+  --m6t-project-cyan: #17808c;
 
   color-scheme: light;
 }
@@ -144,11 +163,16 @@ body {
 
 /* --- project strip ---------------------------------------------------- */
 
+/* The strip is inset from the window edge on both sides. Flush against it the
+   first tab reads as a band of colour running off the frame rather than as a
+   tab, and the active tab's rule has no edge to start from. The inset is the
+   same space token the sidebar's rows carry, so the strip and the tree below
+   it share one left margin. */
 .projects {
   display: flex;
   align-items: stretch;
   height: var(--m6t-tab);
-  padding: 0;
+  padding: 0 var(--m6t-space-3);
   background: var(--m6t-panel);
   border-bottom: 1px solid var(--m6t-border);
 }
@@ -159,6 +183,9 @@ body {
   padding: 0;
   list-style: none;
   overflow-x: auto;
+  /* Dragging a tab across the strip would otherwise select the labels it
+     passes over, the same reason the terminal strip carries this. */
+  user-select: none;
 }
 
 /* Square, edge-to-edge tabs marked by an accent rule rather than a rounded
@@ -173,9 +200,39 @@ body {
   background: var(--m6t-panel);
 }
 
+/* The edge rule says "active" and nothing else (#41). The project's own colour
+   is the dot beside its name: a tab that spent the edge on identity left the
+   strip with no unambiguous answer to which project is open below it. */
 .projects__tab--active {
   box-shadow: inset 0 2px 0 var(--m6t-accent);
   background: var(--m6t-bg);
+}
+
+/* The tab being dragged: lifted off the strip and above its neighbours, which
+   dnd-kit slides out from under it. It keeps its own colours — a tab faded to
+   half opacity while being moved is a tab you cannot read at the moment you
+   most need to. The transform and the transition are dnd-kit's, applied
+   inline; everything here is the look. */
+.projects__tab--dragging {
+  position: relative;
+  z-index: 1;
+  background: var(--m6t-panel-alt);
+  /* A ring first, then the shadow. A drop shadow alone is almost invisible
+     against a dark panel — the thing that reads as "lifted" on both palettes
+     is the tab having its own edge while it floats over its neighbours. */
+  box-shadow:
+    0 0 0 1px var(--m6t-border),
+    0 4px 14px rgb(0 0 0 / 45%);
+  cursor: grabbing;
+}
+
+/* Dragging the open project must not take the mark that says it is open: the
+   lift is added to the active rule, not swapped for it. */
+.projects__tab--active.projects__tab--dragging {
+  box-shadow:
+    inset 0 2px 0 var(--m6t-accent),
+    0 0 0 1px var(--m6t-border),
+    0 4px 14px rgb(0 0 0 / 45%);
 }
 
 .projects__select,
@@ -190,23 +247,143 @@ body {
   cursor: pointer;
 }
 
+/* An inactive tab is muted and the open one is not. Weight is what carries
+   "this is the project you are looking at" — the 2px rule alone is a detail at
+   the top edge of a 32px strip, and until this was here every tab in the row
+   was the same brightness as the open one. */
 .projects__select {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  color: var(--m6t-muted);
   white-space: nowrap;
+}
+
+/* The project's colour, beside its name. Small enough to be a mark rather than
+   a highlight, and never the only thing distinguishing two tabs — the label is
+   what a monochrome display or a screen reader has to work with. */
+.projects__dot {
+  width: var(--m6t-space-3);
+  height: var(--m6t-space-3);
+  border-radius: var(--m6t-radius-round);
+  background: var(--m6t-swatch);
 }
 
 .projects__tab--active .projects__select {
   color: var(--m6t-fg);
 }
 
+/* Removing a project is a rare act, so its control does not sit on every tab
+   at all times: the strip is for reading which projects are open, and eight
+   permanent ✕ marks is eight things to read past. It appears on the tab under
+   the pointer and on the open one — the same reveal the tree uses for its row
+   menu — and stays reachable by keyboard either way, since focus-within brings
+   it back. */
 .projects__remove {
   padding-left: 0;
   color: var(--m6t-muted);
+  opacity: 0;
+}
+
+.projects__tab:hover .projects__remove,
+.projects__tab:focus-within .projects__remove,
+.projects__tab--active .projects__remove {
+  opacity: 1;
 }
 
 .projects__add {
   margin-left: auto;
   color: var(--m6t-muted);
   white-space: nowrap;
+}
+
+/* Naming a project on the way in, and renaming one afterwards, are the same
+   field in the same place — the tab's own width (#41). */
+.projects__rename {
+  min-width: 0;
+  margin: 0 var(--m6t-space-2);
+  padding: 0 var(--m6t-space-2);
+  border: 1px solid var(--m6t-accent);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+}
+
+/* Radix positions and portals this one: placement that avoids the window
+   edges, Escape, click-outside, focus return and arrow-key navigation are all
+   its. What is left here is the look, and the z-index that puts it over the
+   workbench. */
+.projects__menu {
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  padding: var(--m6t-space-1);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-panel);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
+}
+
+.projects__menu-item {
+  padding: var(--m6t-space-1) var(--m6t-space-3);
+  border-radius: var(--m6t-radius);
+  color: var(--m6t-fg);
+  cursor: pointer;
+  outline: none;
+}
+
+/* One state, not two: Radix marks the item under the pointer AND the one the
+   arrow keys are on with data-highlighted, so the keyboard and the mouse show
+   the same thing. */
+.projects__menu-item[data-highlighted] {
+  background: var(--m6t-panel-alt);
+}
+
+.projects__swatches {
+  display: flex;
+  gap: var(--m6t-space-2);
+  padding: var(--m6t-space-2) var(--m6t-space-3);
+}
+
+/* A round chip of the colour itself. The check state is a ring rather than a
+   tick: at 16px a glyph inside the swatch is smaller than the colour it is
+   supposed to be qualifying. */
+.projects__swatch {
+  width: var(--m6t-icon);
+  height: var(--m6t-icon);
+  padding: 0;
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius-round);
+  /* No entry means the "no colour" swatch: the palette chip that clears one. */
+  background: var(--m6t-swatch, var(--m6t-panel-alt));
+  cursor: pointer;
+}
+
+/* One palette resolution for both the dot on a tab and the swatch in the menu:
+   the colour is selected by name and never interpolated, so a `data-color` out
+   of a hand-edited projects.yaml has no rule here to match and paints nothing. */
+.projects__dot[data-color="blue"],
+.projects__swatch[data-color="blue"] { --m6t-swatch: var(--m6t-project-blue); }
+.projects__dot[data-color="green"],
+.projects__swatch[data-color="green"] { --m6t-swatch: var(--m6t-project-green); }
+.projects__dot[data-color="amber"],
+.projects__swatch[data-color="amber"] { --m6t-swatch: var(--m6t-project-amber); }
+.projects__dot[data-color="red"],
+.projects__swatch[data-color="red"] { --m6t-swatch: var(--m6t-project-red); }
+.projects__dot[data-color="purple"],
+.projects__swatch[data-color="purple"] { --m6t-swatch: var(--m6t-project-purple); }
+.projects__dot[data-color="cyan"],
+.projects__swatch[data-color="cyan"] { --m6t-swatch: var(--m6t-project-cyan); }
+
+/* The current colour, and whatever the pointer or the arrow keys are on: a
+   ring, because a tick drawn inside a 16px chip is smaller than the colour it
+   qualifies. Radix supplies both states as data attributes. */
+.projects__swatch[data-state="checked"],
+.projects__swatch[data-highlighted] {
+  border-color: var(--m6t-fg);
+  outline: none;
 }
 
 /* --- workbench -------------------------------------------------------- */
@@ -408,13 +585,23 @@ body {
   align-items: center;
 }
 
+/* The name takes the row's free space, which is what pins everything after it
+   to the right edge. It is the ONLY flexible item in the row on purpose: two
+   items with `margin-left: auto` split the free space between them, so the
+   badge's position became a function of the name's length — a column of dots
+   that sat at a different place on every row and moved whenever anything else
+   in the row changed width. */
 .tree__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Always in the layout, visible only on hover or focus: a button that came and
+   went would move the badge beside it every time the pointer crossed a row. */
 .tree__menu-button {
-  margin-left: auto;
+  flex: none;
   padding: 0 var(--m6t-space-1);
   border: none;
   border-radius: 0;
@@ -1005,7 +1192,7 @@ button:hover {
    the button occupies on hover — so a row's width does not change when the
    pointer enters it. */
 .tree__badge {
-  margin-left: auto;
+  flex: none;
   padding: 0 var(--m6t-space-1);
   color: var(--m6t-muted);
   font-size: var(--m6t-font-size-sm);

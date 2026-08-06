@@ -147,7 +147,7 @@ func TestAddProjectStartsAWatcherAndRemoveProjectStopsIt(t *testing.T) {
 	t.Cleanup(a.trees.Shutdown)
 
 	dir := repoDir(t, "infra")
-	added, err := a.AddProject(dir)
+	added, err := a.AddProject(dir, "")
 	if err != nil {
 		t.Fatalf("AddProject: %v", err)
 	}
@@ -187,10 +187,10 @@ func TestStartWatchingRegisteredProjectsCoversEveryExistingProject(t *testing.T)
 
 	dirA := repoDir(t, "a")
 	dirB := repoDir(t, "b")
-	if _, err := registry.Add(dirA); err != nil {
+	if _, err := registry.Add(dirA, ""); err != nil {
 		t.Fatalf("registering a: %v", err)
 	}
-	if _, err := registry.Add(dirB); err != nil {
+	if _, err := registry.Add(dirB, ""); err != nil {
 		t.Fatalf("registering b: %v", err)
 	}
 

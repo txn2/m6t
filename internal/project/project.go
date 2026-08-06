@@ -11,6 +11,8 @@
 // a repo is; the repo itself stays a pristine manifest checkout.
 package project
 
+import "strings"
+
 // Kube is a project's cluster binding.
 //
 // The binding is per project and explicit: m6t never falls back to the
@@ -43,7 +45,24 @@ type Helm struct {
 // project and Path is where the repo actually is — neither is a setting, and an
 // update call that could change them would be a rename and a relocation wearing
 // the same name as editing a namespace.
+//
+// DisplayName is what makes that split survive the tab strip being renameable
+// (#41). Almost every manifest repository is checked out as "k8s", so the
+// directory name is a bad identity to show a user — but re-keying the registry
+// on every rename would invalidate the name that terminals, editor tabs and
+// watchers are all filed under. The label is a setting; the key is not.
 type Settings struct {
+	// DisplayName is the label the project tab shows. Empty means the project
+	// is shown under its Name, which is what every registry written before
+	// this field existed holds.
+	DisplayName string `yaml:"displayName,omitempty" json:"displayName"`
+
+	// Color is the tab's accent, by palette name rather than by value. The
+	// registry does not know the palette: the names come from the UI and are
+	// resolved there, so a color this build has no entry for renders as no
+	// color instead of as a value injected into a stylesheet.
+	Color string `yaml:"color,omitempty" json:"color"`
+
 	Kube Kube `yaml:"kube,omitempty" json:"kube"`
 	Helm Helm `yaml:"helm,omitempty" json:"helm"`
 }
@@ -59,18 +78,23 @@ type Project struct {
 	// projects.yaml stays readable and survives a home directory that moves.
 	Path string `yaml:"path" json:"path"`
 
+	DisplayName string `yaml:"displayName,omitempty" json:"displayName"`
+	Color       string `yaml:"color,omitempty" json:"color"`
+
 	Kube Kube `yaml:"kube,omitempty" json:"kube"`
 	Helm Helm `yaml:"helm,omitempty" json:"helm"`
 }
 
 // settings returns the project's mutable half.
 func (p Project) settings() Settings {
-	return Settings{Kube: p.Kube, Helm: p.Helm}
+	return Settings{DisplayName: p.DisplayName, Color: p.Color, Kube: p.Kube, Helm: p.Helm}
 }
 
 // withSettings returns a copy of the project carrying s, leaving identity
 // untouched.
 func (p Project) withSettings(s Settings) Project {
+	p.DisplayName = strings.TrimSpace(s.DisplayName)
+	p.Color = strings.TrimSpace(s.Color)
 	p.Kube = s.Kube
 	p.Helm = s.Helm
 	return p
