@@ -47,6 +47,7 @@
   --m6t-row: 22px; /* list row, section header, status bar */
   --m6t-tab: 32px; /* tab strip */
   --m6t-indent: 8px; /* one level of tree nesting */
+  --m6t-icon: 16px; /* every icon, file-type mark or chrome */
   --m6t-separator: 4px; /* draggable divider */
   --m6t-radius: 2px;
   --m6t-radius-round: 50%;
@@ -376,14 +377,20 @@ body {
   white-space: normal;
 }
 
-.tree__icon {
-  width: 1em;
+/* The twisty is a directory's alone; a file reserves the same width so its
+   icon lines up with the folder icons above it rather than shifting left. */
+.tree__twisty {
+  display: flex;
+  flex: none;
+  align-items: center;
+  width: var(--m6t-icon);
   color: var(--m6t-muted);
-  text-align: center;
 }
 
-.tree__icon--dir {
-  color: var(--m6t-accent);
+.tree__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
 }
 
 .tree__name {
@@ -642,6 +649,30 @@ button:hover {
   border-color: var(--m6t-danger);
 }
 
+/* --- icons (#38) ------------------------------------------------------- */
+
+/* One size for every icon, so a tab strip, a tree row and a changes row all
+   line up on the same grid. Two kinds sit under this class and they colour
+   differently on purpose (components/Icon.tsx): a vendored file-type SVG
+   arrives as an <img> carrying its own brand colour, and a lucide chrome
+   icon draws in currentColor so it inherits whatever token its button uses. */
+.icon {
+  flex: none;
+  width: var(--m6t-icon);
+  height: var(--m6t-icon);
+  /* Lucide's own default is 2, which reads as a smear once its 24px artwork
+     is drawn at 16. */
+  stroke-width: 1.75;
+}
+
+/* Buttons that pair an icon with a word ("+ file", "+ shell"). */
+.tree__header button,
+.tabs__add {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-1);
+}
+
 /* --- status bar -------------------------------------------------------- */
 
 .statusbar {
@@ -698,25 +729,24 @@ button:hover {
 }
 
 .tab__icon {
-  width: var(--m6t-space-3);
-  height: var(--m6t-space-3);
-  border-radius: var(--m6t-radius);
-  background: var(--m6t-muted);
-}
-
-.tab__icon--yaml {
-  background: var(--m6t-accent);
-}
-
-.tab__icon--markdown {
-  background: var(--m6t-ok);
+  display: flex;
+  flex: none;
+  align-items: center;
 }
 
 .tab__dirty {
+  display: flex;
+  align-items: center;
   margin-left: var(--m6t-space-1);
   color: var(--m6t-accent);
-  font-size: 0.7em;
-  line-height: 1;
+}
+
+/* Smaller than an icon and filled: this is a state dot, not a picture of a
+   circle, and it has to read as "unsaved" at a glance beside the tab title. */
+.tab__dirty .icon {
+  width: var(--m6t-space-3);
+  height: var(--m6t-space-3);
+  fill: currentColor;
 }
 
 .tab--confirm {
@@ -1010,6 +1040,12 @@ button:hover {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.changes__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
 }
 
 .changes__row {

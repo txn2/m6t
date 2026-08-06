@@ -3,6 +3,7 @@ import type { Entry } from "./tree";
 import {
   ROOT,
   affectedTrackedDirs,
+  baseName,
   collapse,
   expand,
   iconKind,
@@ -41,20 +42,110 @@ describe("paths", () => {
   });
 });
 
+describe("base names", () => {
+  it("returns a top-level path unchanged", () => {
+    expect(baseName("deploy.yaml")).toBe("deploy.yaml");
+  });
+
+  it("returns the last segment of a nested path", () => {
+    expect(baseName("charts/api/values.yaml")).toBe("values.yaml");
+  });
+});
+
 describe("icon buckets", () => {
   it("buckets a directory regardless of name", () => {
-    expect(iconKind(entry("a.yaml", true))).toBe("dir");
+    expect(iconKind("manifests/deploy.yaml", true)).toBe("dir");
   });
 
   it.each([
-    ["deploy.yaml", "yaml"],
-    ["deploy.yml", "yaml"],
+    // Names that settle it on their own.
+    ["Dockerfile", "docker"],
+    ["ops/Containerfile", "docker"],
+    ["build.dockerfile", "docker"],
+    ["Makefile", "make"],
+    ["GNUmakefile", "make"],
+    ["build/rules.mk", "make"],
+    // Extensions.
     ["README.md", "md"],
     ["notes.markdown", "md"],
-    ["values.YAML", "yaml"],
-    ["Makefile", "file"],
-  ])("buckets %s as %s", (name, want) => {
-    expect(iconKind(entry(name))).toBe(want);
+    ["internal/app/app.go", "go"],
+    ["src/lib/tree.ts", "ts"],
+    ["src/components/FileTree.tsx", "tsx"],
+    ["vite.config.mts", "ts"],
+    ["scripts/gate.js", "js"],
+    ["scripts/gate.mjs", "js"],
+    ["package.json", "json"],
+    ["scripts/run.sh", "shell"],
+    ["Cargo.toml", "toml"],
+    // Neither: a generic file.
+    ["LICENSE", "file"],
+    ["frontend/dist/.gitkeep", "file"],
+    ["notes.txt", "file"],
+  ])("buckets %s as %s", (path, want) => {
+    expect(iconKind(path, false)).toBe(want);
+  });
+
+  it("matches names and extensions case-insensitively", () => {
+    expect(iconKind("charts/api/VALUES.YAML", false)).toBe("helm");
+    expect(iconKind("DOCKERFILE", false)).toBe("docker");
+    expect(iconKind("READ.MD", false)).toBe("md");
+  });
+
+  it.each(["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"])(
+    "buckets a file named %s as a plain file",
+    (name) => {
+      // A name that collides with Object.prototype: an object-literal lookup
+      // answers "present" for every one of these and returns a function,
+      // which TypeScript cannot catch behind an index signature typed as
+      // IconKind. The result would be an icon with no artwork behind it.
+      expect(iconKind(name, false)).toBe("file");
+      expect(iconKind(`src/${name}.ts`, false)).toBe("ts");
+    },
+  );
+
+  it("does not read a leading dot as an extension", () => {
+    // `.gitignore` is a dotfile, not a file of type "gitignore" — but a
+    // dotfile with a real suffix still has one.
+    expect(iconKind(".gitignore", false)).toBe("file");
+    expect(iconKind(".golangci.yml", false)).toBe("yaml");
+  });
+});
+
+describe("YAML dialects", () => {
+  it.each([
+    // Helm: the chart's own files, its values, anything it templates.
+    ["charts/api/Chart.yaml", "helm"],
+    ["charts/api/Chart.lock", "helm"],
+    ["charts/api/values.yaml", "helm"],
+    ["charts/api/values-prod.yaml", "helm"],
+    ["charts/api/templates/deployment.yaml", "helm"],
+    // Kustomize.
+    ["overlays/prod/kustomization.yaml", "kustomize"],
+    ["overlays/prod/kustomization.yml", "kustomize"],
+    // CI, which lives at one known path.
+    [".github/workflows/ci.yml", "actions"],
+    [".github/workflows/release.yaml", "actions"],
+    // Everything else below the root: this is a manifest repository.
+    ["manifests/prod/ingress.yaml", "kubernetes"],
+    ["deploy/svc.yml", "kubernetes"],
+  ])("reads %s as %s", (path, want) => {
+    expect(iconKind(path, false)).toBe(want);
+  });
+
+  it.each([
+    // Repository configuration, not manifests: at the root, or a dotfile.
+    ["codecov.yml", "yaml"],
+    ["docker-compose.yaml", "yaml"],
+    [".golangci.yml", "yaml"],
+    ["manifests/.hidden.yaml", "yaml"],
+  ])("leaves %s as plain YAML", (path, want) => {
+    expect(iconKind(path, false)).toBe(want);
+  });
+
+  it("does not mistake a workflow-named file elsewhere for a workflow", () => {
+    // The rule is the path, not the directory name on its own: a `workflows`
+    // directory that is not GitHub's holds manifests like any other.
+    expect(iconKind("ops/workflows/argo.yaml", false)).toBe("kubernetes");
   });
 });
 

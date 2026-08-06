@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { EditorTab } from "../lib/editorTabs";
 import { canSave, isDirty } from "../lib/editorTabs";
+import { iconKind } from "../lib/tree";
+import { FileIcon, UiIcon } from "./Icon";
 
 /**
  * The editor tab strip: one tab per open file (DESIGN.md §5).
@@ -105,11 +107,13 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
           onSelect(tab.key);
         }}
       >
-        <span className={`tab__icon tab__icon--${tab.kind}`} aria-hidden="true" />
+        <span className="tab__icon">
+          <FileIcon kind={iconKind(tab.path, false)} />
+        </span>
         {tab.title}
         {dirty && (
           <span className="tab__dirty" aria-label="unsaved changes">
-            ●
+            <UiIcon name="dirty" />
           </span>
         )}
       </button>
@@ -126,7 +130,7 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
             onPreview(tab.key, tab.mode !== "preview");
           }}
         >
-          {tab.mode === "preview" ? "✎" : "◉"}
+          <UiIcon name={tab.mode === "preview" ? "edit" : "preview"} />
         </button>
       )}
 
@@ -136,7 +140,7 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
         aria-label={`close ${tab.title}`}
         onClick={onRequestClose}
       >
-        ✕
+        <UiIcon name="close" />
       </button>
     </div>
   );

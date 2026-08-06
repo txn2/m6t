@@ -62,21 +62,138 @@ export function parentPath(path: string): string {
   return index < 0 ? ROOT : path.slice(0, index);
 }
 
-/** File-type icon bucket, by extension — DESIGN.md §5's yaml/md/other. */
-export type IconKind = "dir" | "yaml" | "md" | "file";
+/** The last path segment — a file's own name. */
+export function baseName(path: string): string {
+  const index = path.lastIndexOf("/");
+  return index < 0 ? path : path.slice(index + 1);
+}
 
-export function iconKind(entry: Pick<Entry, "name" | "isDir">): IconKind {
-  if (entry.isDir) {
+/**
+ * File-type icon bucket (issue #38). One row's bucket, not one row's picture:
+ * `components/Icon.tsx` owns which artwork each bucket maps to, so the tree,
+ * the editor tab strip and the changes rows can all classify with this and
+ * still render the same icon.
+ */
+export type IconKind =
+  | "dir"
+  | "kubernetes"
+  | "helm"
+  | "kustomize"
+  | "actions"
+  | "yaml"
+  | "md"
+  | "go"
+  | "ts"
+  | "tsx"
+  | "js"
+  | "json"
+  | "shell"
+  | "toml"
+  | "docker"
+  | "make"
+  | "file";
+
+/**
+ * Buckets an exact (lowercased) file name settles on its own.
+ *
+ * A Map rather than an object literal, and not as a style preference: an
+ * object literal inherits from `Object.prototype`, so a file named
+ * `constructor` or `toString` would look up as "present" and hand back a
+ * function where an `IconKind` was promised — which TypeScript cannot catch,
+ * because the index signature says the value is an `IconKind`. `Map.get`
+ * answers about the entries only.
+ */
+const BY_NAME: ReadonlyMap<string, IconKind> = new Map([
+  ["dockerfile", "docker"],
+  ["containerfile", "docker"],
+  ["makefile", "make"],
+  ["gnumakefile", "make"],
+  ["chart.yaml", "helm"],
+  ["chart.lock", "helm"],
+  ["kustomization.yaml", "kustomize"],
+  ["kustomization.yml", "kustomize"],
+] satisfies [string, IconKind][]);
+
+/** Buckets an extension settles on its own — every YAML suffix is absent
+ * here deliberately, because YAML needs the path to disambiguate. */
+const BY_EXTENSION: ReadonlyMap<string, IconKind> = new Map([
+  [".md", "md"],
+  [".markdown", "md"],
+  [".go", "go"],
+  [".ts", "ts"],
+  [".mts", "ts"],
+  [".cts", "ts"],
+  [".tsx", "tsx"],
+  [".js", "js"],
+  [".mjs", "js"],
+  [".cjs", "js"],
+  [".jsx", "js"],
+  [".json", "json"],
+  [".sh", "shell"],
+  [".bash", "shell"],
+  [".zsh", "shell"],
+  [".toml", "toml"],
+  [".dockerfile", "docker"],
+  [".mk", "make"],
+] satisfies [string, IconKind][]);
+
+/**
+ * The icon bucket for a root-relative path.
+ *
+ * Path-based only, by design: the honest way to tell a Kubernetes manifest
+ * from any other YAML is `apiVersion:` + `kind:` in its content, and there is
+ * no way to read that for every entry in a directory the moment it is
+ * expanded without turning one click into a few hundred file reads (#38). So
+ * the rules below decide from the name and the directories above it, which
+ * costs nothing and is wrong only in the cases `yamlKind` names.
+ */
+export function iconKind(path: string, isDir: boolean): IconKind {
+  if (isDir) {
     return "dir";
   }
-  const lower = entry.name.toLowerCase();
-  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
+  const name = baseName(path).toLowerCase();
+  const byName = BY_NAME.get(name);
+  if (byName !== undefined) {
+    return byName;
+  }
+  const extension = extensionOf(name);
+  if (extension === ".yaml" || extension === ".yml") {
+    return yamlKind(path, name);
+  }
+  return BY_EXTENSION.get(extension) ?? "file";
+}
+
+/** A file name's suffix including the dot, or "" when it has none. A leading
+ * dot does not start an extension: `.gitignore` is a dotfile, not a file of
+ * type "gitignore", while `.golangci.yml` is still YAML. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot);
+}
+
+/**
+ * Which of the YAML dialects a `.yaml`/`.yml` file is.
+ *
+ * The last rule is the load-bearing one: in a manifest repository (DESIGN.md
+ * §1) YAML that is not a chart, a kustomization or a CI workflow is a
+ * Kubernetes manifest, so that is the default — except at the repository root
+ * and for dotfiles, which is where repository configuration lives
+ * (`codecov.yml`, `.golangci.yml`) and where a Kubernetes wheel would be a
+ * lie. A `docker-compose.yaml` two directories down is the case this gets
+ * wrong; it takes the generic YAML icon only once content sniffing exists.
+ */
+function yamlKind(path: string, name: string): IconKind {
+  const dirs = parentPath(path).split("/").filter((segment) => segment !== "");
+  if (dirs[0] === ".github" && dirs[1] === "workflows") {
+    return "actions";
+  }
+  if (name.startsWith("values") || dirs.includes("templates")) {
+    return "helm";
+  }
+  if (name.startsWith(".") || dirs.length === 0) {
     return "yaml";
   }
-  if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
-    return "md";
-  }
-  return "file";
+  return "kubernetes";
 }
 
 /** Whether an entry is a dotfile — hidden unless the tree's toggle is on. */

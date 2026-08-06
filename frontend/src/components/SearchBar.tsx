@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { UiIcon } from "./Icon";
 
 /**
  * The find box over a terminal pane, driving xterm's search addon.
@@ -55,7 +56,7 @@ export function SearchBar({ onFind, onClose }: SearchBarProps) {
           find("previous");
         }}
       >
-        ↑
+        <UiIcon name="up" />
       </button>
       <button
         type="button"
@@ -64,10 +65,10 @@ export function SearchBar({ onFind, onClose }: SearchBarProps) {
           find("next");
         }}
       >
-        ↓
+        <UiIcon name="down" />
       </button>
       <button type="button" aria-label="close find" onClick={onClose}>
-        ✕
+        <UiIcon name="close" />
       </button>
     </div>
   );

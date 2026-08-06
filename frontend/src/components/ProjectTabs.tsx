@@ -1,4 +1,5 @@
 import type { Project } from "../lib/projects";
+import { UiIcon } from "./Icon";
 
 export interface ProjectTabsProps {
   readonly projects: readonly Project[];
@@ -53,7 +54,7 @@ export function ProjectTabs({
                 onRemove(project.name);
               }}
             >
-              ×
+              <UiIcon name="close" />
             </button>
           </li>
         ))}
