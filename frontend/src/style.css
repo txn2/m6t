@@ -1067,3 +1067,228 @@ button:hover {
 .changes__error {
   color: var(--m6t-git-conflict);
 }
+
+/* =============================================================================
+   Git operations: branch bar, row actions, commit box (#9)
+   ========================================================================== */
+
+/* The sidebar is one column of stacked sections. The changes list is the only
+   one that scrolls; the branch bar and the commit box are fixed chrome around
+   it, so a long changes list never pushes the Commit button off the bottom. */
+.branchbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  flex: none;
+  padding: var(--m6t-space-2) var(--m6t-space-3);
+  border-top: 1px solid var(--m6t-border);
+}
+
+/* The branch name is the widest thing here and the one worth the room; the
+   two actions keep their intrinsic width. */
+.branchbar__branch {
+  flex: 1 1 6em;
+  min-width: 0;
+}
+
+.branchbar__branch,
+.branchbar__remote {
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-2);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  color: inherit;
+  font: inherit;
+  font-size: var(--m6t-font-size-sm);
+}
+
+.branchbar__action {
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3);
+  font-size: var(--m6t-font-size-sm);
+}
+
+.branchbar__upstream {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  min-width: 0;
+}
+
+.branchbar__remote {
+  max-width: 8em;
+}
+
+.branchbar__blocked {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+}
+
+.branchbar__error {
+  flex-basis: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--m6t-space-2);
+  padding: var(--m6t-space-2);
+  border: 1px solid var(--m6t-git-conflict);
+  border-radius: var(--m6t-radius);
+}
+
+/* git's stderr keeps its own line breaks: a multi-line git error folded into
+   a paragraph is harder to read than the original, and DESIGN.md §7 is about
+   what reaches the user, not only about what is stored. It scrolls rather
+   than wrapping a long hint URL into the layout. */
+.branchbar__stderr {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  color: var(--m6t-git-conflict);
+  font-family: var(--m6t-font-mono);
+  font-size: var(--m6t-font-size-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.branchbar__dismiss {
+  flex: none;
+  height: var(--m6t-row);
+  font-size: var(--m6t-font-size-sm);
+}
+
+/* The group-level action sits at the far end of its heading, where it reads as
+   belonging to the group rather than to the first row under it. */
+.changes__all {
+  margin-left: auto;
+  padding: 0 var(--m6t-space-2);
+  border: none;
+  background: none;
+  color: var(--m6t-muted);
+  font: inherit;
+  font-size: var(--m6t-font-size-sm);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.changes__all:hover:not(:disabled) {
+  color: var(--m6t-accent);
+}
+
+.changes__item {
+  display: flex;
+  align-items: center;
+}
+
+/* The row takes the space; the action keeps its own and appears on hover, the
+   same discipline the tree's menu button follows — so the list reads as paths
+   rather than as a column of buttons. */
+.changes__item .changes__row {
+  min-width: 0;
+  flex: 1;
+}
+
+.changes__action {
+  flex: none;
+  width: var(--m6t-space-6);
+  height: var(--m6t-row);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--m6t-muted);
+  opacity: 0;
+}
+
+.changes__item:hover .changes__action,
+.changes__item:focus-within .changes__action {
+  opacity: 1;
+}
+
+.changes__action:hover:not(:disabled) {
+  color: var(--m6t-accent);
+}
+
+.changes__action:disabled,
+.changes__all:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.changes__group--conflict {
+  color: var(--m6t-git-conflict);
+}
+
+.changes__hint {
+  margin: 0;
+  padding: 0 var(--m6t-space-3) var(--m6t-space-1);
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+}
+
+.commit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-2);
+  flex: none;
+  padding: var(--m6t-space-3);
+  border-top: 1px solid var(--m6t-border);
+}
+
+.commit__subject,
+.commit__body {
+  padding: var(--m6t-space-2);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  color: inherit;
+  font: inherit;
+  font-size: var(--m6t-font-size-sm);
+}
+
+.commit__subject:focus-visible,
+.commit__body:focus-visible {
+  border-color: var(--m6t-accent);
+  outline: none;
+}
+
+/* The body is prose the user may have pasted a manifest into, so it resizes
+   vertically and never horizontally — a sidebar that widens itself would move
+   the editor out from under the pointer. */
+.commit__body {
+  resize: vertical;
+  font-family: var(--m6t-font-mono);
+}
+
+.commit__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-3);
+}
+
+.commit__submit {
+  height: var(--m6t-row);
+  font-size: var(--m6t-font-size-sm);
+}
+
+.commit__submit:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.commit__submit:disabled:hover {
+  border-color: var(--m6t-border);
+}
+
+.commit__staged,
+.commit__blocked {
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+}
+
+.commit__blocked {
+  margin: 0;
+}

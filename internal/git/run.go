@@ -19,7 +19,7 @@ import (
 // subprocess.
 const binaryName = "git"
 
-// commandTimeout bounds one invocation.
+// commandTimeout bounds one local invocation.
 //
 // A read-only status on a cold, very large repository can take seconds, so
 // this is generous. What it is actually for is the case with no other exit:
@@ -27,6 +27,15 @@ const binaryName = "git"
 // process left behind. Without a deadline that call never returns and the
 // project's badges never update again.
 const commandTimeout = 30 * time.Second
+
+// networkTimeout bounds an invocation that talks to a remote.
+//
+// A fetch of a large repository over a slow link is minutes of legitimate
+// work, so commandTimeout would abort real transfers. The deadline still
+// exists because the failure it guards against is different from the local
+// one: a remote that accepted the connection and then stopped answering
+// leaves git waiting on a socket with no timeout of its own.
+const networkTimeout = 10 * time.Minute
 
 // fatalExit is git's exit status for a fatal error, which includes being run
 // outside a repository.
@@ -48,47 +57,121 @@ var (
 	errNotARepository = errors.New("not a git repository")
 )
 
-// runGit invokes git inside root and returns its standard output.
+// invocation is how one git call differs from the default one.
+//
+// The zero value is a mutating, local call with no input — the shape every
+// operation in ops.go wants — so only the exceptions have to say anything.
+type invocation struct {
+	// readOnly adds --no-optional-locks, which stops git from refreshing the
+	// index as a side effect of reading it. It is what keeps the status
+	// reader from feeding itself: the watcher that triggers a status also
+	// watches .git, so a read that wrote .git/index would publish a change,
+	// which would trigger another read, forever.
+	//
+	// A mutating call must NOT set it. Those write the index on purpose, and
+	// the resulting event is the notification the UI needs to refresh.
+	readOnly bool
+
+	// network extends the deadline to networkTimeout for a call that talks to
+	// a remote.
+	network bool
+
+	// stdin is fed to git and closed. It carries a commit message, which is
+	// the one input too large and too free-form to be an argv element.
+	stdin string
+}
+
+// runGit invokes git inside root as a read-only call and returns its standard
+// output. It is the status reader's entry point; ops.go calls runWith.
+func runGit(root string, args ...string) (string, error) {
+	return runWith(root, invocation{readOnly: true}, args...)
+}
+
+// runWith invokes git inside root and returns its standard output.
 //
 // The argv is a slice and the binary is executed directly — never a shell —
 // so a worktree path containing shell metacharacters is inert
 // (.semgrep/go-security.yml enforces the no-shell half of this). The argv is
 // logged, as CLAUDE.md requires of every external binary: what the app ran on
-// the user's repository is the first thing anyone debugging it needs, and it
-// is only ever written when something actually changed on disk, so an idle
-// project logs nothing.
-func runGit(root string, args ...string) (string, error) {
+// the user's repository is the first thing anyone debugging it needs. stdin is
+// deliberately not logged — it is a commit message, which is the user's prose
+// and not part of what was run.
+func runWith(root string, call invocation, args ...string) (string, error) {
 	binary, err := exec.LookPath(binaryName)
 	if err != nil {
 		return "", errNoGit
 	}
 
-	// --no-optional-locks stops git from refreshing the index as a side
-	// effect of reading it. It is what keeps this package from feeding
-	// itself: the watcher that triggers a status also watches .git, so an
-	// invocation that wrote .git/index would publish a change, which would
-	// trigger another invocation, forever.
-	argv := append([]string{"--no-optional-locks", "-C", root}, args...)
+	argv := call.argv(root, args)
 	log.Printf("m6t: running %s %s", binary, strings.Join(argv, " "))
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), call.deadline())
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, argv...)
-
-	// The user's environment is inherited — git needs it for config, ssh and
-	// PATH — with the locale pinned so git's own messages are the ones
-	// notARepositoryMessage was written against.
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	cmd.Env = commandEnv()
+	// Always a reader, never the inherited stdin: a git that reached the
+	// user's terminal would be reading keystrokes meant for a shell in
+	// another pane. An operation with no input gets an empty one, which is
+	// what makes a remote asking for a password fail instead of hang.
+	cmd.Stdin = strings.NewReader(call.stdin)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", classify(ctx, err, argv, stderr.String())
+		return "", classify(ctx, err, argv, explanation(stdout.String(), stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+// explanation picks the stream a failed git wrote its reason to.
+//
+// Usually that is stderr, and stdout holds output nobody wants in an error
+// message. But not always: `git commit` with an empty index exits 1 and writes
+// "nothing to commit, working tree clean" to *stdout*, leaving stderr blank.
+// Reporting only stderr there gives the user "exit status 1" and nothing else,
+// which is exactly the loss of detail DESIGN.md §7 forbids. stderr still wins
+// when both are set — when git has something to say about a failure, that is
+// where it says it.
+func explanation(stdout, stderr string) string {
+	if strings.TrimSpace(stderr) != "" {
+		return stderr
+	}
+	return stdout
+}
+
+// argv builds the full argument vector, putting the top-level options where
+// git requires them: before the subcommand.
+func (call invocation) argv(root string, args []string) []string {
+	argv := make([]string, 0, len(args)+3)
+	if call.readOnly {
+		argv = append(argv, "--no-optional-locks")
+	}
+	argv = append(argv, "-C", root)
+	return append(argv, args...)
+}
+
+func (call invocation) deadline() time.Duration {
+	if call.network {
+		return networkTimeout
+	}
+	return commandTimeout
+}
+
+// commandEnv is the user's environment — git needs it for config, ssh and
+// PATH — with two variables pinned.
+//
+// LC_ALL fixes the locale so git's own messages are the ones
+// notARepositoryMessage was written against. GIT_TERMINAL_PROMPT=0 turns a
+// credential prompt into a failure rather than a hang: m6t runs git with no
+// controlling terminal, so a prompt would have nowhere to appear and the call
+// would sit there until its deadline. It disables only git's own prompting —
+// credential helpers and ssh-agent are untouched, which is what DESIGN.md §7
+// requires of authentication.
+func commandEnv() []string {
+	return append(os.Environ(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
 }
 
 // classify turns a failed invocation into either a sentinel this package

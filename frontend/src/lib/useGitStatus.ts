@@ -5,6 +5,9 @@ import type { Git, Status } from "./git";
 import { emptyStatus, wailsGit } from "./git";
 import type { Endpoint } from "./stream";
 
+/** The reading half of the git seam — the only call this hook makes. */
+type GitReader = Pick<Git, "status">;
+
 /**
  * One project's git status, kept current (DESIGN.md §7).
  *
@@ -18,12 +21,27 @@ export interface GitStatusController {
    * The two degraded states (no git, not a repository) are not errors and
    * arrive on `status` instead. */
   readonly error: string | null;
+  /**
+   * Asks for the status again now.
+   *
+   * The `/events` notification would arrive on its own after any write, so
+   * this is not what makes the UI correct — it is what makes it prompt. A
+   * user who clicks "stage" watches the row move; waiting out the watcher's
+   * coalescing window first reads as the click not having registered.
+   *
+   * It carries the same one-in-flight, one-queued discipline as an event-
+   * driven read, so calling it alongside one costs no extra subprocess.
+   */
+  readonly refresh: () => void;
 }
 
 export function useGitStatus(
   root: string | null,
   endpoint: Endpoint | null,
-  git: Git = wailsGit,
+  // Narrowed to the one call this hook makes. The full seam also carries the
+  // mutations, and taking it here would say this hook could write — which is
+  // the distinction `useGitOps` exists to keep.
+  git: GitReader = wailsGit,
   /** Injectable for tests; defaults to opening a real WebSocket. */
   socketFactory?: SocketFactory,
 ): GitStatusController {
@@ -121,7 +139,7 @@ export function useGitStatus(
     };
   }, [root, endpoint, read, socketFactory]);
 
-  return { status, error };
+  return { status, error, refresh: read };
 }
 
 /** One read's outcome: exactly one of the two is set. */
@@ -133,7 +151,7 @@ interface ReadResult {
 /** Reads one status, turning a rejection into a message rather than a throw
  * — including the synchronous throw the generated binding produces when there
  * is no Wails runtime behind it. */
-async function readStatus(git: Git, root: string): Promise<ReadResult> {
+async function readStatus(git: GitReader, root: string): Promise<ReadResult> {
   try {
     return { status: await git.status(root), error: null };
   } catch (failure: unknown) {

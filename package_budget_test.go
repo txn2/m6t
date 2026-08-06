@@ -43,12 +43,12 @@ var structuralPins = map[string]packagePin{
 		why: "composition root: embeds the frontend, hands options to the Wails runtime",
 	},
 	"internal/app": {
-		loc: 620, exported: 2,
+		loc: 700, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/git": {
-		loc: 650, exported: 15,
-		why: "git service: porcelain v2 status over the system git, read-only, with the two degraded states (no git, not a repository) reported as values rather than errors (DESIGN.md §3.2, §7)",
+		loc: 1000, exported: 27,
+		why: "git service: both halves of DESIGN.md §7 over the system git — porcelain v2 status with its two degraded states reported as values rather than errors, and the daily loop that writes (stage, unstage, commit, pull, push, branch switch)",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,
@@ -162,6 +162,51 @@ var structuralPins = map[string]packagePin{
 // TypeScript compares against them — the frontend's badge and status-bar
 // logic is written against these strings, so they are wire constants in the
 // same sense internal/stream's type names are.
+//
+// 650 -> 1000 and 15 -> 27 in #9, and this one is a raise where the failure
+// message says to decompose instead, so it needs the argument rather than the
+// number. #8's `why` above said "read-only" because #8 was; #9 is the other
+// half of the same DESIGN.md §7 sentence, against the same binary, through the
+// same runner, under the same rule that git's stderr reaches the user
+// unedited. The package is four files with one job each — the wire types, the
+// exec runner, the porcelain v2 parser, the mutations — and 428 of its 902
+// lines are code; the rest is this repository's deliberate prose, which is
+// what makes a raw line count read high here for a package that is not
+// actually large.
+//
+// The decomposition was tried on paper and rejected. Splitting the writer into
+// internal/gitops leaves both halves needing runGit, which cannot be shared
+// without a third package for it — and depguard forbids one service importing
+// another, so that shape only compiles by adding a second dependency-root
+// exception beside internal/buildinfo. Three packages and a loosened layering
+// rule, to put a seam somewhere the code does not have one, is a worse
+// artifact than this raise. A seam that DOES exist is #35's diff viewer: it
+// parses a different format for a different consumer and shares only the
+// binary, so it is expected to land as its own package rather than inside this
+// ceiling.
+//
+// The exported surface goes to 27 with zero slack, as this table requires: the
+// original 15 plus eight operations (Stage, Unstage, Commit, Pull, Push,
+// Checkout, Branches, Remotes) and the four argument-rejection sentinels
+// (ErrNoPaths, ErrOutsideRoot, ErrEmptyMessage, ErrInvalidRef) that callers
+// match with errors.Is — the bound surface is a public API, so its refusals
+// are part of the contract rather than strings to compare.
+//
+// 620 -> 700 in #9. git.go gains the mutating half of the git service: eight
+// delegating bindings, each four lines because each names its own operation
+// and project in front of what internal/git returned, the way GitStatus
+// already does. That uniformity is the growth — a shared one-line wrapper
+// would have saved eighteen lines and cost every message the verb that says
+// which control the user pressed.
+//
+// There is no decomposition on offer here and that is structural rather than a
+// judgement: this package IS the bound surface, so its size is one function per
+// operation the frontend can invoke, and depguard forbids the only other place
+// those functions could live (a service importing internal/app inverts the
+// layering). Splitting git.go into two files would move lines between files
+// this budget sums together, which is the exact gaming the god-object gate
+// exists to catch. 625 is today's actual; 700 is that plus room for one more
+// service's bindings, which is what #10's kube exec surface will be.
 //
 // 540 -> 620 in #8. git.go adds one binding (GitStatus) and tree.go's
 // adapter gains a second publish. No new service handle came with it: the

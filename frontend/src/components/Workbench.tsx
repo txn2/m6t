@@ -7,11 +7,14 @@ import {
   type ReactNode,
 } from "react";
 import { FileTree } from "./FileTree";
+import { BranchBar } from "./BranchBar";
 import { ChangesPanel } from "./ChangesPanel";
+import { CommitBox } from "./CommitBox";
 import { PaneSeparator } from "./PaneSeparator";
 import type { Project } from "../lib/projects";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { GitStatusController } from "../lib/useGitStatus";
+import type { GitOpsController } from "../lib/useGitOps";
 import { badgesFor, branchSummary } from "../lib/gitStatus";
 import {
   EDITOR_MIN_HEIGHT,
@@ -27,6 +30,9 @@ export interface WorkbenchProps {
   readonly tree: FileTreeController;
   /** This project's git status (#8): tree badges and the changes list. */
   readonly git: GitStatusController;
+  /** The mutating git loop for this project (#9): stage, commit, pull, push,
+   * branch switch. */
+  readonly gitOps: GitOpsController;
   /** The open-file intent a tree selection emits; the editor strip acts on it. */
   readonly onOpenFile: (path: string) => void;
   /** The editor strip and panes for this project (#7). */
@@ -41,7 +47,14 @@ export interface WorkbenchProps {
  * All three are real: the tree is #6's, the editor is #7's, and the terminal
  * is #4's, rooted at this project's checkout.
  */
-export function Workbench({ tree, git, onOpenFile, editor, terminals }: WorkbenchProps) {
+export function Workbench({
+  tree,
+  git,
+  gitOps,
+  onOpenFile,
+  editor,
+  terminals,
+}: WorkbenchProps) {
   // The rollup walks every changed path's ancestors, and this component
   // re-renders on unrelated state — a keystroke in the editor, a terminal
   // status. A status object is replaced only when a read lands, so this ties
@@ -65,7 +78,26 @@ export function Workbench({ tree, git, onOpenFile, editor, terminals }: Workbenc
     >
       <aside className="workbench__tree">
         <FileTree tree={tree} badges={badges} onOpenFile={onOpenFile} />
-        <ChangesPanel status={git.status} error={git.error} onOpenFile={onOpenFile} />
+        <BranchBar
+          status={git.status}
+          branches={gitOps.branches}
+          remotes={gitOps.remotes}
+          error={gitOps.error}
+          busy={gitOps.busy}
+          onCheckout={gitOps.checkout}
+          onPull={gitOps.pull}
+          onPush={gitOps.push}
+          onDismissError={gitOps.dismissError}
+        />
+        <ChangesPanel
+          status={git.status}
+          error={git.error}
+          onOpenFile={onOpenFile}
+          onStage={gitOps.stage}
+          onUnstage={gitOps.unstage}
+          busy={gitOps.busy}
+        />
+        <CommitBox status={git.status} onCommit={gitOps.commit} busy={gitOps.busy} />
       </aside>
 
       <PaneSeparator

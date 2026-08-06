@@ -30,6 +30,7 @@ import {
 } from "./lib/theme";
 import { useEditorTabs } from "./lib/useEditorTabs";
 import { useFileTree } from "./lib/useFileTree";
+import { useGitOps } from "./lib/useGitOps";
 import { useGitStatus } from "./lib/useGitStatus";
 import { useTerminals } from "./lib/useTerminals";
 import { EditorPane } from "./components/EditorPane";
@@ -208,6 +209,10 @@ export default function App({
   const activePath = active?.path ?? null;
   const tree = useFileTree(activePath, stream, directory);
   const gitStatus = useGitStatus(activePath, stream, git);
+  // The write half re-reads through the read half: an operation refreshes the
+  // status it changed rather than reporting one of its own, so the panel has
+  // one source for what the repository looks like (PROTOCOL.md §5, `git`).
+  const gitOps = useGitOps(activePath, gitStatus.refresh, git);
 
   const handleOpenFile = useCallback(
     (path: string) => {
@@ -242,6 +247,7 @@ export default function App({
         <Workbench
           tree={tree}
           git={gitStatus}
+          gitOps={gitOps}
           onOpenFile={handleOpenFile}
           editor={
             <Editor project={active} editors={editors} appearance={appearance} />
