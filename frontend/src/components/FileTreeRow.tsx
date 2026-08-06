@@ -198,10 +198,12 @@ interface RowMenuProps {
 }
 
 /**
- * The context menu scaffold the issue asks for: the real actions this
- * ticket implements, plus one honest placeholder line rather than a list of
- * git/kube entries with no behavior behind them yet (#8, #10, DESIGN.md §6,
- * §7).
+ * A row's context menu: the actions that work, and nothing else.
+ *
+ * It carries no note about what a later ticket will add. A menu that lists
+ * what it cannot do is a menu the user has to read past every time, and the
+ * git and kube entries (#8, #10, DESIGN.md §6, §7) will announce themselves by
+ * appearing here when they work.
  */
 function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }: RowMenuProps) {
   useEffect(() => {
@@ -228,7 +230,6 @@ function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }:
       <button type="button" role="menuitem" onClick={onDelete}>
         Delete
       </button>
-      <span className="tree__menu-note">Git and Kubernetes actions arrive in later tickets</span>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EditorTab, EditorTabKind } from "../lib/editorTabs";
 import { newTab, withEdit, withLoaded } from "../lib/editorTabs";
 import type { FileContent } from "../lib/files";
@@ -12,6 +12,14 @@ const file = (content: string, over: Partial<FileContent> = {}): FileContent =>
 
 const ready = (path = "deploy.yaml", kind: EditorTabKind = "yaml"): EditorTab =>
   withLoaded(newTab("k0", "infra", "/w/infra", path, kind), file("a: 1\n"));
+
+/** A saved tab under /w/infra, with a key of its own. */
+const saved = (key: string, path: string): EditorTab =>
+  withLoaded(newTab(key, "infra", "/w/infra", path, "yaml"), file("a: 1\n"));
+
+/** The same, with an unsaved edit in its buffer. */
+const unsaved = (key: string, path: string): EditorTab =>
+  withEdit(saved(key, path), "a: 2\n");
 
 function renderTabs(tabs: EditorTab[], over: Partial<Parameters<typeof EditorTabs>[0]> = {}) {
   const props = {
@@ -35,6 +43,23 @@ function renderTabs(tabs: EditorTab[], over: Partial<Parameters<typeof EditorTab
 /** Opens the close-confirmation for the first tab. */
 function requestClose(name: string) {
   fireEvent.click(screen.getByRole("button", { name: `close ${name}` }));
+}
+
+/** Right-clicks a tab and waits for its context menu. */
+async function openMenu(name: string) {
+  fireEvent.contextMenu(screen.getByRole("tab", { name: new RegExp(name) }));
+  return await screen.findByRole("menu", { name: `${name} actions` });
+}
+
+/** Picks an item from an open context menu. */
+function choose(item: string) {
+  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+}
+
+/** The tab the unsaved-changes prompt is currently asking about, or null. */
+function prompted(): string | null {
+  const dialog = screen.queryByRole("alertdialog");
+  return dialog?.getAttribute("aria-label")?.replace(" has unsaved changes", "") ?? null;
 }
 
 describe("the tab's file icon (#38)", () => {
@@ -209,5 +234,165 @@ describe("closing a tab", () => {
 
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByRole("button", { name: "Discard" })).toBeDefined();
+  });
+});
+
+describe("the tab context menu (#42)", () => {
+  it("offers the four closes and the two copies", async () => {
+    renderTabs([ready()]);
+
+    const menu = await openMenu("deploy.yaml");
+
+    expect(
+      [...menu.querySelectorAll("[role='menuitem']")].map((item) => item.textContent),
+    ).toEqual([
+      "Close",
+      "Close Others",
+      "Close All",
+      "Close Saved",
+      "Copy Path",
+      "Copy Relative Path",
+    ]);
+  });
+
+  it("closes the right-clicked tab from the menu", async () => {
+    const onClose = vi.fn();
+    renderTabs([saved("k0", "deploy.yaml")], { onClose });
+
+    await openMenu("deploy.yaml");
+    choose("Close");
+
+    expect(onClose.mock.calls).toEqual([["k0"]]);
+  });
+
+  // The issue's first acceptance criterion, and the reason bulk closes go
+  // through the same path a single close does.
+  it("closes the clean others and asks about the dirty one", async () => {
+    const onClose = vi.fn();
+    renderTabs(
+      [saved("k0", "deploy.yaml"), saved("k1", "service.yaml"), unsaved("k2", "ingress.yaml")],
+      { onClose },
+    );
+
+    await openMenu("deploy.yaml");
+    choose("Close Others");
+
+    // The right-clicked tab is not in the set, and the dirty one is waiting
+    // on an answer rather than gone.
+    expect(onClose.mock.calls).toEqual([["k1"]]);
+    expect(prompted()).toBe("ingress.yaml");
+  });
+
+  it("asks about every dirty tab a Close All would take", async () => {
+    const onClose = vi.fn();
+    renderTabs(
+      [unsaved("k0", "deploy.yaml"), saved("k1", "service.yaml"), unsaved("k2", "ingress.yaml")],
+      { onClose },
+    );
+
+    await openMenu("service.yaml");
+    choose("Close All");
+
+    expect(onClose.mock.calls).toEqual([["k1"]]);
+    expect(prompted()).toBe("deploy.yaml");
+
+    // Answering the first moves the prompt to the second rather than ending
+    // the operation on it.
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(onClose.mock.calls).toEqual([["k1"], ["k0"]]);
+    expect(prompted()).toBe("ingress.yaml");
+  });
+
+  // Having declined once, the user should not have to decline again per file.
+  it("cancelling a bulk close keeps that tab and drops the rest of the queue", async () => {
+    const onClose = vi.fn();
+    renderTabs([unsaved("k0", "deploy.yaml"), unsaved("k1", "ingress.yaml")], { onClose });
+
+    await openMenu("deploy.yaml");
+    choose("Close All");
+    expect(prompted()).toBe("deploy.yaml");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(prompted()).toBeNull();
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+  });
+
+  // The strip is handed one project's tabs at a time, and a project switch
+  // replaces them wholesale. A queued key with no tab left to render it would
+  // otherwise sit at the head of the queue holding up every close behind it.
+  it("drops queued tabs the strip no longer shows", async () => {
+    const { rerender } = renderTabs([unsaved("k0", "deploy.yaml")]);
+    await openMenu("deploy.yaml");
+    choose("Close All");
+    expect(prompted()).toBe("deploy.yaml");
+
+    rerender([saved("k9", "other.yaml")]);
+
+    expect(prompted()).toBeNull();
+    expect(screen.getByRole("tab", { name: /other\.yaml/ })).toBeDefined();
+  });
+
+  it("closes only what is saved, and asks nothing", async () => {
+    const onClose = vi.fn();
+    renderTabs(
+      [saved("k0", "deploy.yaml"), unsaved("k1", "ingress.yaml"), saved("k2", "service.yaml")],
+      { onClose },
+    );
+
+    await openMenu("ingress.yaml");
+    choose("Close Saved");
+
+    expect(onClose.mock.calls).toEqual([["k0"], ["k2"]]);
+    expect(prompted()).toBeNull();
+  });
+
+  describe("the copies", () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>();
+
+    beforeEach(() => {
+      writeText.mockReset();
+      writeText.mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+    });
+
+    it("copies the absolute path", async () => {
+      renderTabs([withLoaded(newTab("k0", "infra", "/w/infra", "base/deploy.yaml", "yaml"), file("a\n"))]);
+
+      await openMenu("deploy.yaml");
+      choose("Copy Path");
+
+      expect(writeText).toHaveBeenCalledWith("/w/infra/base/deploy.yaml");
+    });
+
+    it("copies the project-root-relative path", async () => {
+      renderTabs([withLoaded(newTab("k0", "infra", "/w/infra", "base/deploy.yaml", "yaml"), file("a\n"))]);
+
+      await openMenu("deploy.yaml");
+      choose("Copy Relative Path");
+
+      expect(writeText).toHaveBeenCalledWith("base/deploy.yaml");
+    });
+
+    // A clipboard the webview refuses is not something the strip can report
+    // and not something the user can act on; what it must not do is leave the
+    // rejection unhandled.
+    it("survives a refused clipboard", async () => {
+      writeText.mockRejectedValue(new Error("denied"));
+      renderTabs([ready()]);
+
+      await openMenu("deploy.yaml");
+      choose("Copy Path");
+
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalled();
+      });
+      expect(screen.getByRole("tab", { name: /deploy\.yaml/ })).toBeDefined();
+    });
   });
 });
