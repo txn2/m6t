@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { EditorTab } from "../lib/editorTabs";
 import { canSave, isDirty } from "../lib/editorTabs";
-import { iconKind } from "../lib/tree";
+import { iconKind, looksLikeManifest, resolveIconKind } from "../lib/tree";
 import { FileIcon, UiIcon } from "./Icon";
 
 /**
@@ -108,7 +108,13 @@ function Tab({ tab, active, onSelect, onPreview, onRequestClose }: TabProps) {
         }}
       >
         <span className="tab__icon">
-          <FileIcon kind={iconKind(tab.path, false)} />
+          {/* The tab already holds the file, so the same content rule the
+              tree runs against a 2 KiB head (#38) runs here for free —
+              which is what keeps a manifest's tab and its tree row from
+              disagreeing about what it is. */}
+          <FileIcon
+            kind={resolveIconKind(iconKind(tab.path, false), looksLikeManifest(tab.content))}
+          />
         </span>
         {tab.title}
         {dirty && (

@@ -67,8 +67,16 @@ var structuralPins = map[string]packagePin{
 		why: "loopback stream server: token-authenticated WebSocket transport for PTY I/O and backend-push events",
 	},
 	"internal/watch": {
-		loc: 1250, exported: 21,
-		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, file content read/write for the editor (#7), plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
+		// 21 -> 22 exported in #38. One name, ReadPrefixes: the bounded head
+		// read the tree classifies a Kubernetes manifest from. It is a
+		// capability this package did not have — ReadFile answers "give me
+		// this file to edit" and enforces an editing size limit for it, which
+		// is the wrong contract for "tell me what these thirty files are" —
+		// and the two identifiers it needed besides (the prefix length, the
+		// oversized-batch sentinel) are unexported precisely because no
+		// caller names them.
+		loc: 1250, exported: 22,
+		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, file content read/write for the editor (#7), bounded prefix reads for content-based file classification (#38), plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
 	},
 }
 

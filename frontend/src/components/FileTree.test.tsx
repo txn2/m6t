@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeState } from "../lib/tree";
-import { ROOT, expand, initialTree, withListing } from "../lib/tree";
+import { ROOT, expand, initialTree, withListing, withManifests } from "../lib/tree";
 import type { Badges } from "../lib/gitStatus";
 import { FileTree } from "./FileTree";
 
@@ -69,14 +69,28 @@ describe("rendering the tree", () => {
     expect(iconOf(screen.getByRole("treeitem", { name: /manifests/ }))).toBe("dir-open");
   });
 
-  it("shows a manifest below the root as Kubernetes, and root YAML as plain", () => {
-    // The rule `iconKind` implements: YAML at the repository root is
-    // repository configuration, YAML under a directory is a manifest.
+  it("shows YAML as plain until its content has been classified", () => {
+    // Nothing in a name says "manifest" (#38), so both rows start here and
+    // only the one whose head said apiVersion+kind moves.
     render(
       <FileTree badges={noBadges()} tree={fakeController(loadedManifests(loadedRoot()))} onOpenFile={vi.fn()} />,
     );
 
+    expect(iconOf(screen.getByRole("treeitem", { name: /prod\.yaml/ }))).toBe("yaml");
+    expect(iconOf(screen.getByRole("treeitem", { name: /deploy\.yaml/ }))).toBe("yaml");
+  });
+
+  it("upgrades a row to Kubernetes once its content says so", () => {
+    const listed = loadedManifests(loadedRoot());
+    const classified = withManifests(
+      listed,
+      { "manifests/prod.yaml": "apiVersion: v1\nkind: Service\n", "deploy.yaml": "x: 1\n" },
+      ["manifests/prod.yaml", "deploy.yaml"],
+    );
+    render(<FileTree badges={noBadges()} tree={fakeController(classified)} onOpenFile={vi.fn()} />);
+
     expect(iconOf(screen.getByRole("treeitem", { name: /prod\.yaml/ }))).toBe("kubernetes");
+    // Read, and it is not one — which must look the same as never read.
     expect(iconOf(screen.getByRole("treeitem", { name: /deploy\.yaml/ }))).toBe("yaml");
   });
 

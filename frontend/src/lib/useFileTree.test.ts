@@ -9,8 +9,12 @@ const endpoint = { port: 51234, token: "tok" };
 
 /** A Directory whose responses a test controls directly. Left untyped as
  * `Directory` (structurally compatible, so it still passes to useFileTree)
- * so the mock methods stay callable as mocks in assertions. */
-function fakeDirectory(listings: Record<string, Entry[]>) {
+ * so the mock methods stay callable as mocks in assertions.
+ *
+ * `heads` is what ReadPrefixes would return for the whole project; the fake
+ * serves the subset each call actually asks about, so a test can assert on
+ * which paths were asked for rather than only on what came back. */
+function fakeDirectory(listings: Record<string, Entry[]>, heads: Record<string, string> = {}) {
   return {
     list: vi.fn((_root: string, relPath: string) => {
       const dir = relPath === "" ? ROOT : relPath;
@@ -19,6 +23,13 @@ function fakeDirectory(listings: Record<string, Entry[]>) {
     create: vi.fn(() => Promise.resolve()),
     rename: vi.fn(() => Promise.resolve()),
     remove: vi.fn(() => Promise.resolve()),
+    prefixes: vi.fn((_root: string, relPaths: string[]) =>
+      Promise.resolve(
+        Object.fromEntries(
+          relPaths.filter((path) => path in heads).map((path) => [path, heads[path]]),
+        ),
+      ),
+    ),
   };
 }
 
@@ -34,6 +45,135 @@ function fakeSocketFactory() {
   });
   return { factory, sockets };
 }
+
+describe("classifying manifests lazily (#38)", () => {
+  it("reads the heads of a listing's plain YAML and records the verdicts", async () => {
+    const directory = fakeDirectory(
+      {
+        [ROOT]: [
+          { name: "deploy.yaml", isDir: false },
+          { name: "codecov.yml", isDir: false },
+        ],
+      },
+      { "deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\n", "codecov.yml": "coverage: {}\n" },
+    );
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+
+    await waitFor(() => {
+      expect(result.current.state.manifests.size).toBe(2);
+    });
+    expect(directory.prefixes).toHaveBeenCalledWith("/w/infra", ["deploy.yaml", "codecov.yml"]);
+    expect(result.current.state.manifests.get("deploy.yaml")).toBe(true);
+    expect(result.current.state.manifests.get("codecov.yml")).toBe(false);
+  });
+
+  it("does not read files whose icon its name already settles", async () => {
+    const directory = fakeDirectory({
+      [ROOT]: [
+        { name: "Chart.yaml", isDir: false },
+        { name: "README.md", isDir: false },
+        { name: "templates", isDir: true },
+      ],
+    });
+    renderHook(() => useFileTree("/w/infra", null, directory));
+
+    await waitFor(() => {
+      expect(directory.list).toHaveBeenCalled();
+    });
+    // Nothing in this listing can change with its content, so the round trip
+    // is not made at all — this is what keeps expanding a chart free.
+    expect(directory.prefixes).not.toHaveBeenCalled();
+  });
+
+  it("splits a large directory into batches the backend will serve", async () => {
+    // internal/watch.ReadPrefixes refuses more than 1024 paths in one call,
+    // so a flat directory of manifests bigger than that has to arrive in
+    // pieces or it never classifies at all.
+    const entries = Array.from({ length: 600 }, (_, i) => ({ name: `m${String(i)}.yaml`, isDir: false }));
+    const heads = Object.fromEntries(entries.map((e) => [e.name, "apiVersion: v1\nkind: Pod\n"]));
+    const directory = fakeDirectory({ [ROOT]: entries }, heads);
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+
+    await waitFor(() => {
+      expect(result.current.state.manifests.size).toBe(600);
+    });
+    expect(directory.prefixes).toHaveBeenCalledTimes(3);
+    for (const call of directory.prefixes.mock.calls) {
+      expect(call[1].length).toBeLessThanOrEqual(256);
+    }
+  });
+
+  it("drops verdicts that land after the project has changed", async () => {
+    let release: (value: Record<string, string>) => void = () => undefined;
+    const directory = {
+      ...fakeDirectory({ [ROOT]: [{ name: "deploy.yaml", isDir: false }] }),
+      prefixes: vi.fn(
+        () =>
+          new Promise<Record<string, string>>((resolve) => {
+            release = resolve;
+          }),
+      ),
+    };
+    const { result, rerender } = renderHook(
+      ({ root }: { root: string | null }) => useFileTree(root, null, directory),
+      { initialProps: { root: "/w/infra" } },
+    );
+    await waitFor(() => {
+      expect(directory.prefixes).toHaveBeenCalled();
+    });
+
+    rerender({ root: "/w/other" });
+    await act(async () => {
+      release({ "deploy.yaml": "apiVersion: v1\nkind: Pod\n" });
+      await Promise.resolve();
+    });
+
+    // Paths are project-relative, so the old project's answer for
+    // "deploy.yaml" would otherwise decide the new project's icon for its
+    // own file of that name.
+    expect(result.current.state.manifests.has("deploy.yaml")).toBe(false);
+  });
+
+  it("leaves the tree usable when classification fails", async () => {
+    const directory = {
+      ...fakeDirectory({ [ROOT]: [{ name: "deploy.yaml", isDir: false }] }),
+      prefixes: vi.fn(() => Promise.reject(new Error("backend gone"))),
+    };
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    // The listing stands and the row keeps its name-derived icon; a failed
+    // classification is not a failed directory.
+    expect(result.current.state.dirs[ROOT].error).toBeNull();
+    expect(result.current.state.manifests.size).toBe(0);
+  });
+
+  it("re-reads a directory's YAML when the watcher says it changed", async () => {
+    const { factory, sockets } = fakeSocketFactory();
+    const heads: Record<string, string> = { "deploy.yaml": "x: 1\n" };
+    const directory = fakeDirectory({ [ROOT]: [{ name: "deploy.yaml", isDir: false }] }, heads);
+    const { result } = renderHook(() => useFileTree("/w/infra", endpoint, directory, factory));
+
+    await waitFor(() => {
+      expect(result.current.state.manifests.get("deploy.yaml")).toBe(false);
+    });
+
+    // The file becomes a manifest on disk. Without a re-read the row would
+    // keep saying plain YAML for the life of the tree.
+    heads["deploy.yaml"] = "apiVersion: v1\nkind: Pod\n";
+    act(() => {
+      sockets[0].onmessage?.({
+        data: '{"type":"tree","payload":{"root":"/w/infra","dirs":["."]}}',
+      } as MessageEvent<string>);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.manifests.get("deploy.yaml")).toBe(true);
+    });
+  });
+});
 
 describe("loading the tree", () => {
   it("lists root as soon as a project is given", async () => {
@@ -77,6 +217,7 @@ describe("loading the tree", () => {
       create: vi.fn(),
       rename: vi.fn(),
       remove: vi.fn(),
+      prefixes: vi.fn(() => Promise.resolve({})),
     };
     const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
     await waitFor(() => {
@@ -145,6 +286,7 @@ describe("create, rename and delete", () => {
       create: vi.fn().mockRejectedValue(new Error("path already exists")),
       rename: vi.fn(),
       remove: vi.fn(),
+      prefixes: vi.fn(() => Promise.resolve({})),
     };
     const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
     await waitFor(() => {

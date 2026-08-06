@@ -4,7 +4,7 @@ import { wailsDirectory } from "./directory";
 import type { SocketFactory } from "./events";
 import { openEventsSocket } from "./events";
 import type { Endpoint } from "./stream";
-import type { TreeState } from "./tree";
+import type { Entry, TreeState } from "./tree";
 import {
   ROOT,
   affectedTrackedDirs,
@@ -18,6 +18,8 @@ import {
   withError,
   withListing,
   withLoading,
+  withManifests,
+  yamlPaths,
 } from "./tree";
 
 /**
@@ -59,11 +61,51 @@ export function useFileTree(
     stateRef.current = state;
   }, [state]);
 
+  // The project a late response has to be checked against — see `classify`.
+  const rootRef = useRef(root);
+  useEffect(() => {
+    rootRef.current = root;
+  }, [root]);
+
   // A new project has nothing loaded yet, and the previous project's entries
   // must not linger on screen while the fresh listing arrives.
   useEffect(() => {
     setState(initialTree());
   }, [root]);
+
+  /**
+   * Reads the head of every plain-YAML file in a fresh listing and records
+   * which of them are Kubernetes manifests (#38).
+   *
+   * Deliberately after the listing has already been shown rather than
+   * before: the rows appear with the icon their names earn, and the ones
+   * whose content says "manifest" upgrade a moment later. A tree that waited
+   * for this would be a tree that blocked on file reads to draw a directory.
+   *
+   * A failure is swallowed on purpose. There is no user-facing action behind
+   * "could not classify" — every row already has an icon — and the next
+   * listing of this directory tries again.
+   */
+  const classify = useCallback(
+    async (forRoot: string, dir: string, entries: readonly Entry[]) => {
+      for (const paths of batched(yamlPaths(dir, entries))) {
+        try {
+          const heads = await directory.prefixes(forRoot, paths);
+          // A project switch while this was in flight would otherwise write
+          // one project's verdicts into another's tree, where the paths are
+          // relative and can collide. The listing state is reset on switch;
+          // these would not be.
+          if (rootRef.current !== forRoot) {
+            return;
+          }
+          setState((current) => withManifests(current, heads, paths));
+        } catch {
+          // Left unclassified; the rows keep their name-derived icon.
+        }
+      }
+    },
+    [directory],
+  );
 
   const list = useCallback(
     (dir: string) => {
@@ -80,12 +122,13 @@ export function useFileTree(
         try {
           const entries = await directory.list(root, dir);
           setState((current) => withListing(current, dir, entries));
+          await classify(root, dir, entries);
         } catch (error: unknown) {
           setState((current) => withError(current, dir, describeError(error)));
         }
       })();
     },
-    [root, directory],
+    [root, directory, classify],
   );
 
   // Root's own listing is not behind an expand click — the top level of any
@@ -198,6 +241,24 @@ export function useFileTree(
     renameEntry,
     deleteEntry,
   };
+}
+
+/**
+ * The paths to ask about, split into batches the backend will serve.
+ *
+ * internal/watch.ReadPrefixes caps a batch so this binding cannot be turned
+ * into a repository walk. A flat directory of two thousand manifests is a
+ * real shape, though, and it must classify rather than fail the cap and
+ * silently keep the plain YAML icon forever — so the cap is respected here
+ * instead of being hit.
+ */
+function batched(paths: readonly string[]): string[][] {
+  const size = 256;
+  const batches: string[][] = [];
+  for (let at = 0; at < paths.length; at += size) {
+    batches.push(paths.slice(at, at + size));
+  }
+  return batches;
 }
 
 /** Renders a rejected binding call as a sentence the tree can show. */

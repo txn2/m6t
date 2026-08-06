@@ -89,7 +89,7 @@ export interface FileIconProps {
 export function FileIcon({ kind, expanded = false }: FileIconProps) {
   // The one bucket material-icon-theme has no artwork for: the set ships
   // `kusto` (Azure Data Explorer), a different product, and kustomize's own
-  // mark is not under a licence on the allowlist. Lucide's stacked layers is
+  // mark is not under a license on the allowlist. Lucide's stacked layers is
   // the honest stand-in, and narrowing it out here is what keeps FILE_SVG
   // total over every remaining kind rather than a partial map with a silent
   // fallback.

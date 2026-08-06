@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeRow } from "../lib/tree";
-import { ROOT, iconKind, parentPath, visibleRows } from "../lib/tree";
+import { ROOT, iconKind, parentPath, resolveIconKind, visibleRows } from "../lib/tree";
 import type { Badges } from "../lib/gitStatus";
 import { badgeAt, badgeTitle } from "../lib/gitStatus";
 import { FileIcon, UiIcon } from "./Icon";
@@ -169,6 +169,7 @@ export function FileTree({ tree, badges, onOpenFile }: FileTreeProps) {
             <RowView
               key={item.row.path}
               row={item.row}
+              isManifest={tree.state.manifests.get(item.row.path) ?? false}
               badge={badgeAt(badges, item.row.path, item.row.isDir)}
               focused={rowIndexOf(rendered, index) === cursor}
               selected={tree.state.selected === item.row.path}
@@ -328,6 +329,8 @@ function activate(row: TreeRow, tree: FileTreeController, onOpenFile: (path: str
 
 interface RowViewProps {
   readonly row: TreeRow;
+  /** Whether content said this row is a Kubernetes manifest (#38). */
+  readonly isManifest: boolean;
   /** This row's git marker, or null when git reports nothing for it. */
   readonly badge: string | null;
   readonly focused: boolean;
@@ -353,6 +356,7 @@ interface RowViewProps {
 
 function RowView({
   row,
+  isManifest,
   badge,
   focused,
   selected,
@@ -425,7 +429,7 @@ function RowView({
         onMenu();
       }}
     >
-      <RowIcons row={row} expanded={expanded} />
+      <RowIcons row={row} expanded={expanded} isManifest={isManifest} />
       <span className="tree__name">{row.name}</span>
       {badge !== null && (
         // data-badge rather than a modifier class: a badge can be `?` or `•`,
@@ -462,6 +466,9 @@ function RowView({
 interface RowIconsProps {
   readonly row: TreeRow;
   readonly expanded: boolean;
+  /** Whether this row's content said it is a Kubernetes manifest (#38);
+   * false both for "read, and it is not" and for "not read yet". */
+  readonly isManifest: boolean;
 }
 
 /**
@@ -472,14 +479,17 @@ interface RowIconsProps {
  * the left of the folder icons above it, and the tree would read as if
  * files were outdented from their own directory.
  */
-function RowIcons({ row, expanded }: RowIconsProps) {
+function RowIcons({ row, expanded, isManifest }: RowIconsProps) {
   return (
     <>
       <span className="tree__twisty" aria-hidden="true">
         {row.isDir && <UiIcon name={expanded ? "chevron-down" : "chevron-right"} />}
       </span>
       <span className="tree__icon">
-        <FileIcon kind={iconKind(row.path, row.isDir)} expanded={expanded} />
+        <FileIcon
+          kind={resolveIconKind(iconKind(row.path, row.isDir), isManifest)}
+          expanded={expanded}
+        />
       </span>
     </>
   );

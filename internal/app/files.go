@@ -17,6 +17,19 @@ func (*App) ReadFile(root, relPath string) (watch.FileContent, error) {
 	return content, nil
 }
 
+// ReadPrefixes returns the head of each named file, for a caller deciding
+// what a file is from its content rather than its name (issue #38's lazy
+// Kubernetes-manifest classification). Paths that cannot answer — a
+// directory, a deleted file, a binary — are absent from the map rather than
+// failing the batch; see watch.ReadPrefixes.
+func (*App) ReadPrefixes(root string, relPaths []string) (map[string]string, error) {
+	prefixes, err := watch.ReadPrefixes(root, relPaths)
+	if err != nil {
+		return nil, fmt.Errorf("reading prefixes in %s: %w", root, err)
+	}
+	return prefixes, nil
+}
+
 // WriteFile saves a file's content to a project's worktree, preserving its
 // original line-ending style (crlf, as ReadFile reported it) so a save shows
 // up as exactly the edit in `git diff` — the issue's own acceptance

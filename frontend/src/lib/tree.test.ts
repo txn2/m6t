@@ -10,7 +10,9 @@ import {
   initialTree,
   isHidden,
   joinPath,
+  looksLikeManifest,
   parentPath,
+  resolveIconKind,
   select,
   toggleHidden,
   visibleChildren,
@@ -18,6 +20,8 @@ import {
   withError,
   withListing,
   withLoading,
+  withManifests,
+  yamlPaths,
 } from "./tree";
 
 function entry(name: string, isDir = false): Entry {
@@ -125,27 +129,113 @@ describe("YAML dialects", () => {
     // CI, which lives at one known path.
     [".github/workflows/ci.yml", "actions"],
     [".github/workflows/release.yaml", "actions"],
-    // Everything else below the root: this is a manifest repository.
-    ["manifests/prod/ingress.yaml", "kubernetes"],
-    ["deploy/svc.yml", "kubernetes"],
   ])("reads %s as %s", (path, want) => {
     expect(iconKind(path, false)).toBe(want);
   });
 
   it.each([
-    // Repository configuration, not manifests: at the root, or a dotfile.
+    // Everything a name cannot settle is plain YAML, wherever it sits. Only
+    // content promotes one of these to a manifest.
+    ["manifests/prod/ingress.yaml", "yaml"],
+    ["deploy/svc.yml", "yaml"],
     ["codecov.yml", "yaml"],
     ["docker-compose.yaml", "yaml"],
     [".golangci.yml", "yaml"],
-    ["manifests/.hidden.yaml", "yaml"],
-  ])("leaves %s as plain YAML", (path, want) => {
+    ["ops/workflows/argo.yaml", "yaml"],
+  ])("leaves %s for content to settle", (path, want) => {
     expect(iconKind(path, false)).toBe(want);
   });
 
-  it("does not mistake a workflow-named file elsewhere for a workflow", () => {
-    // The rule is the path, not the directory name on its own: a `workflows`
-    // directory that is not GitHub's holds manifests like any other.
-    expect(iconKind("ops/workflows/argo.yaml", false)).toBe("kubernetes");
+  it("never guesses Kubernetes from a path", () => {
+    // The gate on the rule this replaced, which read any YAML below the
+    // repository root as a manifest.
+    for (const path of ["manifests/prod/ingress.yaml", "deploy/svc.yml", "k8s/a.yaml"]) {
+      expect(iconKind(path, false)).not.toBe("kubernetes");
+    }
+  });
+});
+
+describe("classifying a manifest by content", () => {
+  it.each([
+    ["apiVersion: apps/v1\nkind: Deployment\n"],
+    ["kind: Deployment\napiVersion: apps/v1\n"],
+    ["# a comment first\n---\napiVersion: v1\nkind: Service\n"],
+    ["apiVersion: v1\nkind: Pod\nmetadata:\n  name: x\n"],
+  ])("reads %j as a manifest", (head) => {
+    expect(looksLikeManifest(head)).toBe(true);
+  });
+
+  it.each([
+    [""],
+    ["coverage:\n  status: off\n"],
+    // Both keys are required: a chart's values file can carry its own kind.
+    ["apiVersion: v2\nname: api\nversion: 0.1.0\n"],
+    ["kind: pipeline\ntype: docker\n"],
+    // Nested is not top level — this is a pod spec fragment inside a chart
+    // value, not an object.
+    ["controller:\n  apiVersion: apps/v1\n  kind: Deployment\n"],
+    // A key with no value is not a declaration.
+    ["apiVersion:\nkind:\n"],
+  ])("reads %j as plain YAML", (head) => {
+    expect(looksLikeManifest(head)).toBe(false);
+  });
+
+  it("upgrades only plain YAML", () => {
+    expect(resolveIconKind("yaml", true)).toBe("kubernetes");
+    expect(resolveIconKind("yaml", false)).toBe("yaml");
+    // A path rule that fired is the stronger statement; content cannot
+    // overrule it, or every chart template would stop looking like Helm.
+    expect(resolveIconKind("helm", true)).toBe("helm");
+    expect(resolveIconKind("kustomize", true)).toBe("kustomize");
+    expect(resolveIconKind("actions", true)).toBe("actions");
+    expect(resolveIconKind("md", true)).toBe("md");
+  });
+});
+
+describe("the lazy classification's bookkeeping", () => {
+  const listing = [
+    { name: "deploy.yaml", isDir: false },
+    { name: "notes.md", isDir: false },
+    { name: "Chart.yaml", isDir: false },
+    { name: "templates", isDir: true },
+  ];
+
+  it("asks only about the files whose icon content can change", () => {
+    const state = withListing(initialTree(), "charts/api", listing);
+    // Chart.yaml is Helm by name and templates/ is a directory; neither is
+    // worth a read, and notes.md is not YAML at all.
+    expect(yamlPaths("charts/api", state.dirs["charts/api"].children)).toEqual([
+      "charts/api/deploy.yaml",
+    ]);
+  });
+
+  it("records both answers, so a negative is not asked again in vain", () => {
+    const asked = ["a.yaml", "b.yaml", "gone.yaml"];
+    const state = withManifests(initialTree(), { "a.yaml": "apiVersion: v1\nkind: Pod\n", "b.yaml": "x: 1\n" }, asked);
+
+    expect(state.manifests.get("a.yaml")).toBe(true);
+    expect(state.manifests.get("b.yaml")).toBe(false);
+    // A path the backend could not answer for is still recorded — absence
+    // from the map means "not read", and this one was.
+    expect(state.manifests.get("gone.yaml")).toBe(false);
+  });
+
+  it("keeps earlier answers when a later batch lands", () => {
+    const first = withManifests(initialTree(), { "a.yaml": "apiVersion: v1\nkind: Pod\n" }, ["a.yaml"]);
+    const second = withManifests(first, { "b.yaml": "apiVersion: v1\nkind: Service\n" }, ["b.yaml"]);
+
+    expect(second.manifests.get("a.yaml")).toBe(true);
+    expect(second.manifests.get("b.yaml")).toBe(true);
+  });
+
+  it("lets a re-read change its mind about a file", () => {
+    // The reason yamlPaths does not exclude what is already classified: a
+    // file edited into a manifest must stop showing the plain YAML icon.
+    const before = withManifests(initialTree(), { "a.yaml": "x: 1\n" }, ["a.yaml"]);
+    const after = withManifests(before, { "a.yaml": "apiVersion: v1\nkind: Pod\n" }, ["a.yaml"]);
+
+    expect(before.manifests.get("a.yaml")).toBe(false);
+    expect(after.manifests.get("a.yaml")).toBe(true);
   });
 });
 

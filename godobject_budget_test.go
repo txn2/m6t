@@ -151,7 +151,17 @@ const (
 	// independently — a repository whose `git remote` fails should still fill
 	// its branch dropdown — and one call returning both would make either
 	// failure take out both lists.
-	maxAppMethods = 23
+	//
+	// 23 -> 24 in #38. One binding, ReadPrefixes. The test the paragraph
+	// above sets — is this a request with an answer and no throughput, or is
+	// it a stream wearing a binding's clothes — it passes: the tree asks
+	// about one directory's YAML files once, gets their heads back, and is
+	// done. What makes it worth a method rather than a widening of an
+	// existing one is that the alternative was worse in the direction this
+	// ceiling cares about: folding the heads into ListDirectory's reply would
+	// have made every directory expansion pay for file reads it usually does
+	// not need, which is the cost the lazy classification exists to avoid.
+	maxAppMethods = 24
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"
