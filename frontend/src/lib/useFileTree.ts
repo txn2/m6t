@@ -8,12 +8,15 @@ import type { Entry, TreeState } from "./tree";
 import {
   ROOT,
   affectedTrackedDirs,
+  ancestry,
   collapse,
   expand,
   initialTree,
   joinPath,
   parentPath,
+  reveal,
   select,
+  toggleChangedOnly,
   toggleHidden,
   withError,
   withListing,
@@ -37,7 +40,11 @@ export interface FileTreeController {
   readonly expand: (dir: string) => void;
   readonly collapse: (dir: string) => void;
   readonly select: (path: string | null) => void;
+  /** Opens a directory and everything above it, and selects it — what a
+   * breadcrumb segment click does (#43). */
+  readonly reveal: (dir: string) => void;
   readonly toggleHidden: () => void;
+  readonly toggleChangedOnly: () => void;
   /** Resolves to an error message on failure, or null on success. */
   readonly createEntry: (dir: string, name: string, isDir: boolean) => Promise<string | null>;
   readonly renameEntry: (path: string, newName: string) => Promise<string | null>;
@@ -68,9 +75,12 @@ export function useFileTree(
   }, [root]);
 
   // A new project has nothing loaded yet, and the previous project's entries
-  // must not linger on screen while the fresh listing arrives.
+  // must not linger on screen while the fresh listing arrives. Changed-only
+  // mode is the one thing carried across: it is a property of how the user is
+  // working rather than of the project they are looking at, the same as the
+  // sidebar's width, and it behaved that way before it moved into this state.
   useEffect(() => {
-    setState(initialTree());
+    setState((current) => ({ ...initialTree(), changedOnly: current.changedOnly }));
   }, [root]);
 
   /**
@@ -150,6 +160,28 @@ export function useFileTree(
   const collapseDir = useCallback((dir: string) => {
     setState((current) => collapse(current, dir));
   }, []);
+
+  /**
+   * Opens a directory and every directory above it (#43).
+   *
+   * Only the ancestors this tree has never listed are fetched, unlike
+   * `expandDir`, which refreshes whatever it opens. A reveal walks a whole
+   * chain rather than one directory, and the chain leading to the file the
+   * user is looking at is very nearly always already loaded — re-listing all
+   * of it would mean a burst of round trips on every breadcrumb click to
+   * re-fetch what the tree already has.
+   */
+  const revealDir = useCallback(
+    (dir: string) => {
+      setState((current) => reveal(current, dir));
+      for (const path of ancestry(dir)) {
+        if (!(path in stateRef.current.dirs)) {
+          list(path);
+        }
+      }
+    },
+    [list],
+  );
 
   // /events: a coalesced batch names directories that may have changed
   // (PROTOCOL.md §5). Only directories this tree has already loaded are
@@ -234,8 +266,12 @@ export function useFileTree(
     select: useCallback((path: string | null) => {
       setState((current) => select(current, path));
     }, []),
+    reveal: revealDir,
     toggleHidden: useCallback(() => {
       setState((current) => toggleHidden(current));
+    }, []),
+    toggleChangedOnly: useCallback(() => {
+      setState((current) => toggleChangedOnly(current));
     }, []),
     createEntry,
     renameEntry,

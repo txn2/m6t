@@ -3,6 +3,7 @@ import type { Entry } from "./tree";
 import {
   ROOT,
   affectedTrackedDirs,
+  ancestry,
   baseName,
   collapse,
   expand,
@@ -13,7 +14,9 @@ import {
   looksLikeManifest,
   parentPath,
   resolveIconKind,
+  reveal,
   select,
+  toggleChangedOnly,
   toggleHidden,
   visibleChildren,
   visibleRows,
@@ -318,6 +321,77 @@ describe("selection", () => {
     const selected = select(initialTree(), "a.yaml");
     expect(selected.selected).toBe("a.yaml");
     expect(select(selected, null).selected).toBeNull();
+  });
+});
+
+describe("the ancestor chain (#43)", () => {
+  it("walks a nested path outermost first, ending at the path itself", () => {
+    expect(ancestry("manifests/prod/ingress.yaml")).toEqual([
+      "manifests",
+      "manifests/prod",
+      "manifests/prod/ingress.yaml",
+    ]);
+  });
+
+  it("gives a top-level path one segment", () => {
+    expect(ancestry("README.md")).toEqual(["README.md"]);
+  });
+
+  it("gives root no segments at all", () => {
+    expect(ancestry(ROOT)).toEqual([]);
+  });
+
+  it("drops empty segments rather than emitting a nameless one", () => {
+    expect(ancestry("a//b")).toEqual(["a", "a/b"]);
+  });
+});
+
+describe("revealing a directory (#43)", () => {
+  it("expands the directory and every directory above it", () => {
+    const state = reveal(initialTree(), "manifests/prod");
+
+    expect([...state.expanded].sort()).toEqual([ROOT, "manifests", "manifests/prod"]);
+    expect(state.selected).toBe("manifests/prod");
+  });
+
+  it("keeps directories that were already open", () => {
+    const state = reveal(expand(initialTree(), "charts"), "manifests");
+
+    expect(state.expanded.has("charts")).toBe(true);
+  });
+
+  // Both of these are filters that would otherwise swallow the reveal whole:
+  // the row would be expanded in a list that does not contain it.
+  it("leaves changed-only mode so a directory with no changes can be seen", () => {
+    const filtered = toggleChangedOnly(initialTree());
+
+    expect(reveal(filtered, "manifests").changedOnly).toBe(false);
+  });
+
+  it("shows dotfiles when a segment of the path is one", () => {
+    const state = reveal(initialTree(), ".github/workflows");
+
+    expect(state.showHidden).toBe(true);
+  });
+
+  it("leaves the dotfile filter alone for a path with nothing hidden in it", () => {
+    expect(reveal(initialTree(), "manifests/prod").showHidden).toBe(false);
+  });
+
+  // The listing is useFileTree's job (it is the half that can call a backend);
+  // this must not invent an empty one, which would render the directory as
+  // loaded and empty rather than as loading.
+  it("fetches nothing and claims no listing", () => {
+    expect(reveal(initialTree(), "manifests").dirs).toEqual({});
+  });
+});
+
+describe("the changed-only filter (#40)", () => {
+  it("starts off and flips both ways", () => {
+    const on = toggleChangedOnly(initialTree());
+    expect(initialTree().changedOnly).toBe(false);
+    expect(on.changedOnly).toBe(true);
+    expect(toggleChangedOnly(on).changedOnly).toBe(false);
   });
 });
 

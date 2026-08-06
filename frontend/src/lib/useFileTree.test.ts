@@ -262,6 +262,81 @@ describe("expanding a directory", () => {
   });
 });
 
+describe("revealing a directory (#43)", () => {
+  /** A project three levels deep, with only its root listed so far. */
+  function nested() {
+    return fakeDirectory({
+      [ROOT]: [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "prod", isDir: true }],
+      "manifests/prod": [{ name: "ingress.yaml", isDir: false }],
+    });
+  }
+
+  it("opens every directory on the way down and lists the ones it has not seen", async () => {
+    const directory = nested();
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+
+    act(() => {
+      result.current.reveal("manifests/prod");
+    });
+
+    expect(result.current.state.expanded.has("manifests")).toBe(true);
+    expect(result.current.state.expanded.has("manifests/prod")).toBe(true);
+    expect(result.current.state.selected).toBe("manifests/prod");
+    await waitFor(() => {
+      expect(result.current.state.dirs["manifests/prod"]?.status).toBe("loaded");
+    });
+    expect(result.current.state.dirs["manifests/prod"].children).toEqual([
+      { name: "ingress.yaml", isDir: false, path: "manifests/prod/ingress.yaml" },
+    ]);
+  });
+
+  // The chain up to the file the user is looking at is nearly always already
+  // loaded, and re-listing all of it would be a burst of round trips per
+  // click to fetch what the tree already has.
+  it("does not re-list a directory it has already loaded", async () => {
+    const directory = nested();
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+    directory.list.mockClear();
+
+    act(() => {
+      result.current.reveal("manifests");
+    });
+
+    expect(directory.list).not.toHaveBeenCalled();
+  });
+
+  it("leaves the filters that would have hidden the directory", async () => {
+    const directory = fakeDirectory({ [ROOT]: [{ name: ".github", isDir: true }] });
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.toggleChangedOnly();
+    });
+
+    act(() => {
+      result.current.reveal(".github/workflows");
+    });
+
+    expect(result.current.state.changedOnly).toBe(false);
+    expect(result.current.state.showHidden).toBe(true);
+  });
+});
+
 describe("create, rename and delete", () => {
   it("creates an entry and re-lists its parent", async () => {
     const directory = fakeDirectory({ [ROOT]: [] });

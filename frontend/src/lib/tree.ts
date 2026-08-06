@@ -44,6 +44,16 @@ export interface TreeState {
   readonly selected: string | null;
   readonly showHidden: boolean;
   /**
+   * Whether the tree is filtered down to the changed files (#40).
+   *
+   * It sits here beside `showHidden` rather than in the component, where it
+   * started, because the two are the same kind of thing — a filter over which
+   * rows exist — and `reveal` has to be able to clear both of them to keep its
+   * promise. A filter the reveal cannot see is a filter that silently swallows
+   * the reveal.
+   */
+  readonly changedOnly: boolean;
+  /**
    * Every plain-YAML path whose content has been read, mapped to whether it
    * turned out to be a Kubernetes manifest (#38).
    *
@@ -63,6 +73,7 @@ export function initialTree(): TreeState {
     expanded: new Set([ROOT]),
     selected: null,
     showHidden: false,
+    changedOnly: false,
     manifests: new Map(),
   };
 }
@@ -82,6 +93,31 @@ export function parentPath(path: string): string {
 export function baseName(path: string): string {
   const index = path.lastIndexOf("/");
   return index < 0 ? path : path.slice(index + 1);
+}
+
+/**
+ * Every prefix of a root-relative path, outermost first, the path itself
+ * last: `manifests/prod/ingress.yaml` becomes `["manifests",
+ * "manifests/prod", "manifests/prod/ingress.yaml"]`.
+ *
+ * One function for the two things that need the same chain — the breadcrumb
+ * above the editor draws it (#43) and `reveal` expands it — so a breadcrumb
+ * segment and the directory a click on it opens cannot come from two
+ * different notions of what the segments are.
+ *
+ * ROOT yields nothing: the project root is not a segment, it is what these
+ * paths are relative to. Empty segments are dropped for the same reason, so a
+ * path that picked up a doubled separator does not produce a nameless crumb
+ * pointing at its own parent.
+ */
+export function ancestry(path: string): string[] {
+  const chain: string[] = [];
+  for (const segment of path.split("/")) {
+    if (segment !== "") {
+      chain.push(chain.length === 0 ? segment : `${chain[chain.length - 1]}/${segment}`);
+    }
+  }
+  return chain;
 }
 
 /**
@@ -347,12 +383,48 @@ export function collapse(state: TreeState, dir: string): TreeState {
   return { ...state, expanded };
 }
 
+/**
+ * Brings a directory on screen: it and every ancestor expanded, it selected,
+ * and every filter that would have hidden it cleared.
+ *
+ * The filters are the part worth stating out loud. A reveal that left
+ * `showHidden` off could not show `.github/workflows`, and one that left
+ * changed-only mode on could not show a directory with nothing changed in it
+ * — in both cases the tree would answer a reveal by doing nothing at all,
+ * which is the one outcome a "reveal" must not have. Turning a filter off is
+ * visible in the header's own toggles, so the user can see what happened and
+ * put it back.
+ *
+ * Expanding is all this does about listings: a directory expanded here may
+ * never have been fetched, and `useFileTree.reveal` is what asks for the ones
+ * that have not.
+ */
+export function reveal(state: TreeState, dir: string): TreeState {
+  const chain = ancestry(dir);
+  const expanded = new Set(state.expanded);
+  for (const path of chain) {
+    expanded.add(path);
+  }
+  return {
+    ...state,
+    expanded,
+    selected: dir,
+    showHidden: state.showHidden || chain.some((path) => isHidden({ name: baseName(path) })),
+    changedOnly: false,
+  };
+}
+
 export function select(state: TreeState, path: string | null): TreeState {
   return { ...state, selected: path };
 }
 
 export function toggleHidden(state: TreeState): TreeState {
   return { ...state, showHidden: !state.showHidden };
+}
+
+/** Flips between the full tree and the changed files alone (#40). */
+export function toggleChangedOnly(state: TreeState): TreeState {
+  return { ...state, changedOnly: !state.changedOnly };
 }
 
 /** One row in the flattened, rendered tree: a visible entry plus its depth. */

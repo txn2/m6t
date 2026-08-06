@@ -46,10 +46,9 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
   const badges = useMemo(() => badgesFor(status), [status]);
   const changed = useMemo(() => changedRows(status), [status]);
 
-  // Which of the two the tree is showing (#40). View state, so it lives here
-  // rather than in TreeState: nothing the backend returns depends on it, and
-  // it survives a project switch the way a sidebar width does.
-  const [changedOnly, setChangedOnly] = useState(false);
+  // Which of the two the tree is showing (#40). It lives in TreeState rather
+  // than here so that `reveal` can clear it (#43) — see the field's own note.
+  const changedOnly = tree.state.changedOnly;
 
   const rows = changedOnly ? changed : visibleRows(tree.state);
   // Root failing to list is the one directory failure worth a dedicated
@@ -76,6 +75,21 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
   useEffect(() => {
     setCursor((c) => Math.min(c, Math.max(rows.length - 1, 0)));
   }, [rows.length]);
+
+  // A reveal from the breadcrumb (#43) expands its way down to a row that may
+  // be well past the bottom of a scrolled tree, and a highlight nobody can see
+  // is not a reveal. Keyed on the row's index rather than on `rows`, which is
+  // a fresh array on every render: scrolling every render would drag the tree
+  // back under the user whenever they scrolled it themselves. The index also
+  // changes from -1 the moment a directory listing this reveal asked for
+  // lands, which is what makes a row that did not exist yet still arrive on
+  // screen.
+  const selectedIndex = rows.findIndex((row) => row.path === tree.state.selected);
+  useEffect(() => {
+    if (selectedIndex >= 0) {
+      rowRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex]);
 
   // Roving tabindex: only move DOM focus when the tree itself already has
   // it, so a background listing refresh (an /events update) never steals
@@ -159,7 +173,7 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
           aria-label={changedOnly ? "show all files" : "show changed files only"}
           title={changedOnly ? "Show all files" : "Show changed files only"}
           onClick={() => {
-            setChangedOnly((only) => !only);
+            tree.toggleChangedOnly();
             // The two lists are different lengths and different orders; a
             // cursor carried across means landing on an unrelated row.
             setCursor(0);
