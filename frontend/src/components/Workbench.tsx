@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { FileTree } from "./FileTree";
+import type { PipelineAction } from "../lib/pipeline";
 import { BranchBar } from "./BranchBar";
 import { PaneSeparator } from "./PaneSeparator";
 import type { Project } from "../lib/projects";
@@ -49,6 +50,11 @@ export interface WorkbenchProps {
   readonly overridden: ReadonlySet<string>;
   /** Opens the Kubernetes binding dialog for a folder (#10). */
   readonly onBind: (path: string) => void;
+  /** Whether this project reaches a cluster, which gates the tree's pipeline
+   * entries (#11). */
+  readonly bound: boolean;
+  /** Starts a pipeline run from a tree row (#11). */
+  readonly onCluster: (path: string, action: PipelineAction) => void;
   /**
    * The two split sizes, in pixels, and how a change to them is reported.
    *
@@ -92,6 +98,8 @@ export function Workbench({
   cluster,
   overridden,
   onBind,
+  bound,
+  onCluster,
   panes,
   onPanes,
 }: WorkbenchProps) {
@@ -144,6 +152,8 @@ export function Workbench({
           onOpenFile={onOpenFile}
           overridden={overridden}
           onBind={onBind}
+          bound={bound}
+          onCluster={onCluster}
         />
         <BranchBar
           status={git.status}

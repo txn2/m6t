@@ -57,7 +57,33 @@ var structuralPins = map[string]packagePin{
 		// accepting one over the bridge, so the cluster a call reaches always
 		// comes from the registry and never from a frontend that may have gone
 		// stale. 796 is today's actual.
-		loc: 900, exported: 2,
+		//
+		// 900 -> 1150 in #11, and this is the raise that has to answer the
+		// failure message rather than talk around it, because the message says
+		// to decompose and this package cannot be decomposed. It IS the bound
+		// surface: depguard forbids a service importing internal/app, so the
+		// only other place these functions could live inverts the layering.
+		// That argument is already made at length below for #9; what is new
+		// here is what it bought.
+		//
+		// The whole of the diff → apply pipeline's bridge landed in kube.go:
+		// five bindings, the target resolution they share, and the protected
+		// confirmation. Of those, one thing is behavior rather than delegation
+		// and it is deliberate — `confirm` refuses a mutation on a protected
+		// binding whose typed context does not match exactly, before any
+		// process is created. It is here because a guard that lived in the
+		// dialog that collects the answer would be a guard the next caller
+		// gets to forget; DESIGN.md §6.1 makes it the app's rule, and this is
+		// the app. `aim` and `resolveBinding` are free functions rather than
+		// methods for the same reason the god-object note gives, so this raise
+		// buys bindings and their doc comments and not a wider coordinator.
+		//
+		// 1066 is today's actual, of which roughly a third is code. 1150 is
+		// that plus the same slim follow-up room the rest of this table
+		// carries — deliberately not enough for #14's Helm bridge to move in
+		// under, which arrives as its own set of bindings and will have to
+		// make this argument again on its own terms.
+		loc: 1150, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/git": {
@@ -136,7 +162,24 @@ var structuralPins = map[string]packagePin{
 		// and the two identifiers it needed besides (the prefix length, the
 		// oversized-batch sentinel) are unexported precisely because no
 		// caller names them.
-		loc: 1250, exported: 22,
+		//
+		// 22 -> 23 exported and 1250 -> 1300 LOC in #11. One name, Resolve: a
+		// repository-relative path turned into the absolute one an external
+		// process is handed, having been proved to name something inside the
+		// worktree.
+		//
+		// It is here rather than in internal/kubeexec or internal/app because
+		// of what it has to do to be honest. kubectl opens the path itself, in
+		// another process, outside the os.Root every operation in this package
+		// works through — so the confinement has to happen before the path
+		// leaves, and the only way to establish it is to stat through that
+		// same root. A caller that joined the two strings itself would get a
+		// path that had been concatenated rather than checked, and a symlink
+		// out of the repository would resolve quietly inside kubectl. The
+		// runtime check is exactly the half fs.ValidPath cannot do.
+		//
+		// 1256 is today's actual; 1300 is that plus the usual follow-up room.
+		loc: 1300, exported: 23,
 		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, file content read/write for the editor (#7), bounded prefix reads for content-based file classification (#38), plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
 	},
 }

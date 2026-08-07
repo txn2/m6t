@@ -48,13 +48,19 @@ describe("reading a blame", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("reads nothing while the column is off", () => {
+  // The column's toggle is not what decides this any more (#64). The same read
+  // feeds the highlight on every line that is in no commit, which is on while
+  // the column is off — gating it on the column would gate one feature on an
+  // unrelated control.
+  it("reads whether or not the column is on", async () => {
     const git = fakeGit();
 
     const { result } = renderHook(() => useBlame(tab("a: 1\n", false), git));
 
-    expect(git.blame).not.toHaveBeenCalled();
-    expect(result.current.blame).toBeNull();
+    await waitFor(() => {
+      expect(result.current.blame).not.toBeNull();
+    });
+    expect(git.blame).toHaveBeenCalledTimes(1);
   });
 
   it("reads nothing when there is no file open", () => {
@@ -65,11 +71,13 @@ describe("reading a blame", () => {
     expect(git.blame).not.toHaveBeenCalled();
   });
 
-  // The core rule of #52: a blame is stated in the line numbers of the file on
-  // disk, and an unsaved insertion moves every line below it. Attributing the
-  // buffer with a blame of the saved file would name the wrong author for most
-  // of it.
-  it("drops the entries while the buffer has unsaved edits", async () => {
+  // The bug this hook used to have: an unsaved edit reset it to NO_BLAME, so
+  // the whole column emptied on the first keystroke. What that reasoning got
+  // right is that a blame's LINE NUMBERS stop describing the buffer; what it
+  // got wrong is that the attribution does not, and following the edits is the
+  // editor's job (`blameAnchors` in lib/codemirror.ts). This holds what it read
+  // until the disk content moves under it.
+  it("holds the blame it read while the buffer has unsaved edits", async () => {
     const git = fakeGit();
     const clean = tab("a: 1\n");
     const { result, rerender } = renderHook(({ open }) => useBlame(open, git), {
@@ -78,10 +86,29 @@ describe("reading a blame", () => {
     await waitFor(() => {
       expect(result.current.blame).not.toBeNull();
     });
+    const held = result.current.blame;
 
     rerender({ open: withEdit(clean, "inserted\na: 1\n") });
 
-    expect(result.current.blame).toBeNull();
+    expect(result.current.blame).toBe(held);
+  });
+
+  // The other half of the same correction: an edit is not a reason to ask git
+  // again either. The file on disk has not moved, so a re-read would spend a
+  // subprocess to be told what this already holds.
+  it("does not read again for an unsaved edit", async () => {
+    const git = fakeGit();
+    const clean = tab("a: 1\n");
+    const { rerender } = renderHook(({ open }) => useBlame(open, git), {
+      initialProps: { open: clean },
+    });
+    await waitFor(() => {
+      expect(git.blame).toHaveBeenCalledTimes(1);
+    });
+
+    rerender({ open: withEdit(clean, "inserted\na: 1\n") });
+
+    expect(git.blame).toHaveBeenCalledTimes(1);
   });
 
   // The other half of the same rule: a save moves the baseline, and the lines
@@ -182,7 +209,11 @@ describe("when git refuses", () => {
     });
   });
 
-  it("clears the failure when the column is turned off", async () => {
+  // Turning the column off no longer stops the read, so the failure it reports
+  // stays where it was. What changes is who shows it: the pane only puts git's
+  // words on screen while the column is on, because a file git cannot blame is
+  // an ordinary file to edit and not an error to be told about on every open.
+  it("keeps the failure when the column is turned off", async () => {
     const git = { blame: vi.fn(() => Promise.reject(new Error("fatal: nope"))) };
     const open = tab();
     const { result, rerender } = renderHook(({ current }) => useBlame(current, git), {
@@ -194,6 +225,28 @@ describe("when git refuses", () => {
 
     rerender({ current: withBlame(open, false) });
 
-    expect(result.current.error).toBeNull();
+    expect(result.current.error).toBe("fatal: nope");
+  });
+
+  it("clears the failure once a later read succeeds", async () => {
+    const git = {
+      blame: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("fatal: nope"))
+        .mockResolvedValue({ commits: [], lines: [] }),
+    };
+    const open = tab();
+    const { result, rerender } = renderHook(({ current }) => useBlame(current, git), {
+      initialProps: { current: open },
+    });
+    await waitFor(() => {
+      expect(result.current.error).not.toBeNull();
+    });
+
+    rerender({ current: { ...open, content: "a: 2\n", baseline: "a: 2\n" } });
+
+    await waitFor(() => {
+      expect(result.current.error).toBeNull();
+    });
   });
 });

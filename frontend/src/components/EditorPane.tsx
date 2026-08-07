@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { MountedEditor } from "../lib/codemirror";
 import { mountEditor } from "../lib/codemirror";
 import type { EditorTab } from "../lib/editorTabs";
-import { readOnlyNotice } from "../lib/editorTabs";
+import { blameIsCurrent, readOnlyNotice } from "../lib/editorTabs";
 import type { BlameState } from "../lib/useBlame";
 import type { Appearance } from "../lib/theme";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -66,8 +66,15 @@ export function EditorPane({
 
       {/* git's own words, not a translation of them (DESIGN.md §7). It is a
           separate line from the tab's error because they are separate
-          failures: this one costs the column, not the file. */}
-      <ErrorLine message={blame.error} />
+          failures: this one costs the column, not the file.
+
+          Only while the column is on. The blame is read for every file now,
+          because the uncommitted-line highlight needs it too (#64) — and a file
+          git cannot blame is an ordinary file to edit, so announcing the
+          refusal on every open would put an alert above half the new files in
+          the repository. Asking for the column is what makes the reason worth
+          showing. */}
+      {tab.blame && <ErrorLine message={blame.error} />}
 
       {tab.status === "loading" && <p className="placeholder">Opening {tab.title}…</p>}
 
@@ -224,12 +231,31 @@ function CodeMirrorHost({
     editor.current?.setReadOnly(tab.readOnly);
   }, [tab.readOnly]);
 
-  // Two arguments, because the column being on and the column having entries
-  // are two states: an unsaved edit invalidates the line numbers a blame is
-  // stated in, so the entries go and the column stays (#52).
+  // The toggle is unconditional. It is the user pressing a button, and nothing
+  // about the state of their buffer is a reason to ignore it — an earlier
+  // version of this gated both calls together and left the column impossible to
+  // turn off while a file had unsaved edits.
   useEffect(() => {
-    editor.current?.setBlame(tab.blame, blame.blame);
-  }, [tab.blame, blame.blame]);
+    editor.current?.showBlame(tab.blame);
+  }, [tab.blame]);
+
+  // Installing one is conditional, because a blame is anchored to the document
+  // it was measured against: `blameIsCurrent` is the test, and `baseline` is
+  // the disk content by definition (#52).
+  //
+  // The early return is what fixes the column emptying on the first keystroke.
+  // Going dirty does not clear anything; it stops a new blame being installed
+  // against text git did not read, and the entries already in the gutter follow
+  // the edits themselves (`blameMarks.ts`). Coming back
+  // clean — a save, or an undo all the way back — installs, which is also what
+  // puts the column right if a read landed mid-edit.
+  const current = blameIsCurrent(tab);
+  useEffect(() => {
+    if (!current) {
+      return;
+    }
+    editor.current?.setBlame(blame.blame);
+  }, [blame.blame, current]);
 
   return <div className="editor-pane__cm" ref={host} data-testid="codemirror-host" />;
 }

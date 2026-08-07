@@ -44,6 +44,46 @@ func List(root, relPath string) ([]Entry, error) {
 	return entries, nil
 }
 
+// Resolve turns a repository-relative path into the absolute one an external
+// tool is handed, and reports whether it names a directory.
+//
+// It exists because kubectl is a separate process and cannot be confined the
+// way everything else in this package is: `kubectl apply -f` takes a path and
+// opens it itself, outside the os.Root this file does all its own work through.
+// So the confinement has to happen before the path leaves — this proves the
+// target is inside the worktree, and what the caller passes on is a path that
+// was checked rather than one that was concatenated.
+//
+// The proof is the Stat: it runs through the same os.Root every other operation
+// here uses, so a symlink pointing out of the repository fails here rather than
+// resolving quietly inside kubectl. That is the half fs.ValidPath cannot do —
+// the static check refuses "..", and only the runtime check refuses a link that
+// was created after it.
+//
+// The directory answer is returned rather than left to the caller to Stat again
+// because the caller would have to do it outside the root to get it, which is
+// the confinement given back one line after it was established. It is what
+// decides `--recursive`, and getting it wrong applies nothing and reports
+// success (see kubeexec.withSource).
+func Resolve(root, relPath string) (native string, isDir bool, err error) {
+	r, err := openRoot(root)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = r.Close() }()
+
+	name, err := rootRelative(relPath)
+	if err != nil {
+		return "", false, err
+	}
+
+	info, err := r.Stat(name)
+	if err != nil {
+		return "", false, fmt.Errorf("resolving %s: %w", relPath, err)
+	}
+	return filepath.Join(root, filepath.FromSlash(name)), info.IsDir(), nil
+}
+
 // Create makes a new empty file or directory at relPath, which must not
 // already exist. The parent directory must already exist — Create adds one
 // node at a time, the same as the tree UI action that calls it.

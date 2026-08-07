@@ -32,6 +32,14 @@ function seam(over: Partial<Kube> = {}): Kube {
     bindFolder: () => Promise.reject(new Error("not used here")),
     unbindFolder: () => Promise.reject(new Error("not used here")),
     tools: () => Promise.resolve([]),
+    // The pipeline (#11) is not this file's subject; a test that needs it
+    // overrides these. Rejecting rather than resolving keeps an accidental
+    // reliance on them visible.
+    validate: () => Promise.reject(new Error("not used here")),
+    diff: () => Promise.reject(new Error("not used here")),
+    apply: () => Promise.reject(new Error("not used here")),
+    deletePreview: () => Promise.reject(new Error("not used here")),
+    remove: () => Promise.reject(new Error("not used here")),
     ...over,
   };
 }

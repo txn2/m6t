@@ -34,13 +34,23 @@ export function GitRemotes(arg1:string):Promise<Array<string>>;
 
 export function GitStatus(arg1:string):Promise<git.Status>;
 
+export function KubeApply(arg1:string,arg2:string,arg3:string):Promise<kubeexec.Result>;
+
 export function KubeBinding(arg1:string,arg2:string):Promise<project.Binding>;
 
 export function KubeCheck(arg1:string,arg2:string):Promise<kubeexec.Result>;
 
 export function KubeContexts():Promise<kubeconfig.Config>;
 
+export function KubeDelete(arg1:string,arg2:string,arg3:string):Promise<kubeexec.Result>;
+
+export function KubeDeletePreview(arg1:string,arg2:string):Promise<kubeexec.Result>;
+
+export function KubeDiff(arg1:string,arg2:string):Promise<kubeexec.Result>;
+
 export function KubeNamespaces(arg1:string):Promise<Array<string>>;
+
+export function KubeValidate(arg1:string,arg2:string):Promise<kubeexec.Result>;
 
 export function ListDirectory(arg1:string,arg2:string):Promise<Array<watch.Entry>>;
 

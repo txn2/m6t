@@ -1919,3 +1919,186 @@ button:hover {
 .settings__save {
   border-color: var(--m6t-accent);
 }
+
+/* =============================================================================
+   The diff → apply pipeline (#11, DESIGN.md §6.1)
+   ========================================================================== */
+
+/* The confirm dialog is wider than the binding form it borrows its shell from:
+   what it holds is a diff, and a diff wrapped at 720px is a diff nobody reads. */
+.pipeline {
+  width: min(920px, 94vw);
+}
+
+/* Where the run is aimed, restated at the top of every phase. The border is
+   what separates it from the title without spending a heading on it. */
+.pipeline__target {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-1);
+  border-top: 1px solid var(--m6t-border);
+  border-bottom: 1px solid var(--m6t-border);
+  padding: var(--m6t-space-3) 0;
+}
+
+/* A protected target is marked on the dialog itself, not only beside the field
+   that asks for the context name: the mark has to be visible while the user is
+   reading the diff, which is where the decision is actually made. */
+.pipeline[data-protected] .pipeline__target {
+  border-left: var(--m6t-separator) solid var(--m6t-danger);
+  padding-left: var(--m6t-space-3);
+}
+
+.pipeline__objects,
+.pipeline__diff,
+.pipeline__confirm,
+.pipeline__outcome,
+.pipeline__blocked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-2);
+}
+
+/* The dry run's object list, and any captured stdout. Bounded, because a
+   directory of a hundred manifests produces a hundred lines and the diff below
+   it is the part the user came for. */
+.pipeline__list {
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: var(--m6t-space-2);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  font-family: var(--m6t-font-mono);
+  font-size: var(--m6t-font-size-sm);
+}
+
+/* "No changes" and "Done." — the two outcomes worth saying in a colour. */
+.pipeline__same {
+  margin: 0;
+  color: var(--m6t-ok);
+}
+
+.pipeline__typed {
+  font-family: var(--m6t-font-mono);
+}
+
+/* The button that reaches the cluster. It is the danger colour on a protected
+   binding and the accent everywhere else, so the most consequential press in
+   the application does not look like Save. */
+.pipeline[data-protected] .pipeline__go {
+  border-color: var(--m6t-danger);
+  color: var(--m6t-danger);
+}
+
+/* The diff itself. It scrolls in its own box rather than growing the dialog:
+   the footer with Cancel and Apply has to stay reachable however long the diff
+   is. */
+.diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-1);
+}
+
+.diff__body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  max-height: 24rem;
+  overflow: auto;
+  padding: var(--m6t-space-2);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  font-family: var(--m6t-font-mono);
+  font-size: var(--m6t-font-size-sm);
+}
+
+/* Lines do not wrap. A wrapped diff line is one whose leading +/- no longer
+   marks its whole content, and horizontal scrolling is the convention every
+   other diff the user reads follows. */
+.diff__line {
+  white-space: pre;
+}
+
+/* Hue and the line's own sign both carry the meaning: the colours are the git
+   marker tokens, which style.test.ts already holds to 4.5:1 on every surface,
+   and the +/- survives a monochrome display and a copy-paste into a chat. */
+.diff__line[data-kind="added"] {
+  color: var(--m6t-git-added);
+}
+
+.diff__line[data-kind="removed"] {
+  color: var(--m6t-git-deleted);
+}
+
+.diff__line[data-kind="meta"] {
+  color: var(--m6t-muted);
+}
+
+.diff__truncated {
+  margin: 0;
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+}
+
+/* The per-project run log in the project panel. */
+.runlog__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runlog__row {
+  border-left: var(--m6t-space-1) solid var(--m6t-ok);
+  padding-left: var(--m6t-space-3);
+}
+
+.runlog__row[data-ok="false"] {
+  border-left-color: var(--m6t-danger);
+}
+
+.runlog__line {
+  display: flex;
+  gap: var(--m6t-space-2);
+  margin: 0;
+  align-items: baseline;
+}
+
+.runlog__time,
+.runlog__detail {
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+}
+
+.runlog__time,
+.runlog__where {
+  font-family: var(--m6t-font-mono);
+}
+
+/* The path is the part that has to give: the panel is 260px by default and can
+   be dragged to 180, and the time and action beside it are fixed width. */
+.runlog__target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runlog__outcome {
+  margin-left: auto;
+}
+
+/* The rule between the cluster actions and the file operations in a row's
+   context menu: two Deletes with opposite blast radii, kept apart. */
+.tree__menu-rule {
+  width: 100%;
+  margin: var(--m6t-space-1) 0;
+  border: none;
+  border-top: 1px solid var(--m6t-border);
+}
+
+.tree__menu button.tree__menu-danger {
+  color: var(--m6t-danger);
+}

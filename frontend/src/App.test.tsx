@@ -12,6 +12,7 @@ import App from "./App";
 import { detachedBuild } from "./lib/build";
 import {
   kubeconfig as kubeModels,
+  kubeexec as execModels,
   project as models,
   session as sessionModels,
   watch,
@@ -19,7 +20,7 @@ import {
 import type { Directory } from "./lib/directory";
 import type { Files } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
-import type { Kube } from "./lib/kube";
+import type { CheckResult, Kube } from "./lib/kube";
 import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
 import { MODIFIED, NOT_A_REPOSITORY, UNTRACKED, emptyBlame, emptyStatus } from "./lib/git";
@@ -54,6 +55,14 @@ function stubKube(projects: readonly Project[] = [], overrides: Partial<Kube> = 
     bindFolder: (name) => Promise.reject(new Error(`no backend for ${name} in tests`)),
     unbindFolder: (name) => Promise.reject(new Error(`no backend for ${name} in tests`)),
     tools: () => Promise.resolve([]),
+    // The pipeline (#11) is not this file's subject; a test that needs it
+    // overrides these. Rejecting rather than resolving keeps an accidental
+    // reliance on them visible.
+    validate: () => Promise.reject(new Error("not used here")),
+    diff: () => Promise.reject(new Error("not used here")),
+    apply: () => Promise.reject(new Error("not used here")),
+    deletePreview: () => Promise.reject(new Error("not used here")),
+    remove: () => Promise.reject(new Error("not used here")),
     ...overrides,
   };
 }
@@ -1331,11 +1340,29 @@ describe("the blame column above the editor (#52)", () => {
     });
   });
 
-  it("does not read a blame for a file nobody asked about", async () => {
+  // The read is no longer opt-in (#64): the same blame feeds the highlight on
+  // every line that is in no commit, which is on while the column is off, so
+  // gating the read on the column would gate one feature on an unrelated
+  // control. It is one subprocess per file the user actually opens.
+  it("reads the blame for the file on screen without being asked", async () => {
     const git = stubGit({ blame: vi.fn(() => Promise.resolve(blame)) });
     await openTheFile(git);
 
-    expect(git.blame).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(git.blame).toHaveBeenCalledWith("/w/infra", "ingress.yaml");
+    });
+  });
+
+  // And what it read is on the code, not only in the column: the band on an
+  // uncommitted line is what answers "which of these have I changed" while the
+  // column is closed.
+  it("marks the uncommitted lines with the column off", async () => {
+    await openTheFile();
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cm-uncommitted-line")).toHaveLength(1);
+    });
+    expect(document.querySelector(".cm-blame")).toBeNull();
   });
 
   it("takes the column away again", async () => {
@@ -1692,7 +1719,7 @@ describe("the Kubernetes binding (#10)", () => {
     await panel(projects, { bindFolder });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /dev/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes binding" }));
 
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("context"), {
@@ -1717,7 +1744,7 @@ describe("the Kubernetes binding (#10)", () => {
     fireEvent.click(screen.getByRole("treeitem", { name: /dev/ }));
     fireEvent.contextMenu(await screen.findByRole("treeitem", { name: /app\.yaml/ }));
 
-    expect(screen.queryByRole("menuitem", { name: "Kubernetes" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Kubernetes binding" })).toBeNull();
   });
 
   it("marks the folder carrying an override and reports it on selection", async () => {
@@ -1750,7 +1777,7 @@ describe("the Kubernetes binding (#10)", () => {
     await panel([scoped], { unbindFolder });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /dev/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes binding" }));
 
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove override" }));
@@ -1766,7 +1793,7 @@ describe("the Kubernetes binding (#10)", () => {
     await panel([bound("infra", "prod-us-west")]);
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /prod/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes binding" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).queryByRole("button", { name: "Remove override" })).toBeNull();
@@ -1781,7 +1808,7 @@ describe("the Kubernetes binding (#10)", () => {
     await panel([bound("infra", "prod-us-west")], { bindFolder });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /dev/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes binding" }));
 
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
@@ -1792,4 +1819,164 @@ describe("the Kubernetes binding (#10)", () => {
     expect(screen.getByRole("dialog")).toBeDefined();
   });
 
+});
+
+/**
+ * The diff → apply pipeline, from the tree row to the cluster (#11).
+ *
+ * The unit tests either side of this cover the sequence (`usePipeline`) and the
+ * dialog (`PipelineDialog`); what only this can show is that the workbench
+ * joins them — the row the user right-clicked is the path the backend is asked
+ * about, and the log the panel shows is the one the run wrote to.
+ */
+describe("the diff to apply pipeline (#11)", () => {
+  const CONTEXTS = kubeModels.Config.createFrom({
+    contexts: [kubeModels.Context.createFrom({ name: "prod-us-west" })],
+    sources: ["/home/u/.kube/config"],
+  });
+
+  function bound(guarded = false): Project {
+    return models.Project.createFrom({
+      name: "infra",
+      path: "/w/infra",
+      displayName: "",
+      color: "",
+      kube: { context: "prod-us-west", namespace: "default", protected: guarded, scopes: null },
+      helm: { defaultValues: [] },
+    });
+  }
+
+  function tree(): Directory {
+    return {
+      list: (_root, relPath) =>
+        Promise.resolve(
+          relPath === ""
+            ? [watch.Entry.createFrom({ name: "app.yaml", path: "app.yaml", isDir: false })]
+            : [],
+        ),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  const ok = (over: Partial<CheckResult> = {}): CheckResult =>
+    execModels.Result.createFrom({
+      argv: ["kubectl", "apply"],
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      ...over,
+    });
+
+  /** The workbench over one bound project holding one manifest. */
+  async function workbench(projects: Project[], over: Partial<Kube> = {}) {
+    const view = render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry: fakeRegistry(projects),
+          directory: tree(),
+          git: stubGit(),
+          kube: stubKube(projects, {
+            contexts: () => Promise.resolve(CONTEXTS),
+            validate: () => Promise.resolve(ok({ stdout: "deployment.apps/api (dry run)\n" })),
+            diff: () => Promise.resolve(ok({ exitCode: 1, stdout: "-a\n+b\n" })),
+            apply: () => Promise.resolve(ok()),
+            deletePreview: () => Promise.resolve(ok({ stdout: "deployment.apps/api\n" })),
+            remove: () => Promise.resolve(ok()),
+            ...over,
+          }),
+        }}
+      />,
+    );
+    await screen.findByRole("treeitem", { name: /app\.yaml/ });
+    return view;
+  }
+
+  /** Opens the row menu on the one manifest and picks an entry. */
+  function actOn(entry: string): void {
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /app\.yaml/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: entry }));
+  }
+
+  it("runs the preview against the row and opens the confirm over it", async () => {
+    const validate = vi.fn(() => Promise.resolve(ok({ stdout: "deployment.apps/api\n" })));
+    await workbench([bound()], { validate });
+
+    actOn("Apply to cluster…");
+
+    await screen.findByRole("button", { name: "Apply" });
+    expect(validate).toHaveBeenCalledWith("infra", "app.yaml");
+    expect(screen.getByLabelText("Cluster diff")).toBeDefined();
+  });
+
+  it("applies what was confirmed and records it in the panel", async () => {
+    const apply = vi.fn(() => Promise.resolve(ok({ stdout: "configured\n" })));
+    await workbench([bound()], { apply });
+
+    actOn("Apply to cluster…");
+    fireEvent.click(await screen.findByRole("button", { name: "Apply" }));
+
+    await waitFor(() => {
+      expect(apply).toHaveBeenCalledWith("infra", "app.yaml", "");
+    });
+    const log = await screen.findByLabelText("Cluster runs");
+    expect(within(log).getByText("app.yaml")).toBeDefined();
+    expect(within(log).getByText("succeeded")).toBeDefined();
+  });
+
+  // The acceptance criterion, end to end: on a protected project the apply is
+  // not reachable until the context name is typed exactly.
+  it("will not apply on a protected project until the context is typed", async () => {
+    const apply = vi.fn(() => Promise.resolve(ok()));
+    await workbench([bound(true)], { apply });
+
+    actOn("Apply to cluster…");
+    const go = (await screen.findByRole("button", { name: "Apply" })) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("context name"), {
+      target: { value: "prod-us-west" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => {
+      expect(apply).toHaveBeenCalledWith("infra", "app.yaml", "prod-us-west");
+    });
+  });
+
+  it("blocks a failed validation before anything is applied", async () => {
+    const apply = vi.fn(() => Promise.resolve(ok()));
+    await workbench([bound()], {
+      validate: () => Promise.resolve(ok({ exitCode: 1, stderr: "error validating data" })),
+      apply,
+    });
+
+    actOn("Apply to cluster…");
+
+    expect(await screen.findByText(/error validating data/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("previews a delete before removing anything", async () => {
+    const remove = vi.fn(() => Promise.resolve(ok()));
+    await workbench([bound()], { remove });
+
+    actOn("Delete from cluster…");
+
+    expect(await screen.findByText(/deployment.apps\/api/)).toBeDefined();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("offers no cluster actions in a project with no binding", async () => {
+    await workbench([project("infra", "/w/infra")]);
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /app\.yaml/ }));
+
+    expect(screen.queryByRole("menuitem", { name: "Apply to cluster…" })).toBeNull();
+  });
 });

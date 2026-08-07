@@ -28,6 +28,7 @@ function fakeEditor(): MountedEditor {
     setContent: vi.fn(),
     setTheme: vi.fn(),
     setReadOnly: vi.fn(),
+    showBlame: vi.fn(),
     setBlame: vi.fn(),
     focus: vi.fn(),
     dispose: vi.fn(),
@@ -136,12 +137,83 @@ describe("mounting an editor", () => {
     rerender({ tab: { ...tab, blame: true }, blame: { blame: someBlame, error: null } });
 
     expect(mount).toHaveBeenCalledTimes(1);
-    expect(editor.setBlame).toHaveBeenLastCalledWith(true, someBlame);
+    expect(editor.showBlame).toHaveBeenLastCalledWith(true);
+    expect(editor.setBlame).toHaveBeenLastCalledWith(someBlame);
   });
 
-  // The dirty case (#52): the toggle stays on and the entries go, because the
-  // line numbers they are stated in are no longer the buffer's.
-  it("keeps the column shown with no entries when the blame goes stale", () => {
+  // The regression this pair exists for: the toggle and the install used to be
+  // one call, so the guard that stops a blame being installed against unsaved
+  // text also swallowed the button — the column could not be turned off while a
+  // file had edits in it. Pressing it is the user's decision and is never
+  // conditional on anything.
+  it("turns the column off while the buffer has unsaved edits", () => {
+    const tab = { ...ready(), blame: true };
+    const { editor, rerender } = renderPane(tab, {
+      blame: { blame: someBlame, error: null },
+    });
+
+    const dirty = { ...tab, content: "a: 2\n" };
+    rerender({ tab: dirty });
+    rerender({ tab: { ...dirty, blame: false } });
+
+    expect(editor.showBlame).toHaveBeenLastCalledWith(false);
+  });
+
+  it("turns the column back on while the buffer has unsaved edits", () => {
+    const tab = { ...ready(), content: "a: 2\n" };
+    const { editor, rerender } = renderPane(tab);
+
+    rerender({ tab: { ...tab, blame: true } });
+
+    expect(editor.showBlame).toHaveBeenLastCalledWith(true);
+  });
+
+  // The dirty case (#52), and the bug it used to produce (#64). A blame is anchored
+  // to the document it was measured against, so it is not installed against a
+  // buffer git has not read — but the pane also does not tear the column down,
+  // which is what emptied it on the first keystroke. The entries already in the
+  // gutter follow the edits themselves.
+  it("installs no blame while the buffer differs from disk, and clears none", () => {
+    const tab = { ...ready(), blame: true };
+    const { editor, rerender } = renderPane(tab, {
+      blame: { blame: someBlame, error: null },
+    });
+    editor.setBlame = vi.fn();
+
+    rerender({ tab: { ...tab, content: "a: 2\n" } });
+
+    expect(editor.setBlame).not.toHaveBeenCalled();
+  });
+
+  // And the column itself is untouched by that guard, which is the half the
+  // regression above got wrong.
+  it("leaves the column shown when the buffer goes dirty", () => {
+    const tab = { ...ready(), blame: true };
+    const { editor, rerender } = renderPane(tab, {
+      blame: { blame: someBlame, error: null },
+    });
+    editor.showBlame = vi.fn();
+
+    rerender({ tab: { ...tab, content: "a: 2\n" } });
+
+    expect(editor.showBlame).not.toHaveBeenCalledWith(false);
+  });
+
+  // Coming back clean reinstalls, which is what puts the column right after a
+  // save and after a read that landed while the user was typing.
+  it("installs the blame again once the buffer matches disk", () => {
+    const tab = { ...ready(), blame: true };
+    const { editor, rerender } = renderPane(tab, {
+      blame: { blame: someBlame, error: null },
+    });
+
+    rerender({ tab: { ...tab, content: "a: 2\n" } });
+    rerender({ tab: { ...tab, content: "a: 2\n", baseline: "a: 2\n" } });
+
+    expect(editor.setBlame).toHaveBeenLastCalledWith(someBlame);
+  });
+
+  it("keeps the column shown with no entries when there is no blame to show", () => {
     const tab = { ...ready(), blame: true };
     const { editor, rerender } = renderPane(tab, {
       blame: { blame: someBlame, error: null },
@@ -149,15 +221,28 @@ describe("mounting an editor", () => {
 
     rerender({ blame: NO_BLAME });
 
-    expect(editor.setBlame).toHaveBeenLastCalledWith(true, null);
+    expect(editor.showBlame).toHaveBeenLastCalledWith(true);
+    expect(editor.setBlame).toHaveBeenLastCalledWith(null);
   });
 
   it("shows git's own words when a blame fails", () => {
-    renderPane(ready(), {
+    renderPane({ ...ready(), blame: true }, {
       blame: { blame: null, error: "fatal: no such path 'x.yaml' in HEAD" },
     });
 
     expect(screen.getByRole("alert").textContent).toContain("no such path");
+  });
+
+  // The blame is read for every file now, because the uncommitted-line
+  // highlight needs it too (#64). A file git cannot blame is an ordinary file
+  // to edit, so the refusal is not worth an alert until the user asks for the
+  // column that shows it.
+  it("says nothing about a failed blame while the column is off", () => {
+    renderPane(ready(), {
+      blame: { blame: null, error: "fatal: no such path 'x.yaml' in HEAD" },
+    });
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   // The blame failed, not the file. Replacing the buffer with a message would

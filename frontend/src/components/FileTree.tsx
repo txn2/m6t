@@ -5,6 +5,8 @@ import { ROOT, parentPath, visibleRows } from "../lib/tree";
 import type { Status } from "../lib/git";
 import type { Badges } from "../lib/gitStatus";
 import { badgeAt, badgeTone, badgesFor, changedRows } from "../lib/gitStatus";
+import type { PipelineAction } from "../lib/pipeline";
+import { actionable } from "../lib/pipeline";
 import { Control } from "./Control";
 import { RowView } from "./FileTreeRow";
 import { CreateRow } from "./InlineField";
@@ -26,6 +28,20 @@ export interface FileTreeProps {
   readonly overridden: ReadonlySet<string>;
   /** Opens the Kubernetes binding dialog for a folder (#10). */
   readonly onBind: (path: string) => void;
+  /**
+   * Whether this project is pointed at a cluster anywhere — `hasBinding` in
+   * lib/kube.ts (#11).
+   *
+   * It gates the pipeline entries on every row, so that a project nobody has
+   * bound does not offer three menu items whose only outcome is the backend's
+   * refusal. It is a project-wide question rather than a per-row one on
+   * purpose: which cluster a given path reaches is resolved by the backend on
+   * the call, and a tree that asked per row would be resolving bindings in the
+   * frontend to decide what to draw.
+   */
+  readonly bound: boolean;
+  /** Starts a pipeline run against a tree row (#11, DESIGN.md §6.1). */
+  readonly onCluster: (path: string, action: PipelineAction) => void;
 }
 
 /** What is being created, and where. */
@@ -43,7 +59,15 @@ interface Creating {
  * expanded — lazy loading, not virtualization, is what bounds it (see the
  * plan this ticket shipped against).
  */
-export function FileTree({ tree, status, onOpenFile, overridden, onBind }: FileTreeProps) {
+export function FileTree({
+  tree,
+  status,
+  onOpenFile,
+  overridden,
+  onBind,
+  bound,
+  onCluster,
+}: FileTreeProps) {
   // Both walk every changed path, and this component re-renders on state that
   // has nothing to do with git — a keystroke in the editor, a terminal going
   // busy. A status object is replaced only when a read lands, so this ties the
@@ -294,6 +318,8 @@ export function FileTree({ tree, status, onOpenFile, overridden, onBind }: FileT
               onConfirmDelete={() => { confirmDelete(item.row.path); }}
               onCancelDelete={() => { setDeleting(null); setActionError(null); }}
               onBind={() => { setMenu(null); onBind(item.row.path); }}
+              cluster={bound && actionable(item.row.path, item.row.isDir)}
+              onCluster={(action) => { setMenu(null); onCluster(item.row.path, action); }}
             />
           ),
         )}
