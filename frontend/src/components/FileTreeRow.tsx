@@ -2,6 +2,7 @@ import { useEffect, type CSSProperties } from "react";
 import type { TreeRow } from "../lib/tree";
 import { iconKind, resolveIconKind } from "../lib/tree";
 import { badgeTitle, badgeTone } from "../lib/gitStatus";
+import type { PipelineAction } from "../lib/pipeline";
 import { FileIcon, UiIcon } from "./Icon";
 import { InlineField } from "./InlineField";
 
@@ -50,6 +51,18 @@ export interface RowViewProps {
   onCancelDelete: () => void;
   /** Opens the Kubernetes binding dialog for this directory (#10). */
   onBind: () => void;
+  /**
+   * Whether the diff → apply pipeline is offered on this row (#11).
+   *
+   * It is decided by the caller rather than here because two things go into it
+   * and only one of them is about the row: what the path is (`actionable` in
+   * lib/pipeline.ts) and whether the project reaches a cluster at all. A row
+   * offering Apply in a project with no binding would be a menu entry whose
+   * only outcome is an error.
+   */
+  readonly cluster: boolean;
+  /** Starts a pipeline run against this row (#11). */
+  onCluster: (action: PipelineAction) => void;
 }
 
 export function RowView({
@@ -77,6 +90,8 @@ export function RowView({
   onConfirmDelete,
   onCancelDelete,
   onBind,
+  cluster,
+  onCluster,
 }: RowViewProps) {
   if (deleting) {
     return (
@@ -162,6 +177,8 @@ export function RowView({
           onRename={onStartRename}
           onDelete={onStartDelete}
           onBind={onBind}
+          cluster={cluster}
+          onCluster={onCluster}
         />
       )}
     </div>
@@ -247,6 +264,8 @@ interface RowMenuProps {
   onRename: () => void;
   onDelete: () => void;
   onBind: () => void;
+  readonly cluster: boolean;
+  onCluster: (action: PipelineAction) => void;
 }
 
 /**
@@ -257,10 +276,14 @@ interface RowMenuProps {
  * git entries (#8, DESIGN.md §7) will announce themselves by appearing here
  * when they work.
  *
- * Kubernetes is a directory's entry alone (#10). A binding covers a subtree,
- * and offering it on a file would invite a per-file override the resolution
- * rules have no way to express — a scope is a folder, and the menu says so by
- * only appearing on one.
+ * The Kubernetes BINDING is a directory's entry alone (#10). A binding covers a
+ * subtree, and offering it on a file would invite a per-file override the
+ * resolution rules have no way to express — a scope is a folder, and the menu
+ * says so by only appearing on one.
+ *
+ * The pipeline actions (#11) are the opposite: they act on manifests, so they
+ * appear on a YAML file and on a directory of them alike, and on neither when
+ * the project has no cluster to reach. `cluster` carries that decision in.
  */
 function RowMenu({
   at,
@@ -271,6 +294,8 @@ function RowMenu({
   onRename,
   onDelete,
   onBind,
+  cluster,
+  onCluster,
 }: RowMenuProps) {
   useEffect(() => {
     const closeOnOutsideClick = () => { onClose(); };
@@ -289,14 +314,39 @@ function RowMenu({
       style={within(at)}
       onClick={(event) => { event.stopPropagation(); }}
     >
+      {cluster && (
+        <>
+          {/* The cluster actions lead, in the order the pipeline runs them
+              (DESIGN.md §6.1): looking is above changing, and the destructive
+              one is last and separated. Delete says "from cluster" because
+              there is another Delete in this same menu that removes the file —
+              two entries a hurried click apart, with opposite blast radii. */}
+          <button type="button" role="menuitem" onClick={() => { onCluster("diff"); }}>
+            <FileIcon kind="kubernetes" />
+            Diff against cluster
+          </button>
+          <button type="button" role="menuitem" onClick={() => { onCluster("apply"); }}>
+            <FileIcon kind="kubernetes" />
+            Apply to cluster…
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="tree__menu-danger"
+            onClick={() => { onCluster("delete"); }}
+          >
+            <FileIcon kind="kubernetes" />
+            Delete from cluster…
+          </button>
+          <hr className="tree__menu-rule" />
+        </>
+      )}
       {isDir && (
         <>
-          {/* Kubernetes first: it is the reason to open this menu on a
-              directory, and the file operations below it are the ones every
-              tree has. */}
+          {/* The binding, then the file operations every tree has. */}
           <button type="button" role="menuitem" onClick={onBind}>
             <FileIcon kind="kubernetes" />
-            Kubernetes
+            Kubernetes binding
           </button>
           <button type="button" role="menuitem" onClick={onNewFile}>
             New File

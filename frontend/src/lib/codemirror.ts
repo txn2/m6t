@@ -14,22 +14,21 @@ import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/sea
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   EditorView,
-  GutterMarker,
   drawSelection,
-  gutter,
   highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
   lineNumbers,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { BLAME_LABEL_WIDTH, blameLabel, blameTooltip, commitAt } from "./blame";
+import { BLAME_LABEL_WIDTH } from "./blame";
+import { blameExtension, blameMarks, setBlameMarks, uncommittedLines } from "./blameMarks";
 import type { EditorTabKind } from "./editorTabs";
-import type { Blame, BlameCommit } from "./git";
+import type { Blame } from "./git";
 import type { Appearance } from "./theme";
 
 /**
- * The editor, and the only module that knows CodeMirror exists.
+ * The editor: constructing a view, wiring its extensions, and colouring it.
  *
  * It is deliberately thin, for the reason `lib/xterm.ts` gives about the
  * terminal: constructing a view and wiring its extensions is the part that
@@ -40,6 +39,13 @@ import type { Appearance } from "./theme";
  * editing": syntax, folding, search, history and line numbers, and
  * pointedly not autocomplete, linting or a language server. Schema
  * diagnostics are #13's, and this file should not grow them by accident.
+ *
+ * It is one of two modules that import CodeMirror, the other being
+ * `blameMarks.ts`. That is a split by state rather than by subject: everything
+ * here is an extension list or a colour table, and the blame column is the one
+ * part of the editor holding data of its own that has to survive the user's
+ * edits. Keeping the boundary at "does it have state" is what stops it becoming
+ * "whatever did not fit".
  */
 
 /**
@@ -61,15 +67,29 @@ export interface MountedEditor {
   setTheme(appearance: Appearance): void;
   setReadOnly(readOnly: boolean): void;
   /**
-   * Shows, hides or refreshes the blame column (#52).
+   * Shows or hides the blame column (#52).
    *
-   * `shown` and `blame` are separate arguments because they are separate
-   * states. A column that is shown with no blame to put in it is the tab's
-   * dirty case: the toggle is still on, the entries are not trustworthy while
-   * the buffer has an unsaved line in it, and the column keeps its width so
-   * that typing does not shift the code sideways.
+   * It is a separate call from `setBlame` because they answer to different
+   * things, and folding them into one is what broke the toggle: the column is
+   * shown because the user pressed a button, and a blame is installed because a
+   * read landed against text git has actually seen. A caller that could only do
+   * both at once had to skip both whenever it could not do the second, which
+   * left the column stuck on over a buffer with unsaved edits.
+   *
+   * The column can be on with nothing in it — a file git has no attribution
+   * for, or a read that failed — and it keeps its width either way, so the code
+   * beside it does not move.
    */
-  setBlame(shown: boolean, blame: Blame | null): void;
+  showBlame(shown: boolean): void;
+  /**
+   * Installs a blame, or clears it with null (#52).
+   *
+   * It anchors to the document as it stands, so the caller must only pass one
+   * measured against this exact text. Everything after that is this module's:
+   * the entries follow the lines they were attributed to as the buffer is
+   * edited (see `blameMarks.ts`).
+   */
+  setBlame(blame: Blame | null): void;
   focus(): void;
   dispose(): void;
 }
@@ -107,6 +127,13 @@ export function mountEditor(
         // line numbers rather than between them and the code. Gutters are laid
         // out in the order their extensions appear.
         blameSlot.of([]),
+        // Outside the compartment, and deliberately: the anchors are document
+        // state, so they have to survive the column being toggled and the
+        // gutter being reconfigured. A field inside the slot would be rebuilt
+        // by the reconfiguration that is supposed to be reading it — and the
+        // highlight beside it is on whether or not the column is.
+        blameMarks,
+        uncommittedLines,
         ...baseExtensions(options.onSave),
         ...languageFor(options.kind),
         themeSlot.of(editorTheme(options.appearance)),
@@ -143,10 +170,31 @@ export function mountEditor(
         effects: readOnlySlot.reconfigure(readOnlyExtension(readOnly)),
       });
     },
-    setBlame: (shown, blame) => {
-      view.dispatch({
-        effects: blameSlot.reconfigure(blameExtension(shown, blame)),
-      });
+    showBlame: (shown) => {
+      view.dispatch({ effects: blameSlot.reconfigure(blameExtension(shown)) });
+      // Adding or removing the column changes how wide the code is, and the
+      // code wraps (`EditorView.lineWrapping`), so every line that wraps at one
+      // width and not the other is a line whose height just changed. Nothing
+      // notices on its own, for two reasons that both have to be true and are:
+      //
+      //   - Gutters are inserted INTO the scroller, beside the content. So
+      //     adding one narrows the text without changing the size of the
+      //     element CodeMirror's ResizeObserver is watching, and the observer
+      //     never fires.
+      //   - Even when it does fire, it ignores anything within 75ms of an
+      //     update — a guard against reacting to its own rendering. A
+      //     reconfiguration is an update, in the same tick.
+      //
+      // Left unmeasured, the gutters keep the line heights from the previous
+      // width while the text is laid out at the new one, and the two slide
+      // apart by a row per wrapped line above the viewport: entries standing
+      // beside lines they do not describe. Scrolling used to be what fixed it,
+      // because scrolling is what eventually forced the measure. This is the
+      // same call CodeMirror's own resize handler makes.
+      view.requestMeasure();
+    },
+    setBlame: (blame) => {
+      view.dispatch({ effects: setBlameMarks.of(blame) });
     },
     focus: () => {
       view.focus();
@@ -206,67 +254,6 @@ export function languageFor(kind: EditorTabKind): Extension[] {
     return [markdown()];
   }
   return [];
-}
-
-/**
- * The blame column (#52), as an extension that can be swapped in place.
- *
- * Nothing is added when the column is off, so a file nobody asked to blame
- * carries no gutter and no per-line callback at all. When it is on with no
- * blame behind it every line's marker is null, which leaves the gutter present
- * and empty — the width comes from CSS, not from its contents, so the code
- * does not move when the entries come and go.
- */
-export function blameExtension(shown: boolean, blame: Blame | null): Extension {
-  if (!shown) {
-    return [];
-  }
-  return gutter({
-    class: "cm-blame",
-    lineMarker: (view, line) => {
-      if (blame === null) {
-        return null;
-      }
-      const commit = commitAt(blame, view.state.doc.lineAt(line.from).number);
-      return commit === null ? null : new BlameEntry(commit);
-    },
-  });
-}
-
-/** One line's entry in the blame column. */
-class BlameEntry extends GutterMarker {
-  private readonly label: string;
-  private readonly tooltip: string;
-  private readonly uncommitted: boolean;
-
-  constructor(commit: BlameCommit) {
-    super();
-    this.label = blameLabel(commit);
-    this.tooltip = blameTooltip(commit);
-    this.uncommitted = commit.uncommitted;
-  }
-
-  // CodeMirror keeps a marker's DOM when the new marker for a line compares
-  // equal, so this is what stops every entry in the file being rebuilt on a
-  // keystroke. Comparing the rendered strings rather than the commit is
-  // deliberate: two entries that say the same thing are the same entry.
-  override eq(other: GutterMarker): boolean {
-    return (
-      other instanceof BlameEntry &&
-      other.label === this.label &&
-      other.tooltip === this.tooltip
-    );
-  }
-
-  override toDOM(): Node {
-    const entry = document.createElement("span");
-    entry.className = this.uncommitted
-      ? "cm-blame-entry cm-blame-entry--uncommitted"
-      : "cm-blame-entry";
-    entry.textContent = this.label;
-    entry.title = this.tooltip;
-    return entry;
-  }
 }
 
 /** The read-only state, as an extension that can be swapped in place. */
@@ -335,7 +322,34 @@ export function editorTheme(appearance: Appearance): Extension {
           whiteSpace: "nowrap",
           textOverflow: "ellipsis",
         },
-        ".cm-blame-entry--uncommitted": { fontStyle: "italic", opacity: "0.7" },
+        // A dark yellow band across the whole entry, not a tinted label. An
+        // uncommitted line is the one thing in this column worth catching the
+        // eye — it is the work that is not stored anywhere yet — and a filled
+        // row is what reads as "these lines" at a glance down a long file,
+        // where a coloured word does not.
+        //
+        // The entry is `display: block`, so the background fills the column's
+        // width and the marks line up as a band rather than as ragged patches
+        // behind text of different lengths. The italic stays for the reason the
+        // tree's badges sit beside their tint: hue on its own is the signal a
+        // monochrome display and a red-green reader both lose.
+        ".cm-blame-entry--uncommitted": {
+          fontStyle: "italic",
+          backgroundColor: c.uncommittedBg,
+          color: c.uncommittedFg,
+          borderRadius: "2px",
+        },
+        // The same fact, drawn across the code (#64). It is the mark that
+        // actually gets read: the question "which of these lines have I
+        // changed" is asked while looking at the file, and the answer has to be
+        // on the line rather than fourteen characters off to the left in a
+        // column most people keep closed.
+        //
+        // It is declared after `.cm-activeLine` so that it wins on the line the
+        // caret is on. Both are one-class rules of equal specificity, so order
+        // is what decides, and "this line is not committed" is the more
+        // important of the two things to know about a line.
+        ".cm-uncommitted-line": { backgroundColor: c.uncommittedLine },
         ".cm-panels": { backgroundColor: c.gutterBg, color: c.fg },
         ".cm-searchMatch": { backgroundColor: c.searchMatch },
         ".cm-searchMatch.cm-searchMatch-selected": {
@@ -364,6 +378,19 @@ interface EditorPalette {
   readonly gutterFg: string;
   /** A hairline between one gutter and the next — the blame column's edge. */
   readonly rule: string;
+  /** The band the blame column draws on a line that is in no commit (#64),
+   * and the text that has to stay readable on it. */
+  readonly uncommittedBg: string;
+  readonly uncommittedFg: string;
+  /**
+   * The wash on the code of the same line.
+   *
+   * Deliberately much weaker than the column's band. It sits under syntax
+   * highlighting rather than under one short label, so it has to be a tint the
+   * eye picks up while scrolling and the reader never has to look through —
+   * every token colour in this palette still has to be legible on it.
+   */
+  readonly uncommittedLine: string;
   readonly searchMatch: string;
   readonly searchMatchActive: string;
   readonly key: string;
@@ -384,6 +411,9 @@ const DARK: EditorPalette = {
   gutterBg: "#16181d",
   gutterFg: "#5c6370",
   rule: "#262a33",
+  uncommittedBg: "#4a3800",
+  uncommittedFg: "#d8c68e",
+  uncommittedLine: "#2b2409",
   searchMatch: "#3a4a6b",
   searchMatchActive: "#61afef",
   key: "#61afef",
@@ -404,6 +434,9 @@ const LIGHT: EditorPalette = {
   gutterBg: "#fbfbfd",
   gutterFg: "#6b7280",
   rule: "#e3e5ea",
+  uncommittedBg: "#6b5200",
+  uncommittedFg: "#f7efd8",
+  uncommittedLine: "#f2e6bd",
   searchMatch: "#d6e4fb",
   searchMatchActive: "#2f6fd0",
   key: "#2f6fd0",

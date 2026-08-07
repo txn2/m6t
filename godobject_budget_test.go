@@ -266,7 +266,41 @@ const (
 	// because a delete triggered by a blank field is a delete nobody typed.
 	// That is the trade this raise is actually spending: one more method for a
 	// destructive operation the user has to name.
-	maxAppMethods = 32
+	// 32 -> 37 in #11, and five at once is now the largest raise this ceiling
+	// has taken, so it needs the argument rather than the number.
+	//
+	// KubeValidate, KubeDiff, KubeApply, KubeDeletePreview and KubeDelete are
+	// the diff → apply pipeline's four steps plus the delete's own preview
+	// (DESIGN.md §6.1). Each is a request with an answer and no throughput —
+	// the test every binding on this list has had to pass — and each is a
+	// different kubectl subcommand with a different output and a different
+	// meaning for its exit code, driven by its own control in the UI.
+	//
+	// What the ceiling should refuse here is the shape this feature most
+	// invites, and refusing it is why the number is five rather than three: a
+	// dry-run boolean. KubeValidate is KubeApply under --dry-run=server and
+	// KubeDeletePreview is KubeDelete under the same, so folding each pair
+	// into one binding with a flag would have cost two methods. It would also
+	// have put the difference between previewing a deletion and performing one
+	// behind a boolean that the frontend passes, which is one inverted
+	// condition away from deleting a namespace's worth of objects. Two
+	// methods is the price of that condition not existing.
+	//
+	// Step 3 — confirm — is deliberately not here. A confirmation is a dialog,
+	// and what crosses the bridge is the answer to it, carried as the typed
+	// context name on the call it authorizes. A KubeConfirm would be a token
+	// minted by one call and spent by another: a session to hold and to
+	// expire, protecting a decision that is already an argument.
+	//
+	// Nothing else moved. `aim` and `resolveBinding` — the target resolution
+	// every one of the five shares — are free functions over the registry
+	// handle, for the reason the ListDirectory note above gives about
+	// projectPath: spending this ceiling on internal wiring is not the
+	// described pattern. Server-side apply is a field in internal/project
+	// written through the UpdateProject that already existed, not a setter
+	// here, which is the trade #10's note made for the binding and #58's for
+	// the session.
+	maxAppMethods = 37
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

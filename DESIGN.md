@@ -317,11 +317,20 @@ v1 scope mirrors actual daily use, not a git client:
 - Diff viewer for working-tree changes and for a file's last commit.
 - A blame column beside the editor, per line: the author's initials and the
   date of the commit that last touched it, with the commit's subject and short
-  SHA on hover. It reads the file on disk, so its entries are hidden while the
-  buffer holds an unsaved edit — one insertion moves every line number under
-  it, and a shifted blame names the wrong person. This is not history tooling:
-  there is no navigating to a commit from it, which stays with log browsing in
-  v1.x.
+  SHA on hover. It reads the file on disk and then follows the buffer: entries
+  move with the lines they were attributed to as the file is edited, and a
+  commit's name is shown only while its line still reads as git measured it. A
+  line being typed on reads `uncommitted` rather than being credited to whoever
+  wrote what used to be there — the same entry a line git itself reports against
+  the all-zero SHA carries. Saving re-reads. This is not history tooling: there
+  is no navigating to a commit from it, which stays with log browsing in v1.x.
+- Every line that is in no commit — edited since the last read, or reported by
+  git against the all-zero SHA — carries a dark yellow band across the code
+  itself. It is the blame's data and not the blame's column: it is on whenever a
+  file has been read, including while the column is closed, because "which of
+  these lines have I changed" is asked while looking at the file and the column
+  is fourteen characters people want back. The two marks share one rule, so they
+  cannot come to disagree about a line.
 - Branch switching (existing branches). Branch creation, log browsing, stash,
   and history tooling are v1.x (§10).
 

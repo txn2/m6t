@@ -74,7 +74,12 @@ export function blameLabel(commit: BlameCommit): string {
  */
 export function blameTooltip(commit: BlameCommit): string {
   if (commit.uncommitted) {
-    return "Not committed yet — this line is only in the working tree";
+    // Deliberately not "only in the working tree". The gutter uses this label
+    // for two things: a line git reported against the all-zero SHA, which IS in
+    // the working tree, and a line the user has typed into since the blame was
+    // read, which is not even that. What both actually have in common is the
+    // part worth saying.
+    return "Not committed yet — this line is in no commit";
   }
   const parts = [commit.author, blameMoment(commit), abbreviate(commit.sha)];
   if (commit.summary !== "") {

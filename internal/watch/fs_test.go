@@ -311,3 +311,88 @@ func TestDeleteOfAMissingEntryIsIdempotent(t *testing.T) {
 		t.Errorf("Delete of a missing entry = %v, want nil", err)
 	}
 }
+
+func TestResolveReturnsTheAbsolutePathAndItsKind(t *testing.T) {
+	root := tree(t, []string{"prod/api/deploy.yaml"}, []string{"prod/api"})
+
+	tests := []struct {
+		name    string
+		rel     string
+		wantRel string
+		wantDir bool
+	}{
+		{name: "file", rel: "prod/api/deploy.yaml", wantRel: "prod/api/deploy.yaml"},
+		{name: "directory", rel: "prod/api", wantRel: "prod/api", wantDir: true},
+		{name: "root itself", rel: "", wantRel: ".", wantDir: true},
+		{name: "slash form on every platform", rel: "prod/api/../api", wantRel: "prod/api", wantDir: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, isDir, err := Resolve(root, test.rel)
+			if err != nil {
+				t.Fatalf("Resolve(%q): %v", test.rel, err)
+			}
+			want := filepath.Join(root, filepath.FromSlash(test.wantRel))
+			if got != want {
+				t.Errorf("path = %q, want %q", got, want)
+			}
+			if isDir != test.wantDir {
+				t.Errorf("isDir = %v, want %v", isDir, test.wantDir)
+			}
+		})
+	}
+}
+
+// The reason this function exists: the path leaves the process, so everything
+// that would escape the worktree has to be refused before it does.
+func TestResolveRefusesWhatWouldLeaveTheWorktree(t *testing.T) {
+	root := tree(t, []string{"prod/deploy.yaml"}, nil)
+
+	tests := []struct {
+		name string
+		rel  string
+		want error
+	}{
+		{name: "parent traversal", rel: "../outside.yaml", want: ErrOutsideRoot},
+		{name: "traversal through a real directory", rel: "prod/../../outside.yaml", want: ErrOutsideRoot},
+		{name: "absolute path", rel: "/etc/passwd", want: ErrOutsideRoot},
+		{name: "the git directory", rel: ".git/config", want: ErrGitInternal},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, _, err := Resolve(root, test.rel); !errors.Is(err, test.want) {
+				t.Errorf("Resolve(%q) error = %v, want %v", test.rel, err, test.want)
+			}
+		})
+	}
+}
+
+// The runtime half of the confinement: a symlink is a path that passes every
+// static check and still points somewhere else, and only os.Root catches it.
+func TestResolveRefusesASymlinkOutOfTheWorktree(t *testing.T) {
+	root := tree(t, nil, nil)
+	outside := filepath.Join(t.TempDir(), "secrets.yaml")
+	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
+		t.Fatalf("writing the target: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape.yaml")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, _, err := Resolve(root, "escape.yaml"); err == nil {
+		t.Error("Resolve followed a symlink out of the worktree, want a refusal")
+	}
+}
+
+// A path that names nothing fails here rather than inside kubectl, where it
+// would arrive as a file-not-found with no mention of the project it was
+// relative to.
+func TestResolveRefusesAMissingPath(t *testing.T) {
+	root := tree(t, nil, nil)
+
+	if _, _, err := Resolve(root, "prod/gone.yaml"); err == nil {
+		t.Error("Resolve of a path that does not exist returned no error, want one")
+	}
+}

@@ -50,6 +50,10 @@ export function GitStatus(arg1) {
   return window['go']['app']['App']['GitStatus'](arg1);
 }
 
+export function KubeApply(arg1, arg2, arg3) {
+  return window['go']['app']['App']['KubeApply'](arg1, arg2, arg3);
+}
+
 export function KubeBinding(arg1, arg2) {
   return window['go']['app']['App']['KubeBinding'](arg1, arg2);
 }
@@ -62,8 +66,24 @@ export function KubeContexts() {
   return window['go']['app']['App']['KubeContexts']();
 }
 
+export function KubeDelete(arg1, arg2, arg3) {
+  return window['go']['app']['App']['KubeDelete'](arg1, arg2, arg3);
+}
+
+export function KubeDeletePreview(arg1, arg2) {
+  return window['go']['app']['App']['KubeDeletePreview'](arg1, arg2);
+}
+
+export function KubeDiff(arg1, arg2) {
+  return window['go']['app']['App']['KubeDiff'](arg1, arg2);
+}
+
 export function KubeNamespaces(arg1) {
   return window['go']['app']['App']['KubeNamespaces'](arg1);
+}
+
+export function KubeValidate(arg1, arg2) {
+  return window['go']['app']['App']['KubeValidate'](arg1, arg2);
 }
 
 export function ListDirectory(arg1, arg2) {

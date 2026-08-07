@@ -14,6 +14,7 @@ import {
 } from "../lib/tree";
 import type { FileStatus, Status } from "../lib/git";
 import { ADDED, DELETED, MODIFIED, UNTRACKED, emptyStatus } from "../lib/git";
+import type { PipelineAction } from "../lib/pipeline";
 import { FileTree } from "./FileTree";
 
 afterEach(cleanup);
@@ -39,12 +40,16 @@ function renderTree(props: {
   readonly tree: FileTreeController;
   readonly status?: Status;
   readonly onOpenFile?: (path: string) => void;
+  readonly bound?: boolean;
+  readonly onCluster?: (path: string, action: PipelineAction) => void;
 }) {
   return render(
     <Harness
       tree={props.tree}
       status={props.status ?? emptyStatus()}
       onOpenFile={props.onOpenFile ?? vi.fn()}
+      bound={props.bound ?? false}
+      onCluster={props.onCluster ?? vi.fn()}
     />,
   );
 }
@@ -64,10 +69,16 @@ function Harness({
   tree,
   status,
   onOpenFile,
+  bound = false,
+  onCluster = () => undefined,
 }: {
   readonly tree: FileTreeController;
   readonly status: Status;
   readonly onOpenFile: (path: string) => void;
+  /** Whether the project reaches a cluster, which gates the pipeline entries
+   * (#11). Off unless a test is about them. */
+  readonly bound?: boolean;
+  readonly onCluster?: (path: string, action: PipelineAction) => void;
 }) {
   const [state, setState] = useState(tree.state);
 
@@ -84,6 +95,8 @@ function Harness({
       onOpenFile={onOpenFile}
       overridden={NO_OVERRIDES}
       onBind={vi.fn()}
+      bound={bound}
+      onCluster={onCluster}
     />
   );
 }
@@ -296,6 +309,8 @@ describe("scrolling the selected row (#56)", () => {
         onOpenFile={vi.fn()}
         overridden={NO_OVERRIDES}
         onBind={vi.fn()}
+        bound={false}
+        onCluster={vi.fn()}
       />,
     );
     return (next: TreeState) => {
@@ -306,6 +321,8 @@ describe("scrolling the selected row (#56)", () => {
           onOpenFile={vi.fn()}
           overridden={NO_OVERRIDES}
           onBind={vi.fn()}
+          bound={false}
+          onCluster={vi.fn()}
         />,
       );
     };
@@ -722,6 +739,8 @@ describe("bringing the selected row on screen (#43)", () => {
         onOpenFile={vi.fn()}
         overridden={NO_OVERRIDES}
         onBind={vi.fn()}
+        bound={false}
+        onCluster={vi.fn()}
       />,
     );
     expect(scrolled).toEqual([]);
@@ -733,6 +752,8 @@ describe("bringing the selected row on screen (#43)", () => {
         onOpenFile={vi.fn()}
         overridden={NO_OVERRIDES}
         onBind={vi.fn()}
+        bound={false}
+        onCluster={vi.fn()}
       />,
     );
 
@@ -898,7 +919,7 @@ describe("the row context menu", () => {
 
     const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual([
-      "Kubernetes",
+      "Kubernetes binding",
       "New File",
       "New Folder",
       "Rename",
@@ -914,7 +935,99 @@ describe("the row context menu", () => {
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
 
     expect(
-      within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Kubernetes" }),
+      within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Kubernetes binding" }),
     ).toBeNull();
+  });
+});
+
+/**
+ * The pipeline entries on a row (#11, DESIGN.md §6.1).
+ *
+ * They are the only menu items in this application that reach a cluster, so
+ * what they are offered on — and what they are not offered on — is the subject
+ * rather than a detail of the layout.
+ */
+describe("the pipeline entries in the row menu", () => {
+  /** The menu items on a row, by their labels. */
+  function menuOn(name: RegExp): string[] {
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name }));
+    return within(screen.getByRole("menu"))
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent ?? "");
+  }
+
+  it("offers diff, apply and delete on a manifest", () => {
+    renderTree({ tree: fakeController(loadedRoot()), bound: true });
+
+    expect(menuOn(/deploy\.yaml/).slice(0, 3)).toEqual([
+      "Diff against cluster",
+      "Apply to cluster…",
+      "Delete from cluster…",
+    ]);
+  });
+
+  it("offers them on a directory too, above the binding", () => {
+    renderTree({ tree: fakeController(loadedRoot()), bound: true });
+
+    expect(menuOn(/manifests/)).toEqual([
+      "Diff against cluster",
+      "Apply to cluster…",
+      "Delete from cluster…",
+      "Kubernetes binding",
+      "New File",
+      "New Folder",
+      "Rename",
+      "Delete",
+    ]);
+  });
+
+  // A menu entry whose only outcome is the backend's refusal teaches the user
+  // that menu entries lie.
+  it("offers none of them when the project reaches no cluster", () => {
+    renderTree({ tree: fakeController(loadedRoot()), bound: false });
+
+    expect(menuOn(/deploy\.yaml/)).toEqual(["Rename", "Delete"]);
+  });
+
+  it("offers none of them on a file that is not a manifest", () => {
+    const listed = withListing(initialTree(), ROOT, [{ name: "README.md", isDir: false }]);
+    renderTree({ tree: fakeController(listed), bound: true });
+
+    expect(menuOn(/README\.md/)).toEqual(["Rename", "Delete"]);
+  });
+
+  it("starts a run against the row it was opened on", () => {
+    const onCluster = vi.fn();
+    renderTree({ tree: fakeController(loadedRoot()), bound: true, onCluster });
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply to cluster…" }));
+
+    expect(onCluster).toHaveBeenCalledWith("deploy.yaml", "apply");
+  });
+
+  it("closes the menu when a run is started", () => {
+    renderTree({ tree: fakeController(loadedRoot()), bound: true });
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Diff against cluster" }));
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // Two Deletes a hurried click apart, with opposite blast radii: one removes a
+  // file and one removes running objects from a cluster. The labels say which,
+  // and only the destructive one is marked.
+  it("distinguishes the cluster delete from the file delete", () => {
+    renderTree({ tree: fakeController(loadedRoot()), bound: true });
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
+
+    const menu = within(screen.getByRole("menu"));
+    expect(menu.getByRole("menuitem", { name: "Delete from cluster…" }).className).toContain(
+      "tree__menu-danger",
+    );
+    expect(menu.getByRole("menuitem", { name: "Delete" }).className).not.toContain(
+      "tree__menu-danger",
+    );
   });
 });

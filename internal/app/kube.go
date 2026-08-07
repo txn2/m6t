@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/txn2/m6t/internal/kubeconfig"
 	"github.com/txn2/m6t/internal/kubeexec"
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/tools"
+	"github.com/txn2/m6t/internal/watch"
 )
 
 // KubeContexts lists the contexts the user's kubeconfig offers, for the
@@ -34,7 +36,19 @@ func (*App) KubeContexts() (kubeconfig.Config, error) {
 // cluster those are routinely different, which is the entire reason scopes
 // exist.
 func (a *App) KubeBinding(name, rel string) (project.Binding, error) {
-	settings, err := a.projects.Settings(name)
+	return resolveBinding(a.projects, name, rel)
+}
+
+// resolveBinding is what KubeBinding answers with, as a function rather than a
+// method.
+//
+// The pipeline resolves its own target and must do it exactly the way the panel
+// does, so the two share this rather than one calling the other: `aim` is a free
+// function for the reason tree.go's startRegisteredWatchers gives — the method
+// ceiling is for bound API, not for internal wiring — and a free function cannot
+// reach a method.
+func resolveBinding(registry *project.Registry, name, rel string) (project.Binding, error) {
+	settings, err := registry.Settings(name)
 	if err != nil {
 		return project.Binding{}, fmt.Errorf("resolving the kube binding for %s: %w", name, err)
 	}
@@ -136,4 +150,224 @@ func (a *App) UnbindFolder(name, path string) (project.Project, error) {
 // for the same reason.
 func (*App) Tools() []tools.Tool {
 	return tools.Detect(context.Background())
+}
+
+// The bound half of the diff → apply pipeline (DESIGN.md §6.1, issue #11).
+//
+// Five bindings, one per step the user drives: validate, diff, apply, and the
+// delete pair. Step 3 — confirm — has no binding of its own, and that absence is
+// the design rather than an omission. A confirmation is a dialog; what crosses
+// the bridge is the answer to it, as the context name the user typed, on the
+// call it authorizes. A separate `KubeConfirm` would be a token minted by one
+// call and spent by another, which is a session to keep and to expire, to
+// protect a decision that is already an argument.
+//
+// What this half enforces, and the one thing here that is behavior rather than
+// delegation: a protected binding refuses to mutate unless the typed context
+// matches exactly, before any process exists. The dialog is the UI's; the
+// refusal is not, because a guard that lives only in a dialog is a guard that a
+// second caller — a keyboard shortcut, a context menu, whatever #14 adds — gets
+// to forget about.
+//
+// It shares kube.go with the binding half rather than taking a file of its own,
+// which is what the package's file ceiling asks for and also what it is: the
+// same service's bound surface, aimed by the same registry resolution.
+//
+// Every one of them resolves its own target from the registry, exactly as
+// KubeCheck does and for the same reason: the binding a call is aimed with comes
+// from projects.yaml at the moment of the call, never from a frontend that may
+// have been rendered before the user edited it by hand.
+
+// errNotConfirmed reports a mutation on a protected binding that arrived without
+// the context name typed, or with the wrong one.
+//
+// It is unexported because nothing matches it: the frontend reads the message
+// over the bridge, and inside Go this package is the only caller. Exporting it
+// would widen the binding layer's seam for an audience of one test.
+var errNotConfirmed = errors.New("this binding is protected: type the context name exactly to confirm")
+
+// KubeValidate is step 1: `kubectl apply --dry-run=server` against the target.
+//
+// target is repository-relative — a file or a directory — and it is both what is
+// acted on and what the binding is resolved at. Those being the same path is the
+// point: a validation aimed at one cluster and an apply aimed at another would
+// be two different questions, and passing the scope separately is how they would
+// come to differ.
+//
+// A schema failure, a missing CRD, an admission refusal and an RBAC denial all
+// come back as a Result with kubectl's stderr in it, which is what the UI blocks
+// the pipeline on. An error here means no verdict was produced at all.
+func (a *App) KubeValidate(name, target string) (kubeexec.Result, error) {
+	at, err := aim(a.projects, name, target)
+	if err != nil {
+		return kubeexec.Result{}, err
+	}
+	result, err := a.kube.Validate(
+		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	if err != nil {
+		return kubeexec.Result{}, fmt.Errorf("validating %s in %s: %w", target, name, err)
+	}
+	return result, nil
+}
+
+// KubeDiff is step 2: what the cluster would change if this were applied.
+//
+// The exit code carries the answer — 0 is "no changes", which DESIGN.md §6.1
+// makes a first-class result rather than an empty screen — and it reaches the
+// frontend on the Result untouched. Nothing here reads the diff kubectl printed.
+func (a *App) KubeDiff(name, target string) (kubeexec.Result, error) {
+	at, err := aim(a.projects, name, target)
+	if err != nil {
+		return kubeexec.Result{}, err
+	}
+	result, err := a.kube.Diff(
+		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	if err != nil {
+		return kubeexec.Result{}, fmt.Errorf("diffing %s in %s: %w", target, name, err)
+	}
+	return result, nil
+}
+
+// KubeApply is step 4, and the first call in this file that changes a cluster.
+//
+// typed is what the user entered into the confirm dialog. It is required to
+// equal the resolved context exactly when the binding is protected, and it is
+// ignored when it is not — which is DESIGN.md §6.1's rule, held here rather than
+// in the dialog that collects it.
+//
+// The check is against the RESOLVED context and not the project's default. In
+// the layout scopes exist for, a file under `prod/` is protected by a rule three
+// directories up and targets a context the project as a whole does not; a check
+// against the default would ask for the wrong word and accept it.
+func (a *App) KubeApply(name, target, typed string) (kubeexec.Result, error) {
+	at, err := aim(a.projects, name, target)
+	if err != nil {
+		return kubeexec.Result{}, err
+	}
+	if err := confirm(at.binding, typed); err != nil {
+		return kubeexec.Result{}, fmt.Errorf("applying %s in %s: %w", target, name, err)
+	}
+	result, err := a.kube.Apply(
+		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	if err != nil {
+		return kubeexec.Result{}, fmt.Errorf("applying %s in %s: %w", target, name, err)
+	}
+	return result, nil
+}
+
+// KubeDeletePreview lists the objects a delete would remove, removing none.
+//
+// It takes no confirmation because it changes nothing, and it is a separate
+// binding from KubeDelete rather than a flag on it for exactly that reason: a
+// dry-run boolean is one inverted condition away from being a deletion, and the
+// inversion would be in the caller this file cannot see.
+func (a *App) KubeDeletePreview(name, target string) (kubeexec.Result, error) {
+	at, err := aim(a.projects, name, target)
+	if err != nil {
+		return kubeexec.Result{}, err
+	}
+	result, err := a.kube.DeletePreview(context.Background(), at.where(), at.path, at.dir)
+	if err != nil {
+		return kubeexec.Result{}, fmt.Errorf("previewing the delete of %s in %s: %w", target, name, err)
+	}
+	return result, nil
+}
+
+// KubeDelete removes the objects the manifests name, under the same typed
+// confirmation KubeApply requires.
+func (a *App) KubeDelete(name, target, typed string) (kubeexec.Result, error) {
+	at, err := aim(a.projects, name, target)
+	if err != nil {
+		return kubeexec.Result{}, err
+	}
+	if err := confirm(at.binding, typed); err != nil {
+		return kubeexec.Result{}, fmt.Errorf("deleting %s in %s: %w", target, name, err)
+	}
+	result, err := a.kube.Delete(context.Background(), at.where(), at.path, at.dir)
+	if err != nil {
+		return kubeexec.Result{}, fmt.Errorf("deleting %s in %s: %w", target, name, err)
+	}
+	return result, nil
+}
+
+// aimed is one resolved pipeline target: which cluster, which path on disk, and
+// what kind of thing the path is.
+type aimed struct {
+	binding project.Binding
+	path    string
+	dir     bool
+}
+
+// where maps the registry's resolved binding onto the one kubeexec declares.
+//
+// The two types stay separate on purpose (see kubeexec's package comment):
+// sibling services do not import each other, so the mapping is the binding
+// layer's, and it is written once here rather than at five call sites.
+func (t aimed) where() kubeexec.Binding {
+	return kubeexec.Binding{Context: t.binding.Context, Namespace: t.binding.Namespace}
+}
+
+// aim resolves a project name and a repository-relative path into everything an
+// invocation needs, refusing anything that does not name a place inside the
+// worktree.
+//
+// One function for all five bindings, because the two halves it does are the two
+// that must never be done differently: the binding comes from the registry, and
+// the path is confined before it leaves the process. A binding that resolved its
+// own target would be a fifth chance to get one of those wrong.
+//
+// A free function over the registry handle rather than an App method, for the
+// reason startRegisteredWatchers gives in tree.go: the method ceiling is a
+// budget on bound API, and this is wiring.
+func aim(registry *project.Registry, name, target string) (aimed, error) {
+	root, err := projectPath(registry, name)
+	if err != nil {
+		return aimed{}, err
+	}
+
+	binding, err := resolveBinding(registry, name, target)
+	if err != nil {
+		return aimed{}, err
+	}
+
+	path, isDir, err := watch.Resolve(root, target)
+	if err != nil {
+		return aimed{}, fmt.Errorf("resolving %s in %s: %w", target, name, err)
+	}
+	return aimed{binding: binding, path: path, dir: isDir}, nil
+}
+
+// confirm is the protected-binding gate: the one condition standing between a
+// bound method and a cluster mutation.
+//
+// The comparison is exact — no trimming, no case folding. A context name is a
+// key the user copied off the panel in front of them, and a match that accepted
+// "  Prod-US-West " would be a match that accepts a user who read the name
+// approximately, which is the user this check exists for.
+func confirm(binding project.Binding, typed string) error {
+	if !binding.Protected {
+		return nil
+	}
+	if typed != binding.Context {
+		return errNotConfirmed
+	}
+	return nil
+}
+
+// projectPath returns the worktree of the named project.
+//
+// A free function over the registry handle rather than an App method, for the
+// reason startRegisteredWatchers gives in tree.go: the method ceiling is for
+// bound API, and this is a lookup.
+func projectPath(registry *project.Registry, name string) (string, error) {
+	projects, err := registry.List()
+	if err != nil {
+		return "", fmt.Errorf("finding %s: %w", name, err)
+	}
+	for _, p := range projects {
+		if p.Name == name {
+			return p.Path, nil
+		}
+	}
+	return "", fmt.Errorf("finding %s: %w", name, project.ErrNotFound)
 }

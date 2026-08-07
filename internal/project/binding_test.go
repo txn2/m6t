@@ -280,3 +280,32 @@ func TestValidateScopesRefusesDuplicates(t *testing.T) {
 		t.Errorf("validateScopes with a duplicate scope error = %v, want ErrInvalidScope", err)
 	}
 }
+
+// Server-side apply is the project's answer for the whole repository. A scope
+// that set it would give one repository two field-manager histories for the
+// same objects, so Resolve carries it through unchanged from the project no
+// matter how deep the matching scope is.
+func TestResolveCarriesServerSideFromTheProjectAlone(t *testing.T) {
+	t.Parallel()
+
+	kube := Kube{
+		Context:    "dev",
+		Namespace:  "default",
+		ServerSide: true,
+		Scopes: []Scope{
+			{Path: "prod", Context: "prod-us-west", Namespace: "platform", Protected: true},
+		},
+	}
+
+	for _, rel := range []string{"", "prod", "prod/api/deploy.yaml"} {
+		if got := kube.Resolve(rel); !got.ServerSide {
+			t.Errorf("Resolve(%q).ServerSide = false, want the project's own true", rel)
+		}
+	}
+
+	off := kube
+	off.ServerSide = false
+	if got := off.Resolve("prod/api"); got.ServerSide {
+		t.Error("Resolve().ServerSide = true for a project that has it off")
+	}
+}

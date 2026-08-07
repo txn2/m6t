@@ -3,7 +3,9 @@ import type { Binding, CheckResult, Kube, KubeContext, Scope, Tool } from "../li
 import { isBound, isUsable, overrideAt, toolProblem } from "../lib/kube";
 import type { Project } from "../lib/projects";
 import { projectLabel } from "../lib/projects";
+import type { RunEntry } from "../lib/pipeline";
 import type { KubeController } from "../lib/useKube";
+import { RunLog } from "./RunLog";
 import { ContextField, NamespaceField } from "./NamespaceField";
 import { UiIcon } from "./Icon";
 /** The Kubernetes wheel, vendored with the file-type marks (see Icon.tsx). */
@@ -21,6 +23,12 @@ export interface ProjectPanelProps {
   onDefault: (context: string, namespace: string, guarded: boolean) => Promise<void>;
   /** Writes the selected folder's override. Rejects the same way. */
   onOverride: (context: string, namespace: string, guarded: boolean) => Promise<void>;
+  /** Turns server-side apply on or off for the whole project (#11). It is its
+   * own callback rather than a fourth argument to `onDefault`, because it is
+   * not part of the binding: it says how an apply is performed, not where. */
+  onServerSide: (serverSide: boolean) => Promise<void>;
+  /** What this project's pipeline has done this session (#11). */
+  readonly runs: readonly RunEntry[];
 }
 
 /**
@@ -40,10 +48,10 @@ export interface ProjectPanelProps {
  * was picked in it — which is also what makes a refused write visible instead
  * of sitting pending behind a button nobody pressed.
  *
- * The bottom is deliberately left to grow into: live object health for the open
- * file is the watch service's (#12), and it lands here because it answers about
- * the same target the section above it names. Nothing occupies that space until
- * it exists.
+ * The bottom holds what the pipeline has done this session (#11), and is
+ * otherwise left to grow into: live object health for the open file is the
+ * watch service's (#12), and it lands here because it answers about the same
+ * target the section above it names.
  */
 export function ProjectPanel({
   project,
@@ -52,6 +60,8 @@ export function ProjectPanel({
   scope,
   onDefault,
   onOverride,
+  onServerSide,
+  runs,
 }: ProjectPanelProps) {
   return (
     <div className="panel" data-protected={kube.binding.protected || undefined}>
@@ -59,7 +69,13 @@ export function ProjectPanel({
 
       <Attributes project={project} />
 
-      <KubeSection project={project} kube={kube} seam={seam} onDefault={onDefault} />
+      <KubeSection
+        project={project}
+        kube={kube}
+        seam={seam}
+        onDefault={onDefault}
+        onServerSide={onServerSide}
+      />
 
       <Selection
         project={project}
@@ -70,6 +86,12 @@ export function ProjectPanel({
         scope={scope}
         onOverride={onOverride}
       />
+
+      {/* Below the selection, because it is a history of what has been done to
+          the thing the section above names — and because it is the only part of
+          this panel that grows, so anything that redrew above it would push the
+          stable sections down (#11). */}
+      <RunLog entries={runs} />
 
       <ToolStates tools={kube.tools} onRefresh={kube.refresh} />
     </div>
@@ -115,6 +137,7 @@ interface KubeSectionProps {
   readonly kube: KubeController;
   readonly seam: Kube;
   onDefault: (context: string, namespace: string, guarded: boolean) => Promise<void>;
+  onServerSide: (serverSide: boolean) => Promise<void>;
 }
 
 /**
@@ -125,7 +148,7 @@ interface KubeSectionProps {
  * control showing the value that is actually in force, with the reason under
  * it, rather than the value that was picked and quietly dropped.
  */
-function KubeSection({ project, kube, seam, onDefault }: KubeSectionProps) {
+function KubeSection({ project, kube, seam, onDefault, onServerSide }: KubeSectionProps) {
   const stored = project.kube;
   const { error, write } = useWrite(project.name);
 
@@ -176,6 +199,20 @@ function KubeSection({ project, kube, seam, onDefault }: KubeSectionProps) {
         description="Applying, deleting or rolling back anywhere in this project asks for the context name to be typed."
         onChange={(next) => {
           write(() => onDefault(stored.context, stored.namespace, next));
+        }}
+      />
+
+      {/* Whole-project, with no per-folder override (#11). A repository whose
+          `dev/` tree applied client-side and whose `prod/` tree applied
+          server-side would carry two field-manager histories for the same
+          objects — a conflict the user gets to discover during a production
+          apply. See project.Kube.ServerSide. */}
+      <Protected
+        checked={stored.serverSide}
+        label="Server-side apply"
+        description="Every apply, diff and validation in this project runs with --server-side, so the API server owns the merge and field conflicts are reported rather than silently won."
+        onChange={(next) => {
+          write(() => onServerSide(next));
         }}
       />
 

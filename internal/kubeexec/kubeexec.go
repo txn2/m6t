@@ -63,6 +63,14 @@ const binaryName = "kubectl"
 // the deadline is actually for is the call with no other exit: an API server
 // that accepted the connection and then stopped answering leaves kubectl
 // waiting on a socket, and without a deadline the UI waits with it forever.
+//
+// It is one number for every call here, and #11's mutations are the first
+// callers it is wrong for: `kubectl delete` waits on finalizers by default, so
+// deleting a namespace outlives this and comes back as "timed out" — an error
+// meaning no verdict was produced — while the deletion was in fact accepted and
+// the objects are terminating. That is #65, and it is a decision about what a
+// partially-observed mutation should say rather than a number to raise, which is
+// why it is not raised here.
 const commandTimeout = 60 * time.Second
 
 // Errors this package returns instead of a Result. Each one means no verdict

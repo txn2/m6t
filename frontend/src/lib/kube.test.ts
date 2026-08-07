@@ -3,6 +3,7 @@ import { project as models, tools as toolModels } from "../../wailsjs/go/models"
 import {
   UNBOUND,
   bindingSummary,
+  hasBinding,
   overrideAt,
   overriddenPaths,
   isBound,
@@ -13,6 +14,7 @@ import {
   withKube,
 } from "./kube";
 import type { Binding, Tool } from "./kube";
+import type { Project } from "./projects";
 
 function binding(over: Partial<Binding> = {}): Binding {
   return models.Binding.createFrom({ ...UNBOUND, ...over });
@@ -170,5 +172,47 @@ describe("what the UI says about a missing tool", () => {
     expect(toolProblem(tool({ name: "kustomize", found: false, problem: "not found" }))).toBe(
       "not found",
     );
+  });
+});
+
+/**
+ * Whether the tree offers the pipeline on a row (#11).
+ *
+ * It is an affordance test rather than a resolution: a project bound only on
+ * `prod/` must still offer Apply, and asking the SELECTION's resolved binding —
+ * which is what the panel shows — would hide it whenever the file on screen sat
+ * somewhere unbound.
+ */
+describe("whether a project is pointed at a cluster at all", () => {
+  const withKubeOf = (kube: Record<string, unknown>): Project =>
+    models.Project.createFrom({
+      name: "infra",
+      path: "/w/infra",
+      displayName: "",
+      color: "",
+      kube: { context: "", namespace: "", protected: false, serverSide: false, scopes: null, ...kube },
+      helm: { defaultValues: [] },
+    });
+
+  it("says no for no project at all", () => {
+    expect(hasBinding(null)).toBe(false);
+  });
+
+  it("says no for a project nobody has bound", () => {
+    expect(hasBinding(withKubeOf({}))).toBe(false);
+  });
+
+  it("says yes for a project default", () => {
+    expect(hasBinding(withKubeOf({ context: "dev-cluster" }))).toBe(true);
+  });
+
+  // The case the selection's binding would get wrong: nothing at the root, and
+  // one folder pointed somewhere.
+  it("says yes for a project bound only on a folder", () => {
+    expect(
+      hasBinding(
+        withKubeOf({ scopes: [{ path: "prod", context: "prod-us-west", namespace: "platform" }] }),
+      ),
+    ).toBe(true);
   });
 });

@@ -1,9 +1,14 @@
 import {
   BindFolder,
+  KubeApply,
   KubeBinding,
   KubeCheck,
   KubeContexts,
+  KubeDelete,
+  KubeDeletePreview,
+  KubeDiff,
   KubeNamespaces,
+  KubeValidate,
   Tools,
   UnbindFolder,
 } from "../../wailsjs/go/app/App";
@@ -59,6 +64,26 @@ export interface Kube {
   unbindFolder: (name: string, path: string) => Promise<Project>;
   /** Which external binaries are installed, and at what version. */
   tools: () => Promise<Tool[]>;
+
+  // The diff → apply pipeline (#11, DESIGN.md §6.1). Every one of these takes
+  // the repository-relative path it acts on and nothing else about the target:
+  // which cluster it reaches is the backend's answer, resolved from the
+  // registry at the moment of the call. See internal/app/pipeline.go.
+
+  /** Step 1: `kubectl apply --dry-run=server`. A non-zero exit blocks. */
+  validate: (name: string, target: string) => Promise<CheckResult>;
+  /** Step 2: `kubectl diff`. Exit 0 is "no changes", 1 is "changes". */
+  diff: (name: string, target: string) => Promise<CheckResult>;
+  /**
+   * Step 4: the apply itself. `typed` is the context name from the confirm
+   * dialog, and the backend refuses a protected binding without it — passing
+   * "" for an unprotected one is the ordinary case, not a bypass.
+   */
+  apply: (name: string, target: string, typed: string) => Promise<CheckResult>;
+  /** The delete's preview: what would be removed, removing nothing. */
+  deletePreview: (name: string, target: string) => Promise<CheckResult>;
+  /** The delete itself, under the same confirmation an apply needs. */
+  remove: (name: string, target: string, typed: string) => Promise<CheckResult>;
 }
 
 /** The kube seam backed by the Wails bindings. */
@@ -71,6 +96,14 @@ export const wailsKube: Kube = {
     BindFolder(name, path, context, namespace, guarded),
   unbindFolder: (name, path) => UnbindFolder(name, path),
   tools: () => Tools(),
+  validate: (name, target) => KubeValidate(name, target),
+  diff: (name, target) => KubeDiff(name, target),
+  apply: (name, target, typed) => KubeApply(name, target, typed),
+  deletePreview: (name, target) => KubeDeletePreview(name, target),
+  // `remove` rather than `delete`, which is a reserved word: the seam is an
+  // object literal and a property named `delete` would read as the operator at
+  // every call site.
+  remove: (name, target, typed) => KubeDelete(name, target, typed),
 };
 
 /** A binding with nothing in it: what an unbound project shows. */
@@ -78,6 +111,7 @@ export const UNBOUND: Binding = {
   context: "",
   namespace: "",
   protected: false,
+  serverSide: false,
   scope: "",
 };
 
@@ -91,6 +125,27 @@ export const UNBOUND: Binding = {
  */
 export function isBound(binding: Binding): boolean {
   return binding.context !== "" && binding.namespace !== "";
+}
+
+/**
+ * Whether a project has any Kubernetes binding at all — a default, or a folder
+ * override somewhere in its tree.
+ *
+ * It is what decides whether the tree offers the pipeline on a row (#11), and
+ * it is deliberately NOT a resolution. `isBound` above answers about one
+ * binding the backend resolved; this answers "has the user pointed this
+ * repository at a cluster anywhere", which is the question an affordance
+ * should ask. Using the selection's resolved binding for it would hide Apply on
+ * a bound `prod/` folder whenever the file on screen happened to be somewhere
+ * unbound — and nothing here targets anything, so the rule against the frontend
+ * working out which cluster a path is aimed at is not in play: what a run
+ * actually reaches is resolved by the backend on the call itself.
+ */
+export function hasBinding(project: Project | null): boolean {
+  if (project === null) {
+    return false;
+  }
+  return project.kube.context !== "" || (project.kube.scopes ?? []).length > 0;
 }
 
 /** A binding as one line: "prod-us-west / api", or the unbound prompt. */
@@ -127,13 +182,16 @@ export function settingsWithKube(project: Project, kube: project.Kube): Settings
  */
 export function withKube(
   project: Project,
-  patch: Partial<Pick<project.Kube, "context" | "namespace" | "protected" | "scopes">>,
+  patch: Partial<
+    Pick<project.Kube, "context" | "namespace" | "protected" | "serverSide" | "scopes">
+  >,
 ): project.Kube {
   const current = project.kube;
   return models.Kube.createFrom({
     context: patch.context ?? current.context,
     namespace: patch.namespace ?? current.namespace,
     protected: patch.protected ?? current.protected,
+    serverSide: patch.serverSide ?? current.serverSide,
     scopes: patch.scopes ?? current.scopes ?? [],
   });
 }

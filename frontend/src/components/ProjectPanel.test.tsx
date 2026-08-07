@@ -10,6 +10,7 @@ import {
 import { ProjectPanel } from "./ProjectPanel";
 import { UNBOUND } from "../lib/kube";
 import type { Binding, CheckResult, Kube, Tool } from "../lib/kube";
+import type { RunEntry } from "../lib/pipeline";
 import type { Project } from "../lib/projects";
 import type { KubeController } from "../lib/useKube";
 
@@ -59,6 +60,14 @@ function seam(over: Partial<Kube> = {}): Kube {
     bindFolder: () => Promise.reject(new Error("not used here")),
     unbindFolder: () => Promise.reject(new Error("not used here")),
     tools: () => Promise.resolve([]),
+    // The pipeline (#11) is not this file's subject; a test that needs it
+    // overrides these. Rejecting rather than resolving keeps an accidental
+    // reliance on them visible.
+    validate: () => Promise.reject(new Error("not used here")),
+    diff: () => Promise.reject(new Error("not used here")),
+    apply: () => Promise.reject(new Error("not used here")),
+    deletePreview: () => Promise.reject(new Error("not used here")),
+    remove: () => Promise.reject(new Error("not used here")),
     ...over,
   };
 }
@@ -70,9 +79,12 @@ function open(over: {
   scope?: string;
   onDefault?: Write;
   onOverride?: Write;
+  onServerSide?: (serverSide: boolean) => Promise<void>;
+  runs?: readonly RunEntry[];
 } = {}) {
   const onDefault: Write = over.onDefault ?? vi.fn(() => Promise.resolve());
   const onOverride: Write = over.onOverride ?? vi.fn(() => Promise.resolve());
+  const onServerSide = over.onServerSide ?? vi.fn(() => Promise.resolve());
   const view = render(
     <ProjectPanel
       project={over.project ?? project()}
@@ -81,9 +93,11 @@ function open(over: {
       scope={over.scope ?? ""}
       onDefault={onDefault}
       onOverride={onOverride}
+      onServerSide={onServerSide}
+      runs={over.runs ?? []}
     />,
   );
-  return { ...view, onDefault, onOverride };
+  return { ...view, onDefault, onOverride, onServerSide };
 }
 
 type Write = Mock<(context: string, namespace: string, guarded: boolean) => Promise<void>>;
@@ -366,7 +380,7 @@ describe("the Kubernetes section", () => {
   it("writes the protected toggle as soon as it moves", async () => {
     const { onDefault } = open({ project: project({ context: "prod", namespace: "default" }) });
 
-    fireEvent.click(within(kubeSection()).getByRole("checkbox"));
+    fireEvent.click(within(kubeSection()).getByRole("checkbox", { name: "Protected" }));
 
     await waitFor(() => {
       expect(onDefault).toHaveBeenCalledWith("prod", "default", true);
@@ -574,3 +588,47 @@ function tool(over: Partial<Tool> = {}): Tool {
     ...over,
   });
 }
+
+/**
+ * Server-side apply (#11, DESIGN.md §6.1).
+ *
+ * It sits in the project section beside Protected because it is the same kind
+ * of setting — one switch that changes how every invocation in the repository
+ * is made — and it has no per-folder counterpart, which is what the Selection
+ * section below it is for.
+ */
+describe("server-side apply", () => {
+  it("shows what the project has stored", () => {
+    open({ project: project({ context: "prod", serverSide: true }) });
+
+    const toggle = within(kubeSection()).getByRole("checkbox", {
+      name: "Server-side apply",
+    }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("writes the change without a save button, the way every control here does", async () => {
+    const { onServerSide } = open({ project: project({ context: "prod" }) });
+
+    fireEvent.click(
+      within(kubeSection()).getByRole("checkbox", { name: "Server-side apply" }),
+    );
+
+    await waitFor(() => {
+      expect(onServerSide).toHaveBeenCalledWith(true);
+    });
+  });
+
+  // A repository whose `dev/` tree applied one way and whose `prod/` tree
+  // applied the other would carry two field-manager histories for the same
+  // objects, so there is deliberately no folder-level control for it.
+  it("is offered nowhere but the project", () => {
+    open({ project: project({ context: "prod" }), scope: "prod/api" });
+
+    expect(
+      within(screen.getByLabelText("Selection")).queryByRole("checkbox", {
+        name: "Server-side apply",
+      }),
+    ).toBeNull();
+  });
+});
