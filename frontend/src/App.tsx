@@ -29,6 +29,7 @@ import { useFileTree } from "./lib/useFileTree";
 import { useGitOps } from "./lib/useGitOps";
 import { useGitStatus } from "./lib/useGitStatus";
 import { useTerminals } from "./lib/useTerminals";
+import { Breadcrumb } from "./components/Breadcrumb";
 import { EditorPane } from "./components/EditorPane";
 import { EditorTabs } from "./components/EditorTabs";
 
@@ -204,7 +205,12 @@ export default function App({
           gitOps={gitOps}
           onOpenFile={handleOpenFile}
           editor={
-            <Editor project={active} editors={editors} appearance={appearance} />
+            <Editor
+              project={active}
+              editors={editors}
+              appearance={appearance}
+              onReveal={tree.reveal}
+            />
           }
           terminals={
             <Terminals
@@ -287,6 +293,8 @@ interface EditorProps {
   readonly project: Project;
   readonly editors: ReturnType<typeof useEditorTabs>;
   readonly appearance: Appearance;
+  /** What a breadcrumb segment opens in the tree (#43). */
+  onReveal: (dir: string) => void;
 }
 
 /**
@@ -297,7 +305,11 @@ interface EditorProps {
  * unmounted on a project switch would drop its CodeMirror view, and with it
  * the undo history behind whatever unsaved work the tab is holding.
  */
-function Editor({ project, editors, appearance }: EditorProps) {
+function Editor({ project, editors, appearance, onReveal }: EditorProps) {
+  // The strip's own tabs, not every project's: the breadcrumb describes what
+  // is on screen, and `activeKey` is per project.
+  const active = editors.visible.find((tab) => tab.key === editors.activeKey) ?? null;
+
   return (
     <>
       <EditorTabs
@@ -310,6 +322,8 @@ function Editor({ project, editors, appearance }: EditorProps) {
           editors.setMode(key, preview ? "preview" : "edit");
         }}
       />
+
+      <Breadcrumb tab={active} onReveal={onReveal} />
 
       <div className="editor-panes">
         {editors.tabs.map((tab) => (

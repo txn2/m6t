@@ -1,8 +1,17 @@
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeState } from "../lib/tree";
-import { ROOT, expand, initialTree, withListing, withManifests } from "../lib/tree";
+import {
+  ROOT,
+  expand,
+  initialTree,
+  select,
+  toggleChangedOnly,
+  withListing,
+  withManifests,
+} from "../lib/tree";
 import type { FileStatus, Status } from "../lib/git";
 import { ADDED, DELETED, MODIFIED, UNTRACKED, emptyStatus } from "../lib/git";
 import { FileTree } from "./FileTree";
@@ -32,11 +41,48 @@ function renderTree(props: {
   readonly onOpenFile?: (path: string) => void;
 }) {
   return render(
-    <FileTree
+    <Harness
       tree={props.tree}
       status={props.status ?? emptyStatus()}
       onOpenFile={props.onOpenFile ?? vi.fn()}
     />,
+  );
+}
+
+/**
+ * The tree, with changed-only mode wired to the real reducer.
+ *
+ * That mode moved out of the component and into `TreeState` (#43) so a reveal
+ * can clear it, which means the toggle now asks the controller to change
+ * state rather than flipping a local flag. A spy would swallow the request and
+ * leave every test below asserting against a tree still in the mode it
+ * started in — so this holds the state the hook would hold, and applies the
+ * same pure transition the hook applies. Everything else stays the spy the
+ * test passed in.
+ */
+function Harness({
+  tree,
+  status,
+  onOpenFile,
+}: {
+  readonly tree: FileTreeController;
+  readonly status: Status;
+  readonly onOpenFile: (path: string) => void;
+}) {
+  const [state, setState] = useState(tree.state);
+
+  return (
+    <FileTree
+      tree={{
+        ...tree,
+        state,
+        toggleChangedOnly: () => {
+          setState(toggleChangedOnly);
+        },
+      }}
+      status={status}
+      onOpenFile={onOpenFile}
+    />
   );
 }
 
@@ -76,7 +122,9 @@ function fakeController(
     expand: vi.fn(),
     collapse: vi.fn(),
     select: vi.fn(),
+    reveal: vi.fn(),
     toggleHidden: vi.fn(),
+    toggleChangedOnly: vi.fn(),
     createEntry: vi.fn().mockResolvedValue(null),
     renameEntry: vi.fn().mockResolvedValue(null),
     deleteEntry: vi.fn().mockResolvedValue(null),
@@ -509,6 +557,69 @@ describe("git in the tree (#8, #40)", () => {
 
     expect(screen.getByText("deploy.yaml")).toBeDefined();
     expect(screen.getByRole("button", { name: "actions for deploy.yaml" })).toBeDefined();
+  });
+});
+
+describe("bringing the selected row on screen (#43)", () => {
+  /** Every element `scrollIntoView` was called on, in order. */
+  function watchScrolling(): Element[] {
+    const scrolled: Element[] = [];
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+      this: Element,
+    ) {
+      scrolled.push(this);
+    });
+    return scrolled;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A reveal from the breadcrumb expands its way to a row that can be well
+  // past the bottom of a scrolled tree; a highlight nobody can see is not a
+  // reveal.
+  it("scrolls the row a reveal selected into view", () => {
+    const scrolled = watchScrolling();
+    const state = select(loadedManifests(loadedRoot()), "manifests");
+
+    renderTree({ tree: fakeController(state) });
+
+    expect(scrolled).toEqual([screen.getByRole("treeitem", { name: /manifests/ })]);
+  });
+
+  it("scrolls nothing when the tree has no selection", () => {
+    const scrolled = watchScrolling();
+
+    renderTree({ tree: fakeController(loadedRoot()) });
+
+    expect(scrolled).toEqual([]);
+  });
+
+  // The reveal expands a directory the tree may never have listed, so the row
+  // does not exist on the render the selection arrives on. Giving up there
+  // would leave the reveal off screen for every directory that had to be
+  // fetched — which is exactly the case it is most needed in.
+  it("scrolls once the row the selection names finally appears", () => {
+    const scrolled = watchScrolling();
+    const view = render(
+      <FileTree
+        tree={fakeController(select(loadedRoot(), "manifests/prod.yaml"))}
+        status={emptyStatus()}
+        onOpenFile={vi.fn()}
+      />,
+    );
+    expect(scrolled).toEqual([]);
+
+    view.rerender(
+      <FileTree
+        tree={fakeController(select(loadedManifests(loadedRoot()), "manifests/prod.yaml"))}
+        status={emptyStatus()}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    expect(scrolled).toEqual([screen.getByRole("treeitem", { name: /prod\.yaml/ })]);
   });
 });
 

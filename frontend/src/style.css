@@ -1069,6 +1069,60 @@ button:hover {
   border-color: var(--m6t-accent);
 }
 
+/* --- breadcrumb (#43) --------------------------------------------------- */
+
+/* One row token tall, like the tree header and the status bar: this is chrome
+   above the content, and it must not take a line of the editor's height with
+   it. `flex: none` because the editor column's other child is the pane, which
+   is the one thing that should absorb the space. */
+.breadcrumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3);
+  border-bottom: 1px solid var(--m6t-border);
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+  /* A deep path is the normal case, not the exception. Scrolling keeps the
+     leaf reachable without wrapping the row to a second line and moving the
+     editor's top edge. */
+  overflow-x: auto;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.breadcrumb__crumb {
+  height: 100%;
+  padding: 0 var(--m6t-space-1);
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.breadcrumb__crumb:hover,
+.breadcrumb__crumb:focus-visible {
+  color: var(--m6t-fg);
+}
+
+/* The file the editor is showing: the one segment that is not a link, so it
+   is the one segment drawn in the foreground colour. */
+.breadcrumb__leaf {
+  padding: 0 var(--m6t-space-1);
+  color: var(--m6t-fg);
+}
+
+/* Smaller than a chrome icon: a separator between two words should read as
+   punctuation, not as a control. */
+.breadcrumb__separator {
+  width: var(--m6t-space-3);
+  height: var(--m6t-space-3);
+  color: var(--m6t-muted);
+}
+
 /* =============================================================================
    Markdown preview
    =============================================================================

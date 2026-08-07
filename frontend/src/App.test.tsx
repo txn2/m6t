@@ -5,11 +5,14 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { detachedBuild } from "./lib/build";
-import { project as models } from "../wailsjs/go/models";
+import { project as models, watch } from "../wailsjs/go/models";
+import type { Directory } from "./lib/directory";
+import type { Files } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
 import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
@@ -970,5 +973,111 @@ describe("the git operations (#9)", () => {
         "error: Your local changes would be overwritten",
       );
     });
+  });
+});
+
+describe("the breadcrumb above the editor (#43)", () => {
+  /** A project with one file three levels down, listed on demand. */
+  const listings: Record<string, { name: string; isDir: boolean }[]> = {
+    "": [{ name: "manifests", isDir: true }],
+    manifests: [{ name: "prod", isDir: true }],
+    "manifests/prod": [{ name: "ingress.yaml", isDir: false }],
+  };
+
+  function stubDirectory(): Directory {
+    return {
+      list: (_root, relPath) => Promise.resolve(listings[relPath] ?? []),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  function stubFiles(): Files {
+    return {
+      read: () =>
+        Promise.resolve(
+          watch.FileContent.createFrom({
+            content: "kind: Ingress\n",
+            crlf: false,
+            mixedEol: false,
+            readOnly: false,
+            size: 14,
+          }),
+        ),
+      write: () => Promise.resolve(),
+    };
+  }
+
+  /** Opens `manifests/prod/ingress.yaml` from the tree, the only way in. */
+  async function openTheFile() {
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          directory: stubDirectory(),
+          files: stubFiles(),
+          git: stubGit(),
+        }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("treeitem", { name: /manifests/ }));
+    fireEvent.click(await screen.findByRole("treeitem", { name: /prod$/ }));
+    fireEvent.click(await screen.findByRole("treeitem", { name: /ingress\.yaml/ }));
+    return screen.findByRole("navigation", { name: "path of ingress.yaml" });
+  }
+
+  /** The breadcrumb's segments, in order. */
+  function segments(bar: HTMLElement): string[] {
+    return [...bar.querySelectorAll("button, .breadcrumb__leaf")].map(
+      (el) => el.textContent ?? "",
+    );
+  }
+
+  it("shows the open file's path from the project root", async () => {
+    const bar = await openTheFile();
+
+    expect(segments(bar)).toEqual(["manifests", "prod", "ingress.yaml"]);
+  });
+
+  it("re-opens a directory in the tree when its segment is clicked", async () => {
+    const bar = await openTheFile();
+    // Collapse the whole chain, so the click has something to undo.
+    fireEvent.click(screen.getByRole("treeitem", { name: /manifests/ }));
+    expect(screen.queryByRole("treeitem", { name: /prod$/ })).toBeNull();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "prod" }));
+
+    expect(screen.getByRole("treeitem", { name: /prod$/ })).toBeDefined();
+    expect(
+      screen.getByRole("treeitem", { name: /ingress\.yaml/ }).getAttribute("aria-selected"),
+    ).toBe("false");
+    // The directory the segment named is the one the tree now points at.
+    expect(
+      screen.getByRole("treeitem", { name: /prod$/ }).getAttribute("aria-selected"),
+    ).toBe("true");
+  });
+
+  // Changed-only mode is a filter over the rows, and a directory with nothing
+  // changed under it has no row in that list to reveal.
+  it("leaves changed-only mode to show a directory it was filtering out", async () => {
+    const bar = await openTheFile();
+    fireEvent.click(screen.getByRole("button", { name: "show changed files only" }));
+    expect(screen.getByText("Nothing has changed in this project.")).toBeDefined();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "manifests" }));
+
+    expect(screen.getByRole("button", { name: "show changed files only" })).toBeDefined();
+    expect(screen.getByRole("treeitem", { name: /manifests/ })).toBeDefined();
+  });
+
+  it("says nothing when no file is open", async () => {
+    await renderWith(["infra"]);
+
+    // By name, because the project strip is a landmark of its own.
+    expect(screen.queryByRole("navigation", { name: /^path of/ })).toBeNull();
   });
 });
