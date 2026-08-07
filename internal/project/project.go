@@ -17,11 +17,18 @@ import "strings"
 //
 // The binding is per project and explicit: m6t never falls back to the
 // kubeconfig current-context, because "whatever kubectl would have done" is how
-// a manifest lands in the wrong cluster. The fields exist now and the UI that
-// sets them arrives with the kube exec service (#10); until then a project
-// carries a zero binding and the cluster panel stays disabled.
+// a manifest lands in the wrong cluster.
+//
+// The three scalar fields are the project's default, and Scopes overrides them
+// per subtree. That split is the shape of a real manifest repository: a
+// directory per cluster, a directory per namespace beneath it, and one project
+// that has to target both without the user rebinding it between applies. See
+// Scope and Kube.Resolve in binding.go — nothing outside this package reads
+// these fields directly, because reading Context for a path that a scope
+// overrides is exactly how the wrong cluster gets targeted.
 type Kube struct {
-	// Context is the kubeconfig context name. Empty means unbound.
+	// Context is the kubeconfig context name for the project as a whole.
+	// Empty means unbound.
 	Context string `yaml:"context,omitempty" json:"context"`
 
 	// Namespace is the default namespace for actions in this project.
@@ -29,6 +36,9 @@ type Kube struct {
 
 	// Protected requires typed confirmation on apply, delete and rollback.
 	Protected bool `yaml:"protected,omitempty" json:"protected"`
+
+	// Scopes are per-subtree overrides, deepest match winning per field.
+	Scopes []Scope `yaml:"scopes,omitempty" json:"scopes"`
 }
 
 // Helm is a project's Helm defaults.
@@ -77,6 +87,17 @@ type Project struct {
 	// tilde-abbreviated when it lies under the user's home directory, so a
 	// projects.yaml stays readable and survives a home directory that moves.
 	Path string `yaml:"path" json:"path"`
+
+	// ShortPath is Path as the file holds it: tilde-abbreviated when the
+	// checkout lies under the user's home directory.
+	//
+	// It is never stored — `yaml:"-"` — because it is derived from Path and a
+	// second copy in the file would be one more thing that can disagree with
+	// it. It exists because the two audiences want opposite forms: every
+	// caller acting on the repository needs the absolute path, and the one
+	// place that shows it to a user wants the short one, and a frontend has no
+	// way to work out where home is.
+	ShortPath string `yaml:"-" json:"shortPath"`
 
 	DisplayName string `yaml:"displayName,omitempty" json:"displayName"`
 	Color       string `yaml:"color,omitempty" json:"color"`

@@ -6,6 +6,10 @@ export function AddProject(arg1, arg2) {
   return window['go']['app']['App']['AddProject'](arg1, arg2);
 }
 
+export function BindFolder(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['BindFolder'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function ChooseProjectDirectory() {
   return window['go']['app']['App']['ChooseProjectDirectory']();
 }
@@ -44,6 +48,22 @@ export function GitRemotes(arg1) {
 
 export function GitStatus(arg1) {
   return window['go']['app']['App']['GitStatus'](arg1);
+}
+
+export function KubeBinding(arg1, arg2) {
+  return window['go']['app']['App']['KubeBinding'](arg1, arg2);
+}
+
+export function KubeCheck(arg1, arg2) {
+  return window['go']['app']['App']['KubeCheck'](arg1, arg2);
+}
+
+export function KubeContexts() {
+  return window['go']['app']['App']['KubeContexts']();
+}
+
+export function KubeNamespaces(arg1) {
+  return window['go']['app']['App']['KubeNamespaces'](arg1);
 }
 
 export function ListDirectory(arg1, arg2) {
@@ -88,6 +108,14 @@ export function SessionState() {
 
 export function StreamEndpoint() {
   return window['go']['app']['App']['StreamEndpoint']();
+}
+
+export function Tools() {
+  return window['go']['app']['App']['Tools']();
+}
+
+export function UnbindFolder(arg1, arg2) {
+  return window['go']['app']['App']['UnbindFolder'](arg1, arg2);
 }
 
 export function UpdateProject(arg1, arg2) {

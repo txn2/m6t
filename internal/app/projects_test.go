@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -132,7 +133,7 @@ func TestUpdateProjectPersistsSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateProject: %v", err)
 	}
-	if updated.Kube != want.Kube {
+	if !reflect.DeepEqual(updated.Kube, want.Kube) {
 		t.Errorf("returned kube = %+v, want %+v", updated.Kube, want.Kube)
 	}
 
@@ -140,7 +141,7 @@ func TestUpdateProjectPersistsSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Projects: %v", err)
 	}
-	if len(listed) != 1 || listed[0].Kube != want.Kube {
+	if len(listed) != 1 || !reflect.DeepEqual(listed[0].Kube, want.Kube) {
 		t.Errorf("Projects after update = %+v, want the new binding", listed)
 	}
 }

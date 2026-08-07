@@ -21,16 +21,24 @@ export interface RowViewProps {
   readonly isManifest: boolean;
   /** This row's git marker, or null when git reports nothing for it. */
   readonly badge: string | null;
+  /** Whether this directory carries a kube override of its own (#10). It is
+   * the folder's own binding, not an inherited one: marking every directory
+   * under `prod/` would colour the whole tree and say nothing about where the
+   * rule lives. */
+  readonly overridden: boolean;
   readonly focused: boolean;
   readonly selected: boolean;
   readonly expanded: boolean;
-  readonly menuOpen: boolean;
+  /** Where the row's menu is open, or null when it is closed. It carries the
+   * point it was opened at, which is where it draws. */
+  readonly menuAt: { readonly x: number; readonly y: number } | null;
   readonly renaming: boolean;
   readonly deleting: boolean;
   readonly error: string | null;
   readonly rowRef: (el: HTMLDivElement | null) => void;
   onActivate: () => void;
-  onMenu: () => void;
+  /** Opens this row's menu at the point the gesture happened. */
+  onMenu: (at: { x: number; y: number }) => void;
   onCloseMenu: () => void;
   onNewFile: () => void;
   onNewFolder: () => void;
@@ -40,16 +48,19 @@ export interface RowViewProps {
   onStartDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  /** Opens the Kubernetes binding dialog for this directory (#10). */
+  onBind: () => void;
 }
 
 export function RowView({
   row,
   isManifest,
   badge,
+  overridden,
   focused,
   selected,
   expanded,
-  menuOpen,
+  menuAt,
   renaming,
   deleting,
   error,
@@ -65,6 +76,7 @@ export function RowView({
   onStartDelete,
   onConfirmDelete,
   onCancelDelete,
+  onBind,
 }: RowViewProps) {
   if (deleting) {
     return (
@@ -110,11 +122,12 @@ export function RowView({
       aria-level={row.depth + 1}
       tabIndex={focused ? 0 : -1}
       className={`tree__row${selected ? " tree__row--selected" : ""}`}
+      data-bound={overridden || undefined}
       style={{ "--depth": row.depth } as CSSProperties}
       onClick={onActivate}
       onContextMenu={(event) => {
         event.preventDefault();
-        onMenu();
+        onMenu({ x: event.clientX, y: event.clientY });
       }}
     >
       <RowIcons row={row} expanded={expanded} isManifest={isManifest} />
@@ -124,6 +137,55 @@ export function RowView({
       <span className="tree__name" data-tone={badgeTone(badge) ?? undefined}>
         {row.name}
       </span>
+      <RowMarkers badge={badge} overridden={overridden} />
+      <button
+        type="button"
+        className="tree__menu-button"
+        aria-label={`actions for ${row.name}`}
+        onClick={(event) => {
+          // The button's own corner, so a menu opened from it hangs off it
+          // rather than from wherever the pointer happened to be.
+          const box = event.currentTarget.getBoundingClientRect();
+          event.stopPropagation();
+          onMenu({ x: box.left, y: box.bottom });
+        }}
+      >
+        <UiIcon name="menu" />
+      </button>
+      {menuAt !== null && (
+        <RowMenu
+          at={menuAt}
+          isDir={row.isDir}
+          onClose={onCloseMenu}
+          onNewFile={onNewFile}
+          onNewFolder={onNewFolder}
+          onRename={onStartRename}
+          onDelete={onStartDelete}
+          onBind={onBind}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A row's trailing marks: what git says about it, and whether it carries a
+ * kube binding of its own (#10).
+ *
+ * They are one component rather than two conditionals inline because the row
+ * has a branch budget and these are the two cheapest to move — neither depends
+ * on any of the row's modes (renaming, deleting, menu-open), so nothing here
+ * has to know which one the row is in.
+ */
+function RowMarkers({
+  badge,
+  overridden,
+}: {
+  readonly badge: string | null;
+  readonly overridden: boolean;
+}) {
+  return (
+    <>
       {badge !== null && (
         // data-badge rather than a modifier class: a badge can be `?` or `•`,
         // neither of which is usable in a class-selector name.
@@ -131,28 +193,15 @@ export function RowView({
           {badge}
         </span>
       )}
-      <button
-        type="button"
-        className="tree__menu-button"
-        aria-label={`actions for ${row.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onMenu();
-        }}
-      >
-        <UiIcon name="menu" />
-      </button>
-      {menuOpen && (
-        <RowMenu
-          isDir={row.isDir}
-          onClose={onCloseMenu}
-          onNewFile={onNewFile}
-          onNewFolder={onNewFolder}
-          onRename={onStartRename}
-          onDelete={onStartDelete}
-        />
+      {overridden && (
+        <span
+          className="tree__bound"
+          title="this folder is bound to its own context or namespace"
+        >
+          <UiIcon name="cluster" />
+        </span>
       )}
-    </div>
+    </>
   );
 }
 
@@ -189,12 +238,15 @@ function RowIcons({ row, expanded, isManifest }: RowIconsProps) {
 }
 
 interface RowMenuProps {
+  /** Where the menu was summoned, in viewport coordinates. */
+  readonly at: { readonly x: number; readonly y: number };
   readonly isDir: boolean;
   onClose: () => void;
   onNewFile: () => void;
   onNewFolder: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onBind: () => void;
 }
 
 /**
@@ -202,10 +254,24 @@ interface RowMenuProps {
  *
  * It carries no note about what a later ticket will add. A menu that lists
  * what it cannot do is a menu the user has to read past every time, and the
- * git and kube entries (#8, #10, DESIGN.md §6, §7) will announce themselves by
- * appearing here when they work.
+ * git entries (#8, DESIGN.md §7) will announce themselves by appearing here
+ * when they work.
+ *
+ * Kubernetes is a directory's entry alone (#10). A binding covers a subtree,
+ * and offering it on a file would invite a per-file override the resolution
+ * rules have no way to express — a scope is a folder, and the menu says so by
+ * only appearing on one.
  */
-function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }: RowMenuProps) {
+function RowMenu({
+  at,
+  isDir,
+  onClose,
+  onNewFile,
+  onNewFolder,
+  onRename,
+  onDelete,
+  onBind,
+}: RowMenuProps) {
   useEffect(() => {
     const closeOnOutsideClick = () => { onClose(); };
     window.addEventListener("click", closeOnOutsideClick);
@@ -213,9 +279,25 @@ function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }:
   }, [onClose]);
 
   return (
-    <div className="tree__menu" role="menu" onClick={(event) => { event.stopPropagation(); }}>
+    <div
+      className="tree__menu"
+      role="menu"
+      // Drawn where the gesture happened rather than where the row is. The menu
+      // used to be `position: fixed` with no coordinates at all, which put it
+      // at whatever static position the row's flex line left it — hundreds of
+      // pixels from the pointer, and wrong again the moment the tree scrolled.
+      style={within(at)}
+      onClick={(event) => { event.stopPropagation(); }}
+    >
       {isDir && (
         <>
+          {/* Kubernetes first: it is the reason to open this menu on a
+              directory, and the file operations below it are the ones every
+              tree has. */}
+          <button type="button" role="menuitem" onClick={onBind}>
+            <FileIcon kind="kubernetes" />
+            Kubernetes
+          </button>
           <button type="button" role="menuitem" onClick={onNewFile}>
             New File
           </button>
@@ -232,4 +314,26 @@ function RowMenu({ isDir, onClose, onNewFile, onNewFolder, onRename, onDelete }:
       </button>
     </div>
   );
+}
+
+/** How wide and tall the menu is assumed to be when holding it on screen.
+ * Measuring would need a layout pass and a second render; the menu has a fixed
+ * min-width and a known item count, so an estimate that errs large is enough to
+ * keep it off the window edges. */
+const MENU_WIDTH = 176;
+const MENU_HEIGHT = 200;
+
+/** The menu's position, held inside the window.
+ *
+ * Without this a right-click near the bottom of a tall tree opens a menu whose
+ * last item is below the fold, and the item most likely to be cut off is
+ * Delete. jsdom reports zero for both dimensions, which reads as "unmeasured"
+ * and leaves the point alone. */
+function within(at: { readonly x: number; readonly y: number }): CSSProperties {
+  const width = typeof window === "undefined" ? 0 : window.innerWidth;
+  const height = typeof window === "undefined" ? 0 : window.innerHeight;
+  return {
+    left: width > 0 ? Math.min(at.x, Math.max(0, width - MENU_WIDTH)) : at.x,
+    top: height > 0 ? Math.min(at.y, Math.max(0, height - MENU_HEIGHT)) : at.y,
+  };
 }

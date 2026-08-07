@@ -194,6 +194,16 @@ func abbreviate(path string) string {
 // The reverse case is deliberately not handled: a backslash is a legal
 // character in a Unix filename, so translating one would corrupt a real path to
 // rescue a config that was hand-written for the wrong platform.
+// resolved returns the project with both path forms filled in: Path absolute
+// for the callers that act on the checkout, ShortPath tilde-abbreviated for the
+// one place that shows it. Every operation that hands a Project outward goes
+// through it, so the two can never be set apart.
+func resolved(p Project) Project {
+	p.ShortPath = abbreviate(expand(p.Path))
+	p.Path = expand(p.Path)
+	return p
+}
+
 func expand(path string) string {
 	if path == homeMarker {
 		return homeDirOr(path)

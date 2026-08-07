@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -296,7 +297,7 @@ func TestUpdateReplacesSettingsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.Kube != want.Kube {
+	if !reflect.DeepEqual(updated.Kube, want.Kube) {
 		t.Errorf("returned kube = %+v, want %+v", updated.Kube, want.Kube)
 	}
 	if updated.Path != resolved {
@@ -307,7 +308,7 @@ func TestUpdateReplacesSettingsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Settings after reload: %v", err)
 	}
-	if reloaded.Kube != want.Kube {
+	if !reflect.DeepEqual(reloaded.Kube, want.Kube) {
 		t.Errorf("kube binding after reload = %+v, want %+v", reloaded.Kube, want.Kube)
 	}
 	if strings.Join(reloaded.Helm.DefaultValues, ",") != "values.yaml" {
@@ -718,5 +719,304 @@ func TestRequireRepositoryReportsAnUnreadablePath(t *testing.T) {
 
 	if err := requireRepository(missing); err == nil {
 		t.Error("requireRepository on a missing path succeeded, want an error")
+	}
+}
+
+// A settings write carrying a scope that does not name a subtree of the
+// repository is refused whole, at the registry rather than only at the binding
+// layer. Storing it with the bad rule dropped would leave the user believing a
+// folder is bound to something it is not.
+func TestUpdateRefusesAScopeOutsideTheRepositoryAndWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repo, _ := fakeRepo(t, "infra")
+	r := New(dir)
+	if _, err := r.Add(repo, ""); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	_, err := r.Update("infra", Settings{Kube: Kube{
+		Context:   "prod-us-west",
+		Namespace: "default",
+		Scopes:    []Scope{{Path: "../elsewhere", Context: "somewhere-else"}},
+	}})
+	if !errors.Is(err, ErrInvalidScope) {
+		t.Fatalf("Update with an escaping scope error = %v, want ErrInvalidScope", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if stored.Kube.Context != "" || stored.Kube.Scopes != nil {
+		t.Errorf("stored binding after a refused update = %+v, want the project still unbound", stored.Kube)
+	}
+}
+
+// The scopes that survive are the normalized ones, and they round-trip through
+// projects.yaml as written: a binding the file disagrees with is a binding the
+// next launch gets wrong.
+func TestUpdateStoresNormalizedScopes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repo, _ := fakeRepo(t, "infra")
+	r := New(dir)
+	if _, err := r.Add(repo, ""); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if _, err := r.Update("infra", Settings{Kube: Kube{
+		Context:   "prod-us-west",
+		Namespace: "default",
+		Scopes: []Scope{
+			{Path: " ./dev/ ", Context: "dev-cluster", Namespace: "dev"},
+			{Path: "prod/api", Namespace: "api", Protected: true},
+		},
+	}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings after reload: %v", err)
+	}
+	want := []Scope{
+		{Path: "dev", Context: "dev-cluster", Namespace: "dev"},
+		{Path: "prod/api", Namespace: "api", Protected: true},
+	}
+	if !reflect.DeepEqual(stored.Kube.Scopes, want) {
+		t.Errorf("scopes after reload = %+v, want %+v", stored.Kube.Scopes, want)
+	}
+
+	// And they resolve the way the layout says they should.
+	got := stored.Kube.Resolve("prod/api/deployment.yaml")
+	if got != (Binding{Context: "prod-us-west", Namespace: "api", Protected: true, Scope: "prod/api"}) {
+		t.Errorf("resolved binding after reload = %+v", got)
+	}
+}
+
+// boundRegistry registers a project carrying the dev/prod layout and returns
+// the registry it lives in.
+func boundRegistry(t *testing.T) (r *Registry, dir string) {
+	t.Helper()
+
+	dir = t.TempDir()
+	repo, _ := fakeRepo(t, "infra")
+	r = New(dir)
+	if _, err := r.Add(repo, ""); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := r.Update("infra", Settings{Kube: Kube{
+		Context:   "prod-us-west",
+		Namespace: "default",
+		Scopes:    []Scope{{Path: "dev", Context: "dev-cluster", Namespace: "dev"}},
+	}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	return r, dir
+}
+
+func TestBindScopeAddsAnOverrideAndLeavesTheRestAlone(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.BindScope("infra", Scope{Path: "prod/api", Namespace: "api", Protected: true}); err != nil {
+		t.Fatalf("BindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if len(stored.Kube.Scopes) != 2 {
+		t.Fatalf("scopes = %+v, want the existing one plus the new one", stored.Kube.Scopes)
+	}
+	if stored.Kube.Context != "prod-us-west" || stored.Kube.Namespace != "default" {
+		t.Errorf("project default changed to %+v", stored.Kube)
+	}
+	got := stored.Kube.Resolve("prod/api/x.yaml")
+	if got != (Binding{Context: "prod-us-west", Namespace: "api", Protected: true, Scope: "prod/api"}) {
+		t.Errorf("resolved = %+v", got)
+	}
+}
+
+// Binding a folder that already has an override replaces it. Two rules for one
+// subtree have no winner a user could predict, which is why validateScopes
+// refuses them — so the set has to be a replace rather than an append.
+func TestBindScopeReplacesAnExistingOverride(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.BindScope("infra", Scope{Path: "./dev/", Context: "dev2", Namespace: "sandbox"}); err != nil {
+		t.Fatalf("BindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	want := []Scope{{Path: "dev", Context: "dev2", Namespace: "sandbox"}}
+	if !reflect.DeepEqual(stored.Kube.Scopes, want) {
+		t.Errorf("scopes = %+v, want the one override replaced: %+v", stored.Kube.Scopes, want)
+	}
+}
+
+func TestBindScopeRefusesAPathOutsideTheRepository(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.BindScope("infra", Scope{Path: "../elsewhere", Context: "x"}); !errors.Is(err, ErrInvalidScope) {
+		t.Fatalf("BindScope with an escaping path error = %v, want ErrInvalidScope", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if len(stored.Kube.Scopes) != 1 {
+		t.Errorf("scopes after a refused bind = %+v, want the original one alone", stored.Kube.Scopes)
+	}
+}
+
+func TestUnbindScopeRemovesAnOverride(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.UnbindScope("infra", "dev"); err != nil {
+		t.Fatalf("UnbindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if stored.Kube.Scopes != nil {
+		t.Errorf("scopes = %+v, want none", stored.Kube.Scopes)
+	}
+	// And the folder is back to inheriting.
+	if got := stored.Kube.Resolve("dev/x.yaml"); got.Context != "prod-us-west" {
+		t.Errorf("resolved after unbind = %+v, want the project default", got)
+	}
+}
+
+// The dialog offers "remove" against what it last read. A folder someone
+// unbound in another window in the meantime has arrived where the user asked.
+func TestUnbindScopeIsSilentAboutAnOverrideThatIsNotThere(t *testing.T) {
+	t.Parallel()
+
+	r, _ := boundRegistry(t)
+
+	if _, err := r.UnbindScope("infra", "staging"); err != nil {
+		t.Errorf("UnbindScope on an unbound folder returned %v, want no error", err)
+	}
+}
+
+func TestScopeWritesReportAnUnknownProject(t *testing.T) {
+	t.Parallel()
+
+	r, _ := boundRegistry(t)
+
+	if _, err := r.BindScope("nothing", Scope{Path: "dev"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("BindScope on an unregistered project error = %v, want ErrNotFound", err)
+	}
+	if _, err := r.UnbindScope("nothing", "dev"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("UnbindScope on an unregistered project error = %v, want ErrNotFound", err)
+	}
+}
+
+// A form saved with nothing filled in says "inherit everything", which is what
+// having no override means. Storing it would leave the tree marking a folder as
+// bound while it resolved exactly as its parent does.
+func TestBindScopeWithNoOverridesRemovesInstead(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.BindScope("infra", Scope{Path: "dev"}); err != nil {
+		t.Fatalf("BindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if stored.Kube.Scopes != nil {
+		t.Errorf("scopes = %+v, want the override gone rather than emptied", stored.Kube.Scopes)
+	}
+}
+
+// The same on a folder that had none: nothing to remove, and nothing stored.
+func TestBindScopeWithNoOverridesStoresNothingNew(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.BindScope("infra", Scope{Path: "staging", Context: "  "}); err != nil {
+		t.Fatalf("BindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if len(stored.Kube.Scopes) != 1 || stored.Kube.Scopes[0].Path != "dev" {
+		t.Errorf("scopes = %+v, want only the one that was already there", stored.Kube.Scopes)
+	}
+}
+
+// Protection alone IS an override: a folder that only ratchets confirmation on
+// is the prod directory of a repository whose default is unprotected.
+func TestBindScopeKeepsAProtectionOnlyOverride(t *testing.T) {
+	t.Parallel()
+
+	r, dir := boundRegistry(t)
+
+	if _, err := r.BindScope("infra", Scope{Path: "prod", Protected: true}); err != nil {
+		t.Fatalf("BindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	got := stored.Kube.Resolve("prod/x.yaml")
+	want := Binding{Context: "prod-us-west", Namespace: "default", Protected: true, Scope: "prod"}
+	if got != want {
+		t.Errorf("resolved = %+v, want %+v", got, want)
+	}
+}
+
+// A folder can be bound before the project has any default at all: a user who
+// only cares about one directory should not have to bind the whole checkout to
+// say so.
+func TestBindScopeWorksOnAProjectWithNoDefault(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	repo, _ := fakeRepo(t, "infra")
+	r := New(dir)
+	if _, err := r.Add(repo, ""); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if _, err := r.BindScope("infra", Scope{Path: "dev", Context: "dev-cluster", Namespace: "dev"}); err != nil {
+		t.Fatalf("BindScope: %v", err)
+	}
+
+	stored, err := New(dir).Settings("infra")
+	if err != nil {
+		t.Fatalf("Settings: %v", err)
+	}
+	if got := stored.Kube.Resolve("dev/x.yaml"); !got.Bound() {
+		t.Errorf("dev resolves to %+v, want the folder's own binding", got)
+	}
+	if got := stored.Kube.Resolve("other/x.yaml"); got.Bound() {
+		t.Errorf("an unbound folder resolves to %+v, want unbound", got)
 	}
 }

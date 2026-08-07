@@ -11,6 +11,18 @@ import type { Files } from "./lib/files";
 import { wailsFiles } from "./lib/files";
 import type { Git, Status } from "./lib/git";
 import { wailsGit } from "./lib/git";
+import type { Kube } from "./lib/kube";
+import {
+  bindingSummary,
+  overriddenPaths,
+  scopeOf,
+  settingsWithKube,
+  wailsKube,
+  withKube,
+} from "./lib/kube";
+import { useKube } from "./lib/useKube";
+import { FolderDialog } from "./components/FolderBinding";
+import { ProjectPanel } from "./components/ProjectPanel";
 import type { Project, Registry } from "./lib/projects";
 import { findProject, projectLabel, wailsRegistry } from "./lib/projects";
 import { useProjects } from "./lib/useProjects";
@@ -58,6 +70,7 @@ export interface Backend {
   readonly files: Files;
   readonly git: Git;
   readonly session: SessionStore;
+  readonly kube: Kube;
 }
 
 /** Every seam backed by its generated Wails binding. */
@@ -67,6 +80,7 @@ export const wailsBackend: Backend = {
   files: wailsFiles,
   git: wailsGit,
   session: wailsSession,
+  kube: wailsKube,
 };
 
 export interface AppProps {
@@ -91,7 +105,10 @@ export default function App({
   endpoint = StreamEndpoint,
   backend,
 }: AppProps) {
-  const { registry, directory, files, git, session } = { ...wailsBackend, ...backend };
+  const { registry, directory, files, git, session, kube } = {
+    ...wailsBackend,
+    ...backend,
+  };
 
   const [build, setBuild] = useState<BuildStatus>(initialStatus);
   const [stream, setStream] = useState<Endpoint | null>(null);
@@ -177,6 +194,28 @@ export default function App({
   // one source for what the repository looks like (PROTOCOL.md §5, `git`).
   const gitOps = useGitOps(activePath, gitStatus.refresh, git);
 
+  // The binding follows what is on screen, not what the project defaults to.
+  // The active editor tab's path is already root-relative, and `scopeOf`
+  // reduces it to the folder a scope is written against — a file inherits from
+  // its directory, which is the whole of how a folder binding works.
+  const openTab =
+    editors.visible.find((tab) => tab.key === editors.activeKey) ?? null;
+  const selection = openTab === null ? "" : scopeOf(openTab.path);
+  const cluster = useKube(
+    { project: projects.activeName, rel: selection },
+    kube,
+  );
+
+  // The folder whose override is being edited, by repository-relative path, or
+  // null when no dialog is open. It belongs to the active project: the tree
+  // that opened it is the active project's, and a project switch closes it
+  // rather than leaving a dialog writing into a repository nobody is looking
+  // at.
+  const [bindingFolder, setBindingFolder] = useState<string | null>(null);
+  useEffect(() => {
+    setBindingFolder(null);
+  }, [projects.activeName]);
+
   // Declared after every hook it restores into, so that in any commit their
   // effects have run before its own: a restore seeds a project's tree on its
   // first activation, and the tree's own effects are what list what it opens.
@@ -224,39 +263,98 @@ export default function App({
           No project open. Add a repository to get started.
         </p>
       ) : (
-        <Workbench
-          tree={tree}
-          git={gitStatus}
-          gitOps={gitOps}
-          onOpenFile={handleOpenFile}
-          panes={workspace}
-          onPanes={setWorkspace}
-          editor={
-            <Editor
+        <>
+          <Workbench
+            tree={tree}
+            git={gitStatus}
+            gitOps={gitOps}
+            onOpenFile={handleOpenFile}
+            panes={workspace}
+            onPanes={setWorkspace}
+            editor={
+              <Editor
+                project={active}
+                editors={editors}
+                status={gitStatus.status}
+                git={git}
+                onLocate={tree.locate}
+                appearance={appearance}
+                onReveal={tree.reveal}
+              />
+            }
+            terminals={
+              <Terminals
+                project={active}
+                stream={stream}
+                streamError={streamError}
+                terminals={terminals}
+                fontSize={workspace.fontSize}
+                appearance={appearance}
+              />
+            }
+            overridden={overriddenPaths(active)}
+            onBind={setBindingFolder}
+            cluster={
+              <ProjectPanel
+                project={active}
+                kube={cluster}
+                seam={kube}
+                scope={selection}
+                onOverride={async (context, namespace, guarded) => {
+                projects.replace(
+                  await kube.bindFolder(active.name, selection, context, namespace, guarded),
+                );
+                cluster.refresh();
+              }}
+              onDefault={async (context, namespace, guarded) => {
+                  await projects.rebind(
+                    active.name,
+                    settingsWithKube(
+                      active,
+                      withKube(active, {
+                        context,
+                        namespace,
+                        protected: guarded,
+                      }),
+                    ),
+                  );
+                  // The panel is showing a binding resolved before the write.
+                  // Asking again is what makes the new context appear without a
+                  // reload — and asking rather than assuming is what keeps the
+                  // displayed binding the backend's answer rather than the
+                  // form's.
+                  cluster.refresh();
+                }}
+              />
+            }
+          />
+
+          {bindingFolder !== null && (
+            <FolderDialog
               project={active}
-              editors={editors}
-              status={gitStatus.status}
-              git={git}
-              onLocate={tree.locate}
-              appearance={appearance}
-              onReveal={tree.reveal}
+              folder={bindingFolder}
+              inherited={bindingSummary(cluster.binding)}
+            inheritedContext={cluster.binding.context}
+              contexts={cluster.contexts}
+              kube={kube}
+              onWritten={(written) => {
+                projects.replace(written);
+                cluster.refresh();
+              }}
+              onClose={() => {
+                setBindingFolder(null);
+              }}
             />
-          }
-          terminals={
-            <Terminals
-              project={active}
-              stream={stream}
-              streamError={streamError}
-              terminals={terminals}
-              fontSize={workspace.fontSize}
-              appearance={appearance}
-            />
-          }
-        />
+          )}
+        </>
       )}
 
       <footer className="statusbar">
-        <ProjectStatus project={active} git={gitStatus} />
+        <ProjectStatus
+          project={active}
+          git={gitStatus}
+          binding={cluster.binding}
+        />
         <span className="statusbar__spacer" />
         <BuildLine build={build} />
         <FontSize
@@ -353,7 +451,8 @@ function Editor({
 }: EditorProps) {
   // The strip's own tabs, not every project's: the breadcrumb describes what
   // is on screen, and `activeKey` is per project.
-  const active = editors.visible.find((tab) => tab.key === editors.activeKey) ?? null;
+  const active =
+    editors.visible.find((tab) => tab.key === editors.activeKey) ?? null;
   // One blame, for the file on screen. See useBlame for why it is not per tab.
   const blame = useBlame(active, git);
 
@@ -397,7 +496,8 @@ function Editor({
         ))}
         {editors.visible.length === 0 && (
           <p className="panes__empty">
-            No file open in {projectLabel(project)}. Pick one from the tree to start editing.
+            No file open in {projectLabel(project)}. Pick one from the tree to
+            start editing.
           </p>
         )}
       </div>
@@ -468,7 +568,8 @@ function Terminals({
         )}
         {stream !== null && terminals.visible.length === 0 && (
           <p className="panes__empty">
-            No terminals open in {projectLabel(project)}. Open a shell to get started.
+            No terminals open in {projectLabel(project)}. Open a shell to get
+            started.
           </p>
         )}
       </div>

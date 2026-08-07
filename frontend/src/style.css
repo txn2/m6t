@@ -429,19 +429,26 @@ textarea {
 
 /* --- workbench -------------------------------------------------------- */
 
-/* Tree | editor over terminal (DESIGN.md §5), with both splits draggable.
-   The two sizes are custom properties set from React state, so a drag writes
-   one number and the grid re-lays itself; min-height: 0 on the middle row is
-   what lets the terminal shrink instead of pushing the status bar off-screen. */
+/* Tree | editor over terminal | cluster (DESIGN.md §5), with all three splits
+   draggable. The sizes are custom properties set from React state, so a drag
+   writes one number and the grid re-lays itself; min-height: 0 on the middle
+   row is what lets the terminal shrink instead of pushing the status bar
+   off-screen.
+
+   The cluster column spans every row rather than sitting beside the editor
+   alone. What it shows is the target of the whole workbench — the cluster the
+   terminal's kubectl and the editor's manifests both point at — and a panel
+   that stopped at the terminal's top edge would read as a property of the
+   editor. */
 .workbench {
   flex: 1;
   display: grid;
-  grid-template-columns: var(--m6t-sidebar) auto 1fr;
+  grid-template-columns: var(--m6t-sidebar) auto 1fr auto var(--m6t-cluster);
   grid-template-rows: 1fr auto var(--m6t-terminal);
   grid-template-areas:
-    "tree vsep editor"
-    "hsep hsep hsep"
-    "terminal terminal terminal";
+    "tree vsep editor csep cluster"
+    "hsep hsep hsep csep cluster"
+    "terminal terminal terminal csep cluster";
   min-height: 0;
 }
 
@@ -471,6 +478,16 @@ textarea {
   min-height: 0;
 }
 
+.workbench__cluster {
+  grid-area: cluster;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--m6t-border);
+  background: var(--m6t-panel);
+}
+
 /* --- pane separators --------------------------------------------------- */
 
 /* The hit area is the full token; the visible line is the 1px border. A
@@ -487,14 +504,24 @@ textarea {
   outline: none;
 }
 
-.separator--vertical {
+.separator--sidebar {
   grid-area: vsep;
+}
+
+.separator--terminal {
+  grid-area: hsep;
+}
+
+.separator--cluster {
+  grid-area: csep;
+}
+
+.separator--vertical {
   width: var(--m6t-separator);
   cursor: col-resize;
 }
 
 .separator--horizontal {
-  grid-area: hsep;
   height: var(--m6t-separator);
   cursor: row-resize;
 }
@@ -639,13 +666,16 @@ textarea {
   opacity: 1;
 }
 
+/* Drawn at the point it was summoned from — `left`/`top` come from the row (see
+   RowMenu). It used to be `position: fixed` with neither, which resolves to the
+   element's static position: inside a flex row that has already laid out, that
+   is hundreds of pixels from the pointer. */
 .tree__menu {
   position: fixed;
   z-index: 10;
   display: flex;
   flex-direction: column;
-  min-width: 10rem;
-  margin-top: var(--m6t-row);
+  min-width: 11rem;
   padding: var(--m6t-space-1);
   border: 1px solid var(--m6t-border);
   border-radius: var(--m6t-radius);
@@ -654,6 +684,9 @@ textarea {
 }
 
 .tree__menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
   padding: var(--m6t-space-1) var(--m6t-space-3);
   border: none;
   border-radius: 0;
@@ -661,6 +694,12 @@ textarea {
   color: inherit;
   font: inherit;
   text-align: left;
+}
+
+/* The items with no icon line up with the ones that have, so the labels form a
+   column instead of a ragged edge. */
+.tree__menu button:not(:has(.icon)) {
+  padding-left: calc(var(--m6t-space-3) + var(--m6t-icon) + var(--m6t-space-2));
 }
 
 .tree__menu button:hover {
@@ -1458,3 +1497,425 @@ button:hover {
   font-size: var(--m6t-font-size-sm);
 }
 
+
+/* --- project panel ----------------------------------------------------- */
+
+/* The panel names the target of everything in the window (DESIGN.md §5), so
+   its type is deliberately larger than the chrome around it: the context name
+   is the one string on screen a user must never misread. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-3);
+  padding: var(--m6t-space-3);
+  min-height: 0;
+  font-size: 0.85rem;
+}
+
+/* The protected accent, on the panel itself. It is a left edge rather than a
+   full border because the panel already has one on its left from the grid, and
+   thickening the edge the eye is already tracking is what makes the state
+   register without adding a second box. */
+.panel[data-protected="true"] {
+  box-shadow: inset 3px 0 0 var(--m6t-danger);
+}
+
+/* The panel names itself. Without it the first thing on screen is a cluster
+   name, which reads the same whichever project is open. */
+.panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* A label/value pair, label in a fixed column so the values line up down the
+   whole panel rather than per section. */
+.panel__fact {
+  display: flex;
+  align-items: baseline;
+  gap: var(--m6t-space-2);
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.panel__fact-label {
+  flex: none;
+  width: 5.5rem;
+  color: var(--m6t-muted);
+}
+
+.panel__fact-value {
+  min-width: 0;
+  color: var(--m6t-fg);
+  word-break: break-all;
+}
+
+/* The consequence of the protected switch, under it rather than trailing it:
+   a caption running off the side of a checkbox is a caption nobody reads. */
+.panel__toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-1);
+}
+
+.panel__toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+}
+
+.panel__toggle-note {
+  margin: 0;
+  margin-left: calc(var(--m6t-icon) + var(--m6t-space-2));
+  color: var(--m6t-muted);
+  font-size: 0.8rem;
+}
+
+.panel__actions {
+  display: flex;
+  gap: var(--m6t-space-2);
+}
+
+/* A selection field sending this folder somewhere other than the project
+   default, in the colour the tree marks a bound folder with (.tree__bound).
+   One colour for one fact: "this is not where the rest of the project goes". */
+.panel__field[data-diverged="true"] select,
+.panel__field[data-diverged="true"] input {
+  border-color: var(--m6t-project-purple);
+}
+
+.panel__field[data-diverged="true"] .settings__field > span {
+  color: var(--m6t-project-purple);
+}
+
+.panel__protected {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-1);
+  margin: 0;
+  color: var(--m6t-danger);
+  font-size: 0.85rem;
+}
+
+.panel__empty,
+.panel__hint {
+  margin: 0;
+  color: var(--m6t-muted);
+  font-size: 0.8rem;
+}
+
+.panel__action,
+.panel__recheck {
+  padding: var(--m6t-space-1) var(--m6t-space-2);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-panel-alt);
+  color: var(--m6t-fg);
+  cursor: pointer;
+}
+
+.panel__action:hover:not(:disabled),
+.panel__recheck:hover {
+  border-color: var(--m6t-accent);
+}
+
+.panel__action:disabled {
+  cursor: default;
+  color: var(--m6t-muted);
+}
+
+.panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-2);
+  align-items: flex-start;
+}
+
+.panel__error {
+  margin: 0;
+  color: var(--m6t-danger);
+}
+
+.panel__verdict[data-ok="true"] p {
+  color: var(--m6t-ok);
+}
+
+.panel__verdict[data-ok="false"] p {
+  color: var(--m6t-danger);
+}
+
+.panel__verdict p {
+  margin: 0 0 var(--m6t-space-1);
+}
+
+/* kubectl's own output, wrapped rather than clipped: a truncated error is one
+   the user has to reproduce in a terminal to read. */
+.panel__stderr,
+.panel__argv pre {
+  margin: 0;
+  padding: var(--m6t-space-1);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  color: var(--m6t-muted);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.panel__argv summary {
+  color: var(--m6t-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.panel__tools {
+  margin-top: auto;
+  border-top: 1px solid var(--m6t-border);
+  padding-top: var(--m6t-space-2);
+}
+
+.panel__tools ul {
+  margin: 0 0 var(--m6t-space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.panel__tool {
+  color: var(--m6t-danger);
+  font-size: 0.8rem;
+  margin-bottom: var(--m6t-space-1);
+}
+
+/* Section headings carry the Kubernetes wheel at the size of a row icon: the
+   panel's first section is the one a user scans for, and the mark is what they
+   scan for it by. */
+/* Sections are separated by their own heading and spacing, not by a rule
+   between them: a border per section turns a four-section panel into a stack of
+   boxes. The first heading needs no gap above it because the panel title is
+   already there. */
+.panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-2);
+  align-items: stretch;
+}
+
+.panel__section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  margin: 0;
+  padding-bottom: var(--m6t-space-1);
+  border-bottom: 1px solid var(--m6t-border);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--m6t-muted);
+}
+
+.panel__section-title .icon {
+  width: var(--m6t-icon);
+  height: var(--m6t-icon);
+}
+
+/* The tool states are pinned to the bottom, which is also what reserves the
+   space between them and the sections above for #12's live status: the panel
+   grows downward into a gap that already exists rather than pushing them
+   around when it lands. */
+.panel__tools {
+  margin-top: auto;
+}
+
+/* A folder carrying its own kube override (#10).
+   The mark is the primary signal and the tint is secondary, the same order the
+   git badges use (#40): a colour alone would be the only thing saying "this
+   directory goes somewhere else", which is unreadable on a monochrome display
+   and silent to a screen reader. */
+.tree__row[data-bound="true"] .tree__name {
+  color: var(--m6t-project-purple);
+}
+
+.tree__bound {
+  display: inline-flex;
+  align-items: center;
+  color: var(--m6t-project-purple);
+}
+
+.tree__bound .icon {
+  width: var(--m6t-icon);
+  height: var(--m6t-icon);
+}
+
+/* --- the protected accent, everywhere it appears ----------------------- */
+
+/* One rule per surface, one colour for all of them. A protected binding has to
+   look the same on the tab, in the status bar and in the panel, or the user
+   learns three marks instead of one (DESIGN.md §5). */
+.projects__tab[data-protected="true"] {
+  box-shadow: inset 0 0 0 1px var(--m6t-danger);
+}
+
+.projects__tab--active[data-protected="true"] {
+  box-shadow:
+    inset 0 2px 0 var(--m6t-accent),
+    inset 0 0 0 1px var(--m6t-danger);
+}
+
+.projects__lock,
+.statusbar [data-protected="true"] .icon {
+  color: var(--m6t-danger);
+}
+
+.statusbar [data-protected="true"] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--m6t-space-1);
+  color: var(--m6t-danger);
+}
+
+/* --- settings dialog --------------------------------------------------- */
+
+.settings__backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 55%);
+  z-index: 20;
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-3);
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: var(--m6t-space-3);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-panel);
+}
+
+.settings__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-2);
+  border-top: 1px solid var(--m6t-border);
+  padding-top: var(--m6t-space-3);
+}
+
+.settings__section h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--m6t-muted);
+}
+
+.settings__hint,
+.settings__empty {
+  margin: 0;
+  color: var(--m6t-muted);
+  font-size: 0.85rem;
+}
+
+.settings__field {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+}
+
+.settings__field span {
+  flex: none;
+  width: 5.5rem;
+  color: var(--m6t-muted);
+}
+
+.settings__field select,
+.settings__field input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--m6t-space-1);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  color: var(--m6t-fg);
+  font: inherit;
+}
+
+.settings__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+}
+
+.settings__save,
+.settings__cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--m6t-space-1);
+  align-self: flex-start;
+  padding: var(--m6t-space-1) var(--m6t-space-2);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-panel-alt);
+  color: var(--m6t-fg);
+  cursor: pointer;
+  font: inherit;
+}
+
+/* The reason a namespace could not be listed, under the field it cost. */
+.settings__note {
+  margin: 0;
+  color: var(--m6t-muted);
+  font-size: 0.8rem;
+}
+
+.settings__spacer {
+  flex: 1;
+}
+
+/* Destructive, and placed at the far end from Save so the two are not
+   neighbours under a moving pointer. */
+.settings__remove {
+  padding: var(--m6t-space-1) var(--m6t-space-2);
+  border: 1px solid var(--m6t-border);
+  border-radius: var(--m6t-radius);
+  background: none;
+  color: var(--m6t-danger);
+  cursor: pointer;
+  font: inherit;
+}
+
+.settings__remove:hover {
+  border-color: var(--m6t-danger);
+}
+
+.settings__error {
+  margin: 0;
+  color: var(--m6t-danger);
+}
+
+.settings__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+}
+
+.settings__title {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+}
+
+.settings__save {
+  border-color: var(--m6t-accent);
+}

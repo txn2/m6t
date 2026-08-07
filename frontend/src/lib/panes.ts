@@ -117,3 +117,11 @@ export const EDITOR_MIN_WIDTH = 320;
 export const TERMINAL_DEFAULT = 260;
 export const TERMINAL_MIN = 120;
 export const EDITOR_MIN_HEIGHT = 160;
+
+/**
+ * The cluster panel's width (#10). Its minimum is the point below which the
+ * context name — the one thing on screen that must never be ambiguous
+ * (DESIGN.md §5) — starts wrapping mid-name, which is worse than no panel.
+ */
+export const CLUSTER_DEFAULT = 280;
+export const CLUSTER_MIN = 220;

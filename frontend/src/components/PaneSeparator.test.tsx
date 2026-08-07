@@ -25,6 +25,7 @@ function renderSidebar(onResize = vi.fn(), size = 300) {
   render(
     <PaneSeparator
       orientation="vertical"
+      area="sidebar"
       size={size}
       direction={1}
       bounds={bounds}
@@ -58,6 +59,7 @@ describe("the separator as a control", () => {
     render(
       <PaneSeparator
         orientation="vertical"
+      area="sidebar"
         size={300}
         direction={1}
         bounds={{ ...bounds, total: 0 }}
@@ -146,6 +148,7 @@ describe("dragging", () => {
     render(
       <PaneSeparator
         orientation="horizontal"
+      area="terminal"
         size={300}
         direction={1}
         bounds={bounds}
@@ -168,6 +171,7 @@ describe("dragging", () => {
     render(
       <PaneSeparator
         orientation="horizontal"
+      area="terminal"
         size={300}
         direction={-1}
         bounds={bounds}

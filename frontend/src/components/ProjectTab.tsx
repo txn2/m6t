@@ -32,6 +32,13 @@ export interface ProjectTabProps {
  * stylesheet owns the palette, so a colour name this build does not know — from
  * a projects.yaml someone edited by hand, which DESIGN.md §4 invites — is a tab
  * with no dot, and no value out of a config file is ever interpolated into CSS.
+ *
+ * `data-protected` is the persistent accent DESIGN.md §5 calls the single most
+ * important safety feature in the app: a project whose binding requires typed
+ * confirmation says so on its tab, permanently, whether or not it is the tab in
+ * front. It is the project's own flag rather than the selection's — the tab
+ * describes the project, and the per-folder answer is in the panel and the
+ * status bar, both of which follow the selection.
  */
 export function ProjectTab({
   project,
@@ -73,6 +80,7 @@ export function ProjectTab({
         <li
           ref={setNodeRef}
           data-project={project.name}
+          data-protected={project.kube.protected ? "true" : undefined}
           className={`projects__tab${active ? " projects__tab--active" : ""}${
             isDragging ? " projects__tab--dragging" : ""
           }`}
@@ -107,6 +115,7 @@ export function ProjectTab({
               {color !== null && (
                 <span className="projects__dot" data-color={color} aria-hidden="true" />
               )}
+              {project.kube.protected && <UiIcon name="lock" className="projects__lock" />}
               {label}
             </button>
           )}

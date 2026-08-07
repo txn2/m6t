@@ -69,8 +69,7 @@ func (r *Registry) List() ([]Project, error) {
 
 	projects := make([]Project, 0, len(stored))
 	for _, p := range stored {
-		p.Path = expand(p.Path)
-		projects = append(projects, p)
+		projects = append(projects, resolved(p))
 	}
 	return projects, nil
 }
@@ -87,21 +86,21 @@ func (r *Registry) List() ([]Project, error) {
 // a follow-up Update so that a project never appears in the strip under a name
 // the user has already replaced.
 func (r *Registry) Add(path, displayName string) (Project, error) {
-	resolved, err := resolve(path)
+	target, err := resolve(path)
 	if err != nil {
 		return Project{}, err
 	}
-	if err := requireRepository(resolved); err != nil {
+	if err := requireRepository(target); err != nil {
 		return Project{}, err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.append(resolved, strings.TrimSpace(displayName))
+	return r.append(target, strings.TrimSpace(displayName))
 }
 
 // append adds a validated absolute path to the registry. The caller holds mu.
-func (r *Registry) append(resolved, displayName string) (Project, error) {
+func (r *Registry) append(target, displayName string) (Project, error) {
 	projects, err := load(r.dir)
 	if err != nil {
 		return Project{}, err
@@ -116,23 +115,20 @@ func (r *Registry) append(resolved, displayName string) (Project, error) {
 	// registered is a no-op that selects it, and silently renaming the tab the
 	// user named last week is not what "add" promised.
 	for _, p := range projects {
-		if expand(p.Path) == resolved {
-			p.Path = resolved
-			return p, nil
+		if expand(p.Path) == target {
+			return resolved(p), nil
 		}
 	}
 
 	added := Project{
-		Name:        uniqueName(projects, filepath.Base(resolved)),
-		Path:        abbreviate(resolved),
+		Name:        uniqueName(projects, filepath.Base(target)),
+		Path:        abbreviate(target),
 		DisplayName: displayName,
 	}
 	if err := save(r.dir, append(projects, added)); err != nil {
 		return Project{}, err
 	}
-
-	added.Path = resolved
-	return added, nil
+	return resolved(added), nil
 }
 
 // Remove drops a project from the registry and returns what it removed.
@@ -171,8 +167,7 @@ func (r *Registry) Remove(name string) (Project, error) {
 	if err := save(r.dir, remaining); err != nil {
 		return Project{}, err
 	}
-	removed.Path = expand(removed.Path)
-	return removed, nil
+	return resolved(removed), nil
 }
 
 // Reorder rewrites the stored order to the one names gives.
@@ -221,7 +216,7 @@ func (r *Registry) Reorder(names []string) ([]Project, error) {
 		return nil, err
 	}
 	for i := range ordered {
-		ordered[i].Path = expand(ordered[i].Path)
+		ordered[i] = resolved(ordered[i])
 	}
 	return ordered, nil
 }
@@ -245,7 +240,20 @@ func (r *Registry) Settings(name string) (Settings, error) {
 
 // Update replaces the named project's settings, leaving its name and path
 // alone.
+//
+// Scope paths are validated before anything is written. A binding is the one
+// setting whose being wrong reaches a cluster, so a settings write carrying a
+// scope that does not name a subtree of the repository is refused whole rather
+// than stored with the bad rule dropped — half-applied safety settings are
+// worse than a rejected form, because the user believes the half that vanished
+// is in force.
 func (r *Registry) Update(name string, s Settings) (Project, error) {
+	kube, err := validateScopes(s.Kube)
+	if err != nil {
+		return Project{}, fmt.Errorf("updating %s: %w", name, err)
+	}
+	s.Kube = kube
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -262,9 +270,7 @@ func (r *Registry) Update(name string, s Settings) (Project, error) {
 		if err := save(r.dir, projects); err != nil {
 			return Project{}, err
 		}
-		updated := projects[i]
-		updated.Path = expand(updated.Path)
-		return updated, nil
+		return resolved(projects[i]), nil
 	}
 	return Project{}, fmt.Errorf("updating %s: %w", name, ErrNotFound)
 }

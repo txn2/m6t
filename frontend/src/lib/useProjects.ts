@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Project, Registry } from "./projects";
+import type { Project, Registry, Settings } from "./projects";
 import {
   directoryName,
   findProject,
@@ -49,6 +49,30 @@ export interface Projects {
   readonly commitAdd: (name: string) => void;
   readonly rename: (name: string, label: string) => void;
   readonly recolor: (name: string, color: string) => void;
+  /**
+   * Writes a whole Settings value and resolves when the registry has accepted
+   * it, or rejects with the registry's own message (#10).
+   *
+   * It is the one write here that reports rather than swallows. `rename` and
+   * `recolor` cannot fail on their content — any string is a label — so their
+   * failures are transport failures and belong in the strip's error line. A
+   * binding can be refused on its content: a scope path that leaves the
+   * repository is rejected whole by `internal/project`, and the user has to see
+   * that beside the field they typed it in, which means the dialog needs the
+   * error rather than the strip.
+   */
+  readonly rebind: (name: string, settings: Settings) => Promise<void>;
+  /**
+   * Takes a project the backend has already written and puts it in the list
+   * (#10).
+   *
+   * The folder-binding operations write through their own registry calls —
+   * BindScope and UnbindScope, which do the read-modify-write under the
+   * registry's own mutex rather than in the UI — and answer with the project
+   * as stored. This is how that answer replaces the stale copy the strip is
+   * holding, without a second round trip to re-read what was just returned.
+   */
+  readonly replace: (project: Project) => void;
   /** Takes the order a finished drag settled on, and persists it. */
   readonly move: (names: string[]) => void;
   readonly remove: (name: string) => void;
@@ -158,6 +182,18 @@ export function useProjects(registry: Registry): Projects {
     [patch],
   );
 
+  const rebind = useCallback(
+    async (name: string, settings: Settings) => {
+      const updated = await registry.update(name, settings);
+      setList((current) => current.map((p) => (p.name === updated.name ? updated : p)));
+    },
+    [registry],
+  );
+
+  const replace = useCallback((project: Project) => {
+    setList((current) => current.map((p) => (p.name === project.name ? project : p)));
+  }, []);
+
   const move = useCallback(
     (names: string[]) => {
       const ordered = orderProjects(list, names);
@@ -207,6 +243,8 @@ export function useProjects(registry: Registry): Projects {
     commitAdd,
     rename,
     recolor,
+    rebind,
+    replace,
     move,
     remove,
   };

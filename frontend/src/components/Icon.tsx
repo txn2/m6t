@@ -9,11 +9,14 @@ import {
   EllipsisVertical,
   Eye,
   EyeOff,
+  Hexagon,
   History,
   Layers,
   ListFilter,
+  Lock,
   Pencil,
   Plus,
+  Settings,
   X,
 } from "lucide-react";
 import type { IconKind } from "../lib/tree";
@@ -128,6 +131,13 @@ const UI_LUCIDE = {
   hidden: EyeOff,
   up: ArrowUp,
   down: ArrowDown,
+  // The cluster panel's three (#10). `cluster` is the hexagon DESIGN.md §5
+  // draws as ⬢ beside the context name, and `lock` is the mark a protected
+  // binding carries wherever it appears — panel, status bar and tab — so the
+  // three places cannot drift into three different pictures for one state.
+  cluster: Hexagon,
+  lock: Lock,
+  settings: Settings,
 } as const satisfies Readonly<Record<string, LucideIcon>>;
 
 export type UiIconName = keyof typeof UI_LUCIDE;

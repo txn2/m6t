@@ -10,11 +10,15 @@ import { BranchBar } from "./BranchBar";
 import { PaneSeparator } from "./PaneSeparator";
 import type { Project } from "../lib/projects";
 import { projectLabel } from "../lib/projects";
+import type { Binding } from "../lib/kube";
+import { bindingSummary } from "../lib/kube";
+import { UiIcon } from "./Icon";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { GitStatusController } from "../lib/useGitStatus";
 import type { GitOpsController } from "../lib/useGitOps";
 import { branchSummary } from "../lib/gitStatus";
 import {
+  CLUSTER_MIN,
   EDITOR_MIN_HEIGHT,
   EDITOR_MIN_WIDTH,
   SIDEBAR_MIN,
@@ -37,6 +41,14 @@ export interface WorkbenchProps {
   readonly editor: ReactNode;
   /** The terminal strip and panes for this project. */
   readonly terminals: ReactNode;
+  /** The project panel for this project (#10): the Kubernetes binding, the
+   * folder overrides it carries, and — once #12 lands — the live status of
+   * what is on screen. */
+  readonly cluster: ReactNode;
+  /** The folders carrying a kube override, for the tree to mark (#10). */
+  readonly overridden: ReadonlySet<string>;
+  /** Opens the Kubernetes binding dialog for a folder (#10). */
+  readonly onBind: (path: string) => void;
   /**
    * The two split sizes, in pixels, and how a change to them is reported.
    *
@@ -49,10 +61,11 @@ export interface WorkbenchProps {
   readonly onPanes: (next: PaneSizes) => void;
 }
 
-/** The workbench's two split sizes, in pixels. */
+/** The workbench's three split sizes, in pixels. */
 export interface PaneSizes {
   readonly sidebar: number;
   readonly terminalHeight: number;
+  readonly cluster: number;
 }
 
 /**
@@ -76,10 +89,13 @@ export function Workbench({
   onOpenFile,
   editor,
   terminals,
+  cluster,
+  overridden,
+  onBind,
   panes,
   onPanes,
 }: WorkbenchProps) {
-  const { sidebar, terminalHeight } = panes;
+  const { sidebar, terminalHeight, cluster: clusterWidth } = panes;
   const { extent, frame } = useExtent();
 
   const setSidebar = (next: number) => {
@@ -87,6 +103,9 @@ export function Workbench({
   };
   const setTerminalHeight = (next: number) => {
     onPanes({ ...panes, terminalHeight: next });
+  };
+  const setCluster = (next: number) => {
+    onPanes({ ...panes, cluster: next });
   };
 
   // A size can arrive too large for the window it is being drawn in: a session
@@ -97,10 +116,14 @@ export function Workbench({
   // keeping a width the window no longer has after being shrunk.
   useEffect(() => {
     const fitted = fit(panes, extent);
-    if (fitted.sidebar !== sidebar || fitted.terminalHeight !== terminalHeight) {
+    if (
+      fitted.sidebar !== sidebar ||
+      fitted.terminalHeight !== terminalHeight ||
+      fitted.cluster !== clusterWidth
+    ) {
       onPanes(fitted);
     }
-  }, [panes, extent, sidebar, terminalHeight, onPanes]);
+  }, [panes, extent, sidebar, terminalHeight, clusterWidth, onPanes]);
 
   return (
     <div
@@ -110,11 +133,18 @@ export function Workbench({
         {
           "--m6t-sidebar": `${String(sidebar)}px`,
           "--m6t-terminal": `${String(terminalHeight)}px`,
+          "--m6t-cluster": `${String(clusterWidth)}px`,
         } as CSSProperties
       }
     >
       <aside className="workbench__tree">
-        <FileTree tree={tree} status={git.status} onOpenFile={onOpenFile} />
+        <FileTree
+          tree={tree}
+          status={git.status}
+          onOpenFile={onOpenFile}
+          overridden={overridden}
+          onBind={onBind}
+        />
         <BranchBar
           status={git.status}
           branches={gitOps.branches}
@@ -134,6 +164,7 @@ export function Workbench({
         direction={1}
         bounds={{ min: SIDEBAR_MIN, minOther: EDITOR_MIN_WIDTH, total: extent.width }}
         label="Sidebar width"
+        area="sidebar"
         onResize={setSidebar}
       />
 
@@ -149,12 +180,30 @@ export function Workbench({
         direction={-1}
         bounds={{ min: TERMINAL_MIN, minOther: EDITOR_MIN_HEIGHT, total: extent.height }}
         label="Terminal height"
+        area="terminal"
         onResize={setTerminalHeight}
       />
 
       <section className="workbench__terminal" aria-label="Terminal">
         {terminals}
       </section>
+
+      {/* The cluster panel leads its separator from the right edge, so
+          dragging left grows it — direction -1, the terminal's rule on the
+          other axis. */}
+      <PaneSeparator
+        orientation="vertical"
+        size={clusterWidth}
+        direction={-1}
+        bounds={{ min: CLUSTER_MIN, minOther: EDITOR_MIN_WIDTH, total: extent.width }}
+        label="Cluster panel width"
+        area="cluster"
+        onResize={setCluster}
+      />
+
+      <aside className="workbench__cluster" aria-label="Project">
+        {cluster}
+      </aside>
     </div>
   );
 }
@@ -176,6 +225,15 @@ export function fit(
       min: TERMINAL_MIN,
       minOther: EDITOR_MIN_HEIGHT,
       total: extent.height,
+    }),
+    // Clamped against the width the sidebar has already taken, not against the
+    // window: three panes on one axis means the editor's minimum has to survive
+    // both neighbours, and clamping each against the full width would let the
+    // two of them squeeze it to nothing between them.
+    cluster: clampSplit(panes.cluster, {
+      min: CLUSTER_MIN,
+      minOther: EDITOR_MIN_WIDTH,
+      total: extent.width === 0 ? 0 : extent.width - panes.sidebar,
     }),
   };
 }
@@ -225,6 +283,10 @@ export interface ProjectStatusProps {
   readonly project: Project | null;
   /** The active project's git state, for the branch half of the bar (#8). */
   readonly git: GitStatusController;
+  /** What the current selection is bound to (#10) — resolved by the backend,
+   * so it is the binding a kubectl call would actually use rather than the
+   * project default the frontend happens to be holding. */
+  readonly binding: Binding;
 }
 
 /**
@@ -236,22 +298,28 @@ export interface ProjectStatusProps {
  * rather than in a menu. The branch line sits beside it for the same reason:
  * DESIGN.md §5 puts `⎇ main ↑1 ↓0 · 3 changed` in the status bar because
  * which branch is checked out decides what an apply would actually apply.
+ *
+ * What it names is the binding for the *selection*, not for the project. In a
+ * repository laid out one directory per cluster those differ, and the status
+ * bar showing a project default while the editor holds a file bound elsewhere
+ * would be the most misleading line in the window (#10).
  */
-export function ProjectStatus({ project, git }: ProjectStatusProps) {
+export function ProjectStatus({ project, git, binding }: ProjectStatusProps) {
   if (project === null) {
     return <span data-testid="project-status">no project selected</span>;
   }
-  const context = project.kube.context;
   // The label, not the key: the status bar names the project the user named,
   // and the registry's own name for it is a directory basename they never
   // chose (#41).
   const label = projectLabel(project);
   return (
     <>
-      <span data-testid="project-status">
-        {context === ""
-          ? `${label} — no context bound`
-          : `${label} — ${context}`}
+      <span
+        data-testid="project-status"
+        data-protected={binding.protected ? "true" : undefined}
+      >
+        {`${label}: ${bindingSummary(binding)}`}
+        {binding.protected && <UiIcon name="lock" />}
       </span>
       <span data-testid="git-status">
         {git.error ?? branchSummary(git.status)}
