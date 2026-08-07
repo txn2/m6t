@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Entry } from "./tree";
+import type { Entry, TreeState } from "./tree";
 import {
   ROOT,
   affectedTrackedDirs,
@@ -12,6 +12,7 @@ import {
   isHidden,
   joinPath,
   looksLikeManifest,
+  openDirs,
   parentPath,
   resolveIconKind,
   locate,
@@ -515,5 +516,37 @@ describe("applying a tree-changed event", () => {
 
   it("reports nothing for a directory that was never loaded", () => {
     expect(affectedTrackedDirs(initialTree(), ["manifests"])).toEqual([]);
+  });
+});
+
+describe("the directories a returning project re-lists", () => {
+  /** A tree with `manifests` and `manifests/prod` listed and expanded. */
+  function opened(): TreeState {
+    let state = withListing(initialTree(), ROOT, [entry("manifests", true)]);
+    state = withListing(expand(state, "manifests"), "manifests", [entry("prod", true)]);
+    return withListing(expand(state, "manifests/prod"), "manifests/prod", [entry("a.yaml")]);
+  }
+
+  it("names root even when nothing has been loaded", () => {
+    expect(openDirs(initialTree())).toEqual([ROOT]);
+  });
+
+  it("names every expanded directory on screen, outermost first", () => {
+    expect(openDirs(opened())).toEqual([ROOT, "manifests", "manifests/prod"]);
+  });
+
+  it("skips a directory whose parent is collapsed", () => {
+    // `manifests/prod` is still expanded and still loaded, but it draws
+    // nothing while `manifests` is closed — re-listing it would be a round
+    // trip for rows nobody can see.
+    expect(openDirs(collapse(opened(), "manifests"))).toEqual([ROOT]);
+  });
+
+  it("skips a directory the hidden-file filter is keeping off screen", () => {
+    let state = withListing(initialTree(), ROOT, [entry(".github", true)]);
+    state = withListing(expand(state, ".github"), ".github", [entry("workflows", true)]);
+
+    expect(openDirs(state)).toEqual([ROOT]);
+    expect(openDirs(toggleHidden(state))).toEqual([ROOT, ".github"]);
   });
 });

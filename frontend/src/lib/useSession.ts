@@ -73,15 +73,17 @@ const defaults: WorkspaceSettings = {
  * (#58).
  *
  * Restoring is per project and lazy: the window-wide settings come back at
- * launch, and a project's tabs come back the first time that project is the one
- * on screen. Restoring every project's at launch would spawn a shell and read a
- * file for each tab of each registered repository before the user had asked for
- * any of it — the same reason the panes for an inactive project stay mounted
- * rather than being rebuilt, read in the other direction.
+ * launch, and a project's tabs, terminals and tree come back the first time
+ * that project is the one on screen. Restoring every project's at launch would
+ * spawn a shell and read a file for each tab of each registered repository
+ * before the user had asked for any of it — the same reason the panes for an
+ * inactive project stay mounted rather than being rebuilt, read in the other
+ * direction.
  *
- * The tree is the exception: it is restored on every switch, because the tree
- * hook resets on one. What comes back is the shape as it was when the project
- * was last on screen, which is what the recording below keeps up to date.
+ * The tree follows that rule rather than being the exception it used to be
+ * (#59). While the tree hook reset itself on every project switch, the saved
+ * record was the only thing that remembered a tree's shape, so this had to put
+ * it back on every activation; now the hook retains it, and this seeds it once.
  */
 export function useSession({
   projects,
@@ -187,13 +189,16 @@ export function useSession({
     if (loaded === null || restoring || activeName === null || activePath === null) {
       return;
     }
-    const record = projectSession(current.current, activeName);
-    wiring.current.tree.restore(
-      restoredTree(record, restoredWorkspace(current.current).changedOnly),
-    );
     if (hydrated.current.has(activeName)) {
       return;
     }
+    const record = projectSession(current.current, activeName);
+    // Synchronously, ahead of the reads below: the tree's shape is state rather
+    // than content, so there is nothing to wait for, and the rows it asks for
+    // are on their way before the first file is opened.
+    wiring.current.tree.restore(
+      restoredTree(record, restoredWorkspace(current.current).changedOnly),
+    );
     // Marked hydrated only once the files have been read, not when the restore
     // starts: a project recorded mid-restore would be recorded with the tabs
     // that had opened so far and lose the rest.
@@ -215,11 +220,10 @@ export function useSession({
   // Recording. Every render recomputes the session; a write is scheduled only
   // when it would change the file.
   //
-  // In the one commit a project switch lands in, the tree on screen is still
-  // the previous project's — the tree hook clears it in an effect, which runs
-  // after this render was built. What that would record is corrected by the
-  // reset's own re-render, well inside the debounce, so the file never sees
-  // it; the write is what this guards, not every intermediate value.
+  // `tree.state` is the active project's from the first render of a switch, so
+  // there is no window in which this records one project's tree against
+  // another's name — the hook reads its entry during render rather than
+  // replacing it in an effect afterwards (#59).
   useEffect(() => {
     if (loaded === null) {
       return;
