@@ -3,6 +3,7 @@
 import {project} from '../models';
 import {git} from '../models';
 import {watch} from '../models';
+import {session} from '../models';
 import {stream} from '../models';
 import {buildinfo} from '../models';
 
@@ -43,6 +44,10 @@ export function RemoveProject(arg1:string):Promise<void>;
 export function RenameEntry(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ReorderProjects(arg1:Array<string>):Promise<Array<project.Project>>;
+
+export function SaveSession(arg1:session.State):Promise<void>;
+
+export function SessionState():Promise<session.State>;
 
 export function StreamEndpoint():Promise<stream.Endpoint>;
 

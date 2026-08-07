@@ -78,6 +78,14 @@ export function ReorderProjects(arg1) {
   return window['go']['app']['App']['ReorderProjects'](arg1);
 }
 
+export function SaveSession(arg1) {
+  return window['go']['app']['App']['SaveSession'](arg1);
+}
+
+export function SessionState() {
+  return window['go']['app']['App']['SessionState']();
+}
+
 export function StreamEndpoint() {
   return window['go']['app']['App']['StreamEndpoint']();
 }

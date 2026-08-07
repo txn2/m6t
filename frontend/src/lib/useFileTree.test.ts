@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Directory } from "./directory";
 import type { Entry } from "./tree";
-import { ROOT } from "./tree";
+import { ROOT, visibleRows } from "./tree";
 import { useFileTree } from "./useFileTree";
 
 const endpoint = { port: 51234, token: "tok" };
@@ -553,5 +553,101 @@ describe("live updates over /events", () => {
     rerender({ root: "/w/other" });
 
     expect(sockets[0].close).toHaveBeenCalled();
+  });
+});
+
+describe("restoring a session's tree", () => {
+  it("reopens the saved directories and lists them", async () => {
+    const directory = fakeDirectory({
+      [ROOT]: [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "prod", isDir: true }],
+      "manifests/prod": [{ name: "ingress.yaml", isDir: false }],
+    });
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory as Directory));
+    await waitFor(() => {
+      expect(directory.list).toHaveBeenCalledWith("/w/infra", ROOT);
+    });
+
+    act(() => {
+      result.current.restore({
+        expanded: ["", "manifests", "manifests/prod"],
+        selected: "manifests/prod/ingress.yaml",
+        showHidden: true,
+        changedOnly: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.dirs["manifests/prod"]?.status).toBe("loaded");
+    });
+    expect([...result.current.state.expanded].sort()).toEqual([
+      "",
+      "manifests",
+      "manifests/prod",
+    ]);
+    expect(result.current.state.selected).toBe("manifests/prod/ingress.yaml");
+    expect(result.current.state.showHidden).toBe(true);
+  });
+
+  // The hook already lists the root for every project; asking again would be a
+  // second round trip for one directory on every project switch.
+  it("does not re-list the root it was already given", async () => {
+    const directory = fakeDirectory({ [ROOT]: [{ name: "manifests", isDir: true }] });
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory as Directory));
+    await waitFor(() => {
+      expect(directory.list).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      result.current.restore({ expanded: [""], selected: null, showHidden: false, changedOnly: false });
+    });
+
+    expect(directory.list).toHaveBeenCalledTimes(1);
+  });
+
+  // A directory removed while the app was closed draws nothing: its row comes
+  // from its parent's listing, which no longer mentions it.
+  it("keeps the rest of the tree when a saved directory is gone", async () => {
+    const directory = fakeDirectory({
+      [ROOT]: [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "prod.yaml", isDir: false }],
+    });
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory as Directory));
+    await waitFor(() => {
+      expect(directory.list).toHaveBeenCalledWith("/w/infra", ROOT);
+    });
+
+    act(() => {
+      result.current.restore({
+        expanded: ["manifests", "removed"],
+        selected: null,
+        showHidden: false,
+        changedOnly: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+    expect(visibleRows(result.current.state).map((row) => row.path)).toEqual([
+      "manifests",
+      "manifests/prod.yaml",
+    ]);
+  });
+
+  // The changed-files filter is window-wide: the tree carries it across a
+  // project switch, so a restore has to be able to set it as well as clear it.
+  it("applies the window-wide changed-files filter", async () => {
+    const directory = fakeDirectory({ [ROOT]: [] });
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory as Directory));
+    await waitFor(() => {
+      expect(directory.list).toHaveBeenCalled();
+    });
+
+    act(() => {
+      result.current.restore({ expanded: [], selected: null, showHidden: false, changedOnly: true });
+    });
+
+    expect(result.current.state.changedOnly).toBe(true);
   });
 });

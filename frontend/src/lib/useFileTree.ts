@@ -4,7 +4,7 @@ import { wailsDirectory } from "./directory";
 import type { SocketFactory } from "./events";
 import { openEventsSocket } from "./events";
 import type { Endpoint } from "./stream";
-import type { Entry, TreeState } from "./tree";
+import type { Entry, RestoredTree, TreeState } from "./tree";
 import {
   ROOT,
   affectedTrackedDirs,
@@ -15,6 +15,7 @@ import {
   joinPath,
   parentPath,
   locate,
+  restoreTree,
   reveal,
   select,
   toggleChangedOnly,
@@ -48,6 +49,8 @@ export interface FileTreeController {
    * expand, the filters that would have hidden it clear, and the row scrolls
    * into view once its listing lands. */
   readonly locate: (path: string) => void;
+  /** Puts a saved tree shape back and re-lists what it had open (#58). */
+  readonly restore: (saved: RestoredTree) => void;
   readonly toggleHidden: () => void;
   readonly toggleChangedOnly: () => void;
   /** Resolves to an error message on failure, or null on success. */
@@ -202,6 +205,32 @@ export function useFileTree(
     [list],
   );
 
+  /**
+   * Restores a saved tree shape (#58).
+   *
+   * Every saved directory is listed rather than only the ones this tree has
+   * not seen, which is the opposite of `reveal`'s and `locate`'s rule and
+   * deliberate: a restore runs in the same commit as the reset a project
+   * switch performs, and the loaded-listings ref is a render behind that —
+   * asked in this moment it still describes the project being switched away
+   * from. Listing them is what an expanded tree costs either way.
+   *
+   * The root is skipped because the effect above already lists it for every
+   * project, and asking twice would mean two round trips for one directory on
+   * every switch.
+   */
+  const restoreTreeState = useCallback(
+    (saved: RestoredTree) => {
+      setState((current) => restoreTree(current, saved));
+      for (const dir of saved.expanded) {
+        if (dir !== ROOT) {
+          list(dir);
+        }
+      }
+    },
+    [list],
+  );
+
   // /events: a coalesced batch names directories that may have changed
   // (PROTOCOL.md §5). Only directories this tree has already loaded are
   // worth re-fetching — see affectedTrackedDirs for why.
@@ -287,6 +316,7 @@ export function useFileTree(
     }, []),
     reveal: revealDir,
     locate: locateFile,
+    restore: restoreTreeState,
     toggleHidden: useCallback(() => {
       setState((current) => toggleHidden(current));
     }, []),

@@ -93,13 +93,21 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// is no git -> watch edge for the trigger and no stream -> git edge for
 	// the payload: the event on the wire names a project, and the status
 	// itself never leaves this package's reach.
+	// internal/app -> internal/session is #58's edge, the sixth service and the
+	// same shape as the registry's: it owns a file in the configuration
+	// directory, imports nothing first-party, and is composed here. There is
+	// deliberately no session -> project edge even though both write into that
+	// directory — the path is resolved once by the binding layer and handed to
+	// each, which is what keeps a scratch file from being able to reach the
+	// registry that must never be lost.
 	want := map[string][]string{
 		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo", "internal/git", "internal/project", "internal/pty", "internal/stream", "internal/watch"},
+		"internal/app":       {"internal/buildinfo", "internal/git", "internal/project", "internal/pty", "internal/session", "internal/stream", "internal/watch"},
 		"internal/buildinfo": {},
 		"internal/git":       {},
 		"internal/project":   {},
 		"internal/pty":       {},
+		"internal/session":   {},
 		"internal/stream":    {},
 		"internal/watch":     {},
 	}

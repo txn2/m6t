@@ -17,6 +17,7 @@ import (
 	"github.com/txn2/m6t/internal/buildinfo"
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/pty"
+	"github.com/txn2/m6t/internal/session"
 	"github.com/txn2/m6t/internal/stream"
 	"github.com/txn2/m6t/internal/watch"
 )
@@ -60,6 +61,13 @@ type App struct {
 	// binding all hang off.
 	projects *project.Registry
 
+	// sessions is the workspace session (#58): what the window was showing when
+	// it was last closed. It is a second file in the same configuration
+	// directory as the registry and a service of its own, because what it holds
+	// is scratch — a session that will not parse is replaced by defaults, which
+	// is the opposite of what projects.yaml does with the same failure.
+	sessions *session.Store
+
 	// trees watches every registered project's worktree (DESIGN.md §3.2) and
 	// backs the tree UI's lazy listing and CRUD (tree.go). Every project is
 	// an open tab from the moment it is registered, so a watcher's lifetime
@@ -88,7 +96,10 @@ func newApp() *App {
 	// A registry with no path reports the failure on every call rather than
 	// taking the window down at construction: an app that cannot find the OS
 	// config directory can still run terminals, and a project list showing an
-	// error is a better answer than no window at all.
+	// error is a better answer than no window at all. The session store is
+	// handed the same directory rather than resolving one of its own — there is
+	// one configuration directory, and two answers to where it is would be one
+	// too many.
 	configDir, err := project.ConfigDir()
 	if err != nil {
 		configDir = ""
@@ -99,6 +110,7 @@ func newApp() *App {
 		terminals: terminals,
 		streams:   streams,
 		projects:  project.New(configDir),
+		sessions:  session.New(configDir),
 
 		// M6T_FS_POLL selects the polling fallback (DESIGN.md §3.2). There
 		// is no per-project settings UI yet (Kube and Helm are in the same

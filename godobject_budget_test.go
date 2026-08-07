@@ -61,7 +61,15 @@ const (
 	// over the registry and service handles the App already has, not App
 	// methods — spending fields is the described pattern, spending the method
 	// ceiling on internal wiring is not.
-	maxAppFields = 6
+	// 6 -> 7 in #58. The workspace session arrives as a single *session.Store
+	// handle: the one-handle-per-service case a fifth time — the file, its
+	// locking, its schema and the normalization that makes a hand-edited
+	// session safe to act on all live in internal/session, and the App holds
+	// the handle only to delegate two calls. It is a second handle into the
+	// same configuration directory rather than a widening of the registry's,
+	// because the two files answer a failed parse in opposite ways and one
+	// service cannot hold both rules (see package_budget_test.go).
+	maxAppFields = 7
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.
@@ -197,7 +205,19 @@ const (
 	// was saved, for a column nobody asked to see — the same cost the #38
 	// paragraph above refused to fold into ListDirectory, arriving from the
 	// other direction.
-	maxAppMethods = 23
+	//
+	// 23 -> 25 in #58. SessionState and SaveSession: a read at launch and a
+	// write when the workspace settles, each a request with an answer and no
+	// throughput, which is the test every binding on this list has had to pass.
+	//
+	// Two is also the ceiling on what this feature can ever cost here, and that
+	// is the point worth reviewing rather than the raise. The saved workspace
+	// grows with every control the UI gains — the next toggle, the next pane —
+	// and a setter per field is exactly how a bound surface becomes a bus. The
+	// whole state crosses in one call instead, so a new field is a field in
+	// internal/session and a line in the frontend's snapshot, and this number
+	// does not move again for it.
+	maxAppMethods = 25
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

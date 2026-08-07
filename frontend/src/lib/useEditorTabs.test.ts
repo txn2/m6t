@@ -555,3 +555,130 @@ describe("tabsInChangedDirs", () => {
     expect(tabsInChangedDirs([tab("a.yaml", "/w/other")], "/w/infra", ["."])).toEqual([]);
   });
 });
+
+describe("restoring a session's tabs", () => {
+  it("reopens the saved files in order, focused on the saved one", async () => {
+    const files = fakeFiles({
+      "a.yaml": content("a: 1\n"),
+      "notes.md": content("# notes\n"),
+    });
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    await act(async () => {
+      await result.current.restore("infra", "/w/infra", {
+        files: [
+          { path: "a.yaml", mode: "edit" },
+          { path: "notes.md", mode: "preview" },
+        ],
+        active: "notes.md",
+      });
+    });
+
+    expect(result.current.visible.map((tab) => tab.path)).toEqual(["a.yaml", "notes.md"]);
+    expect(result.current.visible.every((tab) => tab.status === "ready")).toBe(true);
+    expect(result.current.visible[1].mode).toBe("preview");
+    expect(result.current.activeKey).toBe(result.current.visible[1].key);
+  });
+
+  // A markdown tab opens in preview by default. Restoring one the user had put
+  // into edit mode has to override that, or the mode is not really saved.
+  it("restores a mode the tab would not have defaulted to", async () => {
+    const files = fakeFiles({ "notes.md": content("# notes\n") });
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    await act(async () => {
+      await result.current.restore("infra", "/w/infra", {
+        files: [{ path: "notes.md", mode: "edit" }],
+        active: null,
+      });
+    });
+
+    expect(result.current.visible[0].mode).toBe("edit");
+  });
+
+  // Deleted while the app was closed: the tab is not restored, and the ones
+  // around it are. An error tab would make every restart after a branch switch
+  // an exercise in closing tabs.
+  it("silently skips a file that is gone and focuses a survivor", async () => {
+    const files = fakeFiles({ "kept.yaml": content("k: 1\n") });
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    await act(async () => {
+      await result.current.restore("infra", "/w/infra", {
+        files: [
+          { path: "deleted.yaml", mode: "edit" },
+          { path: "kept.yaml", mode: "edit" },
+        ],
+        active: "deleted.yaml",
+      });
+    });
+
+    expect(result.current.visible.map((tab) => tab.path)).toEqual(["kept.yaml"]);
+    expect(result.current.visible[0].status).toBe("ready");
+    expect(result.current.activeKey).toBe(result.current.visible[0].key);
+  });
+
+  it("leaves the strip empty when every saved file is gone", async () => {
+    const files = fakeFiles();
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    await act(async () => {
+      await result.current.restore("infra", "/w/infra", {
+        files: [{ path: "deleted.yaml", mode: "edit" }],
+        active: "deleted.yaml",
+      });
+    });
+
+    expect(result.current.visible).toHaveLength(0);
+    expect(result.current.activeKey).toBeNull();
+  });
+
+  // The user can open a file in the moment before the session is applied.
+  it("does not open a second tab for a file that is already open", async () => {
+    const files = fakeFiles({ "a.yaml": content("a: 1\n") });
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    act(() => {
+      result.current.open("infra", "/w/infra", "a.yaml");
+    });
+    await waitFor(() => {
+      expect(result.current.visible[0].status).toBe("ready");
+    });
+
+    await act(async () => {
+      await result.current.restore("infra", "/w/infra", {
+        files: [{ path: "a.yaml", mode: "edit" }],
+        active: "a.yaml",
+      });
+    });
+
+    expect(result.current.visible).toHaveLength(1);
+  });
+
+  it("restores one project's tabs without touching another's", async () => {
+    const files = fakeFiles({ "a.yaml": content("a: 1\n"), "b.yaml": content("b: 2\n") });
+    const { result, rerender } = renderHook(
+      ({ project }: { project: string }) => useEditorTabs(project, null, files),
+      { initialProps: { project: "infra" } },
+    );
+
+    await act(async () => {
+      await result.current.restore("infra", "/w/infra", {
+        files: [{ path: "a.yaml", mode: "edit" }],
+        active: null,
+      });
+    });
+    rerender({ project: "apps" });
+    await act(async () => {
+      await result.current.restore("apps", "/w/apps", {
+        files: [{ path: "b.yaml", mode: "edit" }],
+        active: null,
+      });
+    });
+
+    expect(result.current.visible.map((tab) => tab.path)).toEqual(["b.yaml"]);
+    expect(result.current.tabs).toHaveLength(2);
+    rerender({ project: "infra" });
+    expect(result.current.visible.map((tab) => tab.path)).toEqual(["a.yaml"]);
+  });
+});

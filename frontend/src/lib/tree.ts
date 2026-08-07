@@ -379,6 +379,45 @@ export function yamlPaths(dir: string, entries: readonly Entry[]): string[] {
     .filter((path) => iconKind(path, false) === "yaml");
 }
 
+/**
+ * The saved shape of a tree (#58): which directories were open, what was
+ * selected, and the two filters.
+ *
+ * It is declared here rather than in `lib/session.ts`, which is what produces
+ * one, because the alternative is an import cycle: the session reads this
+ * module's `TreeState` to record a tree, and this module would then read the
+ * session's type to restore one.
+ */
+export interface RestoredTree {
+  readonly expanded: readonly string[];
+  readonly selected: string | null;
+  readonly showHidden: boolean;
+  readonly changedOnly: boolean;
+}
+
+/**
+ * Puts a saved shape back onto a tree (#58).
+ *
+ * The listings are not part of it and could not be: what a directory holds is
+ * whatever it holds now. The restored tree knows which directories were open,
+ * and the hook asks the backend what is in them.
+ *
+ * The root is expanded whatever the session says, for the reason
+ * `initialTree` gives — the top level of a file tree is not behind a click. A
+ * directory that no longer exists needs no handling at all: its row comes from
+ * its parent's listing, which will not mention it, so an entry for it here
+ * describes nothing and draws nothing.
+ */
+export function restoreTree(state: TreeState, saved: RestoredTree): TreeState {
+  return {
+    ...state,
+    expanded: new Set([ROOT, ...saved.expanded]),
+    selected: saved.selected,
+    showHidden: saved.showHidden,
+    changedOnly: saved.changedOnly,
+  };
+}
+
 /** Expands a directory, so its children render once loaded. */
 export function expand(state: TreeState, dir: string): TreeState {
   if (state.expanded.has(dir)) {

@@ -26,6 +26,7 @@ import type { SocketFactory } from "./events";
 import { openEventsSocket } from "./events";
 import type { Files } from "./files";
 import { wailsFiles } from "./files";
+import type { RestoredEditors } from "./session";
 import type { Endpoint } from "./stream";
 import { ROOT, iconKind, parentPath } from "./tree";
 
@@ -48,6 +49,16 @@ export interface EditorTabs {
   readonly activeKey: string | null;
   readonly select: (key: string) => void;
   readonly open: (project: string, root: string, path: string) => void;
+  /**
+   * Reopens a project's saved tabs (#58). Resolves when every one of them has
+   * either opened or been found gone, which is what tells the session it may
+   * start recording this project's strip as fact.
+   */
+  readonly restore: (
+    project: string,
+    root: string,
+    saved: RestoredEditors,
+  ) => Promise<void>;
   readonly edit: (key: string, content: string) => void;
   /** Resolves true when the file reached disk. A caller that is about to
    * close the tab has to wait for that answer: closing on a failed write
@@ -133,6 +144,57 @@ export function useEditorTabs(
       load(key, root, path);
     },
     [load],
+  );
+
+  /**
+   * Reopens the tabs a session recorded for a project (#58).
+   *
+   * It reads each file itself rather than going through `open`, for the one
+   * behaviour restoring needs and opening must not have: a file that will not
+   * read is silently not restored. `open` is a user asking for a specific file
+   * and owes them an error when it is not there; a session is a description of
+   * a workspace that may have changed since, and answering a deleted file with
+   * a tab full of error text would make every restart after a `git clean` an
+   * exercise in closing tabs.
+   *
+   * Sequentially, and the order matters twice: the strip comes back in the
+   * order it was saved in, and a project with thirty tabs does not open thirty
+   * concurrent reads at launch.
+   */
+  const restore = useCallback(
+    async (project: string, root: string, saved: RestoredEditors): Promise<void> => {
+      const opened: { key: string; path: string }[] = [];
+
+      for (const file of saved.files) {
+        // A tab the user opened before the session was applied is left alone:
+        // restoring over it would be a second tab for one file.
+        if (findTabKey(strip.current, project, file.path) !== null) {
+          continue;
+        }
+        keys.current += 1;
+        const key = `editor-${String(keys.current)}`;
+        try {
+          const content = await files.read(root, file.path);
+          const kind = kindFromIcon(iconKind(file.path, false));
+          setTabs((current) => [
+            ...current,
+            withMode(withLoaded(newTab(key, project, root, file.path, kind), content), file.mode),
+          ]);
+          opened.push({ key, path: file.path });
+        } catch {
+          // Gone, unreadable, or no longer inside the project. Not restored.
+        }
+      }
+
+      if (opened.length === 0) {
+        return;
+      }
+      // The saved selection, or the first tab that survived: a strip that came
+      // back focused on nothing would be a strip with no editor under it.
+      const focus = opened.find((tab) => tab.path === saved.active) ?? opened[0];
+      setActiveByProject((current) => ({ ...current, [project]: focus.key }));
+    },
+    [files],
   );
 
   const edit = useCallback((key: string, content: string) => {
@@ -263,6 +325,7 @@ export function useEditorTabs(
     activeKey,
     select,
     open,
+    restore,
     edit,
     save,
     close,
