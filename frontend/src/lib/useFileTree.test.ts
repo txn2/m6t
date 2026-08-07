@@ -188,7 +188,7 @@ describe("loading the tree", () => {
     ]);
   });
 
-  it("resets to a fresh tree when the project changes", async () => {
+  it("opens a project it has never seen on an empty tree", async () => {
     const directory = fakeDirectory({ [ROOT]: [{ name: "a.yaml", isDir: false }] });
     const { result, rerender } = renderHook(
       ({ root }: { root: string | null }) => useFileTree(root, null, directory),
@@ -200,12 +200,27 @@ describe("loading the tree", () => {
 
     rerender({ root: "/w/other" });
 
-    // The reset happens before the new root's own listing effect runs, so by
-    // the time it settles root is "loading" again rather than still holding
-    // the previous project's entries — that stale data is the thing this
-    // guards against.
+    // The previous project's entries must not linger on screen under the new
+    // project's name while its first listing is in flight — its relative paths
+    // mean something else here.
     expect(result.current.state.dirs[ROOT]?.children).toEqual([]);
     expect(result.current.state.expanded.has(ROOT)).toBe(true);
+  });
+
+  // The seam below is rebuilt inside the render callback, which is both the
+  // ordinary way to write a test and an easy slip in a component. A hook that
+  // re-ran its listing effect on it would fetch, render, and fetch again — the
+  // failure is an out-of-memory crash rather than a wrong value, so it is
+  // worth a test of its own rather than being left to whoever trips it.
+  it("survives a caller that passes a new seam on every render", async () => {
+    const { result } = renderHook(() =>
+      useFileTree("/w/infra", null, fakeDirectory({ [ROOT]: [{ name: "a.yaml", isDir: false }] })),
+    );
+
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    expect(result.current.state.dirs[ROOT].children).toHaveLength(1);
   });
 
   it("reports a listing failure without losing what root already had", async () => {
@@ -234,6 +249,302 @@ describe("loading the tree", () => {
     expect(result.current.state.dirs.manifests.error).toBe("permission denied");
     // Root's own successful listing is untouched by a sibling's failure.
     expect(result.current.state.dirs[ROOT].status).toBe("loaded");
+  });
+});
+
+describe("keeping a project's tree across a switch (#59)", () => {
+  /** A Directory serving a different repository per root, so a test can prove
+   * two projects' identical relative paths never bleed into one another. */
+  function byRoot(listings: Record<string, Record<string, Entry[]>>) {
+    return {
+      list: vi.fn((root: string, relPath: string) => {
+        const dir = relPath === "" ? ROOT : relPath;
+        return Promise.resolve(listings[root]?.[dir] ?? []);
+      }),
+      create: vi.fn(() => Promise.resolve()),
+      rename: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+      prefixes: vi.fn(() => Promise.resolve({})),
+    };
+  }
+
+  const infra = {
+    [ROOT]: [{ name: "manifests", isDir: true }],
+    manifests: [
+      { name: "prod", isDir: true },
+      { name: "app.yaml", isDir: false },
+    ],
+    "manifests/prod": [{ name: "ingress.yaml", isDir: false }],
+  };
+
+  /** Renders the hook over a switchable root, waiting for the first project's
+   * root listing to land. */
+  function open(directory: Directory, root: string) {
+    return renderHook(({ at }: { at: string }) => useFileTree(at, null, directory), {
+      initialProps: { at: root },
+    });
+  }
+
+  it("comes back to the same expansion, selection and hidden-file setting", async () => {
+    const directory = fakeDirectory(infra);
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests/prod");
+      result.current.select("manifests/app.yaml");
+      result.current.toggleHidden();
+    });
+
+    rerender({ at: "/w/apps" });
+    rerender({ at: "/w/infra" });
+
+    expect([...result.current.state.expanded].sort()).toEqual([
+      ROOT,
+      "manifests",
+      "manifests/prod",
+    ]);
+    expect(result.current.state.selected).toBe("manifests/app.yaml");
+    expect(result.current.state.showHidden).toBe(true);
+  });
+
+  it("has the retained rows on screen before the refreshed ones land", async () => {
+    const directory = fakeDirectory(infra);
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+
+    rerender({ at: "/w/apps" });
+    rerender({ at: "/w/infra" });
+
+    // Synchronously on return, with every refresh still in flight: the rows
+    // are the retained ones rather than a loading state where they were.
+    expect(result.current.state.dirs.manifests.status).toBe("loading");
+    expect(visibleRows(result.current.state).map((row) => row.path)).toEqual([
+      "manifests",
+      "manifests/prod",
+      "manifests/app.yaml",
+    ]);
+  });
+
+  it("re-lists what the project has open, and nothing it has collapsed", async () => {
+    const directory = fakeDirectory(infra);
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests/prod");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs["manifests/prod"]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.collapse("manifests");
+    });
+
+    rerender({ at: "/w/apps" });
+    directory.list.mockClear();
+    rerender({ at: "/w/infra" });
+
+    // `manifests/prod` is still expanded and still loaded, but it draws
+    // nothing while its parent is closed — re-listing it would be a round trip
+    // for rows nobody can see.
+    expect(directory.list.mock.calls.map(([, dir]) => dir)).toEqual([ROOT]);
+  });
+
+  it("drops a directory deleted while the user was in another project", async () => {
+    const listings: Record<string, Entry[]> = {
+      [ROOT]: [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "prod", isDir: true }],
+    };
+    const directory = fakeDirectory(listings);
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.children).toHaveLength(1);
+    });
+
+    rerender({ at: "/w/apps" });
+    listings.manifests = [];
+    rerender({ at: "/w/infra" });
+
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests.children).toEqual([]);
+    });
+  });
+
+  it("never shows one project's listing under another's identical path", async () => {
+    const directory = byRoot({
+      "/w/infra": {
+        [ROOT]: [{ name: "manifests", isDir: true }],
+        manifests: [{ name: "infra.yaml", isDir: false }],
+      },
+      "/w/apps": {
+        [ROOT]: [{ name: "manifests", isDir: true }],
+        manifests: [{ name: "apps.yaml", isDir: false }],
+      },
+    });
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+
+    rerender({ at: "/w/apps" });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+    expect(result.current.state.dirs.manifests.children.map((e) => e.name)).toEqual([
+      "apps.yaml",
+    ]);
+
+    rerender({ at: "/w/infra" });
+    expect(result.current.state.dirs.manifests.children.map((e) => e.name)).toEqual([
+      "infra.yaml",
+    ]);
+  });
+
+  it("keeps the changed-files filter window-wide rather than per project", async () => {
+    const directory = fakeDirectory(infra);
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+
+    act(() => {
+      result.current.toggleChangedOnly();
+    });
+    rerender({ at: "/w/apps" });
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    // The filter describes how the user is working, not which repository they
+    // are looking at — see `withTree`.
+    expect(result.current.state.changedOnly).toBe(true);
+
+    act(() => {
+      result.current.toggleChangedOnly();
+    });
+    rerender({ at: "/w/infra" });
+    expect(result.current.state.changedOnly).toBe(false);
+  });
+
+  it("forgets a project that has left the registry", async () => {
+    const directory = fakeDirectory(infra);
+    const { result, rerender } = open(directory, "/w/infra");
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+    act(() => {
+      result.current.expand("manifests");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs.manifests?.status).toBe("loaded");
+    });
+
+    rerender({ at: "/w/apps" });
+    act(() => {
+      result.current.closeProject("/w/infra");
+    });
+    rerender({ at: "/w/infra" });
+
+    // Nothing retained: a re-added project starts where a new one does, and
+    // the map is not holding an entry a removed project left behind.
+    expect(result.current.state.dirs.manifests).toBeUndefined();
+    expect([...result.current.state.expanded]).toEqual([ROOT]);
+  });
+
+  it("drops a listing that lands after the project left the registry", async () => {
+    let release: (entries: Entry[]) => void = () => undefined;
+    const directory: Directory = {
+      list: vi.fn(
+        () =>
+          new Promise<Entry[]>((resolve) => {
+            release = resolve;
+          }),
+      ),
+      create: vi.fn(),
+      rename: vi.fn(),
+      remove: vi.fn(),
+      prefixes: vi.fn(() => Promise.resolve({})),
+    };
+    const { result } = open(directory, "/w/infra");
+
+    act(() => {
+      result.current.closeProject("/w/infra");
+    });
+    await act(async () => {
+      release([{ name: "late.yaml", isDir: false }]);
+    });
+
+    // A read in flight when a project is removed would otherwise write its
+    // entry back a moment after the removal dropped it, leaving the map
+    // holding a project the registry no longer has.
+    expect(result.current.state.dirs[ROOT]).toBeUndefined();
+  });
+
+  it("records a listing that lands after the user has moved on", async () => {
+    let release: (entries: Entry[]) => void = () => undefined;
+    const directory: Directory = {
+      list: vi.fn((root: string) =>
+        root === "/w/infra"
+          ? new Promise<Entry[]>((resolve) => {
+              release = resolve;
+            })
+          : Promise.resolve([]),
+      ),
+      create: vi.fn(),
+      rename: vi.fn(),
+      remove: vi.fn(),
+      prefixes: vi.fn(() => Promise.resolve({})),
+    };
+    const { result, rerender } = open(directory, "/w/infra");
+
+    rerender({ at: "/w/apps" });
+    await act(async () => {
+      release([{ name: "late.yaml", isDir: false }]);
+    });
+
+    // The answer belongs to the project it was asked of, which is still on the
+    // map — before there was one, a late listing had nowhere to go but away.
+    expect(result.current.state.dirs[ROOT]?.children).toEqual([]);
+    rerender({ at: "/w/infra" });
+    expect(result.current.state.dirs[ROOT].children.map((e) => e.name)).toEqual(["late.yaml"]);
   });
 });
 
@@ -461,11 +772,27 @@ describe("create, rename and delete", () => {
 
 describe("hidden files", () => {
   it("toggles the flag the tree filters by", () => {
-    const { result } = renderHook(() => useFileTree(null, null, fakeDirectory({})));
+    const { result } = renderHook(() => useFileTree("/w/infra", null, fakeDirectory({})));
     expect(result.current.state.showHidden).toBe(false);
     act(() => {
       result.current.toggleHidden();
     });
+    expect(result.current.state.showHidden).toBe(true);
+  });
+
+  it("holds the flag per project, so each keeps its own", () => {
+    const directory = fakeDirectory({ [ROOT]: [] });
+    const { result, rerender } = renderHook(({ root }) => useFileTree(root, null, directory), {
+      initialProps: { root: "/w/infra" },
+    });
+
+    act(() => {
+      result.current.toggleHidden();
+    });
+    rerender({ root: "/w/apps" });
+    expect(result.current.state.showHidden).toBe(false);
+
+    rerender({ root: "/w/infra" });
     expect(result.current.state.showHidden).toBe(true);
   });
 });

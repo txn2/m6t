@@ -125,6 +125,7 @@ function fakeController(
     reveal: vi.fn(),
     locate: vi.fn(),
     restore: vi.fn(),
+    closeProject: vi.fn(),
     toggleHidden: vi.fn(),
     toggleChangedOnly: vi.fn(),
     createEntry: vi.fn().mockResolvedValue(null),

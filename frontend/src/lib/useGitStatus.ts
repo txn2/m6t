@@ -9,11 +9,21 @@ import type { Endpoint } from "./stream";
 type GitReader = Pick<Git, "status">;
 
 /**
- * One project's git status, kept current (DESIGN.md §7).
+ * The status a project has before anything has been read for it. One shared
+ * value rather than a fresh object per render: `FileTree` recomputes every
+ * row's badge when this changes identity, and a project with no reading yet
+ * has nothing to recompute.
+ */
+const noStatus: Status = emptyStatus();
+
+/**
+ * Every project's git status, kept current (DESIGN.md §7).
  *
- * Scoped to the active project, the same way `useFileTree` is: only one
- * project's badges are ever on screen, so a project switch is a clean reset
- * rather than a filter over shared state.
+ * One status per project, keyed by root, the same shape `useFileTree` holds
+ * its trees in and for the same reason (#59): only one project's badges are on
+ * screen, but throwing the other projects' away meant the badges blanked and
+ * came back on every switch. What is retained is shown immediately on return,
+ * and a fresh read is already in flight behind it.
  */
 export interface GitStatusController {
   readonly status: Status;
@@ -33,6 +43,9 @@ export interface GitStatusController {
    * driven read, so calling it alongside one costs no extra subprocess.
    */
   readonly refresh: () => void;
+  /** Drops a project's retained status, named by its root path — the same
+   * key, and the same reason, as `FileTreeController.closeProject`. */
+  readonly closeProject: (root: string) => void;
 }
 
 export function useGitStatus(
@@ -45,13 +58,27 @@ export function useGitStatus(
   /** Injectable for tests; defaults to opening a real WebSocket. */
   socketFactory?: SocketFactory,
 ): GitStatusController {
-  const [status, setStatus] = useState<Status>(emptyStatus);
+  const [statuses, setStatuses] = useState<Readonly<Record<string, Status>>>({});
+  // Not per project, unlike the statuses. A failure is a sentence about the
+  // read that just happened, and showing the last project's on arrival at this
+  // one would be attributing one repository's problem to another.
   const [error, setError] = useState<string | null>(null);
+
+  const status = (root === null ? undefined : statuses[root]) ?? noStatus;
 
   // The project a result would belong to. It is a ref, not the `root` prop,
   // because a read that started before a project switch resolves after it,
   // and the check that discards it has to see the root as it is *now*.
   const target = useRef(root);
+
+  // The projects this hook is still holding a status for: every one that has
+  // been on screen, less the ones removed from the registry since.
+  //
+  // A read is a subprocess, and a project removed while one was running would
+  // otherwise have its entry written back a moment after `closeProject` dropped
+  // it — an entry for a project the registry no longer has, for the life of the
+  // app. `useFileTree` keeps the same set for the same reason.
+  const held = useRef(new Set<string>());
 
   // A status read is one subprocess, and the events that trigger it arrive in
   // coalesced batches from a watcher that does not wait for anyone. Without
@@ -92,11 +119,8 @@ export function useGitStatus(
             break;
           }
           const result = await readStatus(seam.current, reading);
-          // Dropped when the project changed while this was in flight: the
-          // loop goes round again for the new one, because the switch queued
-          // a re-read.
-          if (target.current === reading) {
-            apply(result, setStatus, setError);
+          if (held.current.has(reading)) {
+            apply(reading, result, setStatuses, setError, target.current === reading);
           }
         } while (stale.current);
       } finally {
@@ -105,14 +129,15 @@ export function useGitStatus(
     })();
   }, []);
 
-  // A new project's badges must not be the previous project's while its first
-  // read is in flight, so the visible status resets before anything is asked
-  // for.
+  // A project's own last-known badges are what it comes back to, so nothing is
+  // cleared here but the error — the read started below is what replaces them.
+  // A project being seen for the first time has no entry, and `noStatus` is
+  // what it shows until that read lands.
   useEffect(() => {
     target.current = root;
-    setStatus(emptyStatus());
     setError(null);
     if (root !== null) {
+      held.current.add(root);
       read();
     }
   }, [root, read]);
@@ -139,7 +164,18 @@ export function useGitStatus(
     };
   }, [root, endpoint, read, socketFactory]);
 
-  return { status, error, refresh: read };
+  const closeProject = useCallback((closing: string) => {
+    held.current.delete(closing);
+    setStatuses((current) => {
+      if (!(closing in current)) {
+        return current;
+      }
+      const { [closing]: _dropped, ...rest } = current;
+      return rest;
+    });
+  }, []);
+
+  return { status, error, refresh: read, closeProject };
 }
 
 /** One read's outcome: exactly one of the two is set. */
@@ -159,20 +195,33 @@ async function readStatus(git: GitReader, root: string): Promise<ReadResult> {
   }
 }
 
-/** Publishes a read's outcome. A success clears a previous failure; a failure
- * leaves the last good status on screen, because stale badges are more useful
- * than none while the reason is shown in the status bar. */
+/**
+ * Publishes a read's outcome against the project it was read for.
+ *
+ * A success clears a previous failure; a failure leaves that project's last
+ * good status alone, because stale badges are more useful than none while the
+ * reason is shown in the status bar.
+ *
+ * A status is recorded whether or not the project is still the one on screen —
+ * it describes the repository it was read from, and that repository's entry is
+ * where it belongs. `showing` gates only the error, which is a sentence in the
+ * status bar about the project the user is looking at.
+ */
 function apply(
+  root: string,
   result: ReadResult,
-  setStatus: (status: Status) => void,
+  setStatuses: (update: (current: Readonly<Record<string, Status>>) => Record<string, Status>) => void,
   setError: (error: string | null) => void,
+  showing: boolean,
 ): void {
   if (result.status !== null) {
-    setStatus(result.status);
-    setError(null);
+    const read = result.status;
+    setStatuses((current) => ({ ...current, [root]: read }));
+  }
+  if (!showing) {
     return;
   }
-  setError(result.error);
+  setError(result.status !== null ? null : result.error);
 }
 
 /** Renders a rejected binding call as a sentence the status bar can show. */

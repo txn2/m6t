@@ -495,6 +495,90 @@ describe("removing a project", () => {
   });
 });
 
+describe("a project tab keeping its state (#59)", () => {
+  /** Two checkouts that both hold a `manifests` directory, with different
+   * things inside — the case a map keyed on anything but the root gets wrong. */
+  const listings: Record<string, Record<string, { name: string; isDir: boolean }[]>> = {
+    "/w/alpha": {
+      "": [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "alpha.yaml", isDir: false }],
+    },
+    "/w/beta": {
+      "": [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "beta.yaml", isDir: false }],
+    },
+  };
+
+  function stubDirectory(): Directory {
+    return {
+      list: (root, relPath) => Promise.resolve(listings[root]?.[relPath] ?? []),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  async function workbench(registry: Registry) {
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{ registry, directory: stubDirectory(), git: stubGit() }}
+      />,
+    );
+    await screen.findByRole("treeitem", { name: /manifests/ });
+  }
+
+  it("comes back to the tree the project was left in", async () => {
+    await workbench(fakeRegistry([project("alpha"), project("beta")]));
+
+    fireEvent.click(screen.getByRole("treeitem", { name: /manifests/ }));
+    expect(await screen.findByRole("treeitem", { name: /alpha\.yaml/ })).toBeDefined();
+
+    open("beta");
+    // Nothing of alpha's under beta's identical relative path.
+    expect(screen.queryByRole("treeitem", { name: /alpha\.yaml/ })).toBeNull();
+    expect(screen.queryByRole("treeitem", { name: /beta\.yaml/ })).toBeNull();
+
+    open("alpha");
+
+    // Synchronously on return, with the refresh still in flight: the row is
+    // there rather than a collapsed tree waiting on a round trip.
+    expect(screen.getByRole("treeitem", { name: /alpha\.yaml/ })).toBeDefined();
+  });
+
+  it("gives a re-added project a tree with nothing of the old one in it", async () => {
+    const registry = fakeRegistry([project("alpha"), project("beta")]);
+    registry.choose = vi.fn(() => Promise.resolve("/w/alpha"));
+    await workbench(registry);
+
+    fireEvent.click(screen.getByRole("treeitem", { name: /manifests/ }));
+    expect(await screen.findByRole("treeitem", { name: /alpha\.yaml/ })).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove alpha from the project list" }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+    });
+
+    open("+ Project");
+    fireEvent.keyDown(await screen.findByRole("textbox", { name: "project name" }), {
+      key: "Enter",
+    });
+    await screen.findByRole("button", { name: "alpha" });
+
+    // The registry no longer held this project, so nothing was kept for it: its
+    // root is expanded and everything below is collapsed, as for any project
+    // being opened for the first time.
+    await waitFor(() => {
+      expect(screen.getByRole("treeitem", { name: /manifests/ })).toBeDefined();
+    });
+    expect(screen.queryByRole("treeitem", { name: /alpha\.yaml/ })).toBeNull();
+  });
+});
+
 describe("the stream endpoint", () => {
   it("says it is still connecting before the endpoint arrives", async () => {
     await renderWith(["infra"]);

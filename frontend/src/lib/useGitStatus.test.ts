@@ -60,7 +60,7 @@ describe("reading a project's status", () => {
 
   // The previous project's badges must not sit on the new project's tree
   // while its first read is in flight.
-  it("clears the visible status when the project changes", async () => {
+  it("shows a project it has never read nothing of the last one's", async () => {
     const git = fakeGit({
       "/w/infra": statusOf([file("a.yaml", { worktree: MODIFIED })]),
       "/w/other": statusOf([]),
@@ -317,9 +317,10 @@ describe("not stacking reads", () => {
     expect(git.status).toHaveBeenCalledTimes(2);
   });
 
-  // A read in flight when the project changes belongs to the old project.
-  // Applying its answer would put one repository's badges on another's tree.
-  it("discards a read that lands after the project changed", async () => {
+  // A read in flight when the project changes belongs to the old project, and
+  // is recorded against it: what it must never do is put one repository's
+  // badges on another's tree.
+  it("keeps a read that lands after the project changed off the visible badges", async () => {
     const answers: Record<string, () => void> = {};
     const git = {
       status: vi.fn(
@@ -361,5 +362,109 @@ describe("not stacking reads", () => {
     await waitFor(() => {
       expect(result.current.status.files[0]?.path).toBe("/w/other/only.yaml");
     });
+
+    // The late answer was not thrown away — it went to the project it was read
+    // from, which is what that project comes back to.
+    rerender({ root: "/w/infra" });
+    expect(result.current.status.files[0]?.path).toBe("/w/infra/only.yaml");
+  });
+});
+
+describe("keeping a project's badges across a switch (#59)", () => {
+  it("shows the last-known status on return and re-reads behind it", async () => {
+    const git = fakeGit({
+      "/w/infra": statusOf([file("a.yaml", { worktree: MODIFIED })]),
+      "/w/apps": statusOf([]),
+    });
+    const { result, rerender } = renderHook(({ root }: { root: string }) => useGitStatus(root, null, git), {
+      initialProps: { root: "/w/infra" },
+    });
+    await waitFor(() => {
+      expect(result.current.status.files).toHaveLength(1);
+    });
+
+    rerender({ root: "/w/apps" });
+    await waitFor(() => {
+      expect(git.status).toHaveBeenCalledWith("/w/apps");
+    });
+    git.status.mockClear();
+
+    rerender({ root: "/w/infra" });
+
+    // Synchronously, before the re-read this switch started has landed: the
+    // badges the user left are the ones they come back to.
+    expect(result.current.status.files[0]?.path).toBe("a.yaml");
+    expect(git.status).toHaveBeenCalledWith("/w/infra");
+  });
+
+  it("updates the retained badges once the fresh read lands", async () => {
+    const byRoot: Record<string, Status> = {
+      "/w/infra": statusOf([file("a.yaml", { worktree: MODIFIED })]),
+      "/w/apps": statusOf([]),
+    };
+    const git = fakeGit(byRoot);
+    const { result, rerender } = renderHook(({ root }: { root: string }) => useGitStatus(root, null, git), {
+      initialProps: { root: "/w/infra" },
+    });
+    await waitFor(() => {
+      expect(result.current.status.files).toHaveLength(1);
+    });
+
+    rerender({ root: "/w/apps" });
+    byRoot["/w/infra"] = statusOf([file("b.yaml", { worktree: UNTRACKED })]);
+    rerender({ root: "/w/infra" });
+
+    await waitFor(() => {
+      expect(result.current.status.files[0]?.path).toBe("b.yaml");
+    });
+  });
+
+  it("forgets a project that has left the registry", async () => {
+    const git = fakeGit({ "/w/infra": statusOf([file("a.yaml", { worktree: MODIFIED })]) });
+    const { result, rerender } = renderHook(({ root }: { root: string }) => useGitStatus(root, null, git), {
+      initialProps: { root: "/w/infra" },
+    });
+    await waitFor(() => {
+      expect(result.current.status.files).toHaveLength(1);
+    });
+
+    rerender({ root: "/w/apps" });
+    act(() => {
+      result.current.closeProject("/w/infra");
+    });
+    rerender({ root: "/w/infra" });
+
+    // Nothing retained: the map holds no entry for a project the registry no
+    // longer has, so the badges start where a new project's do.
+    expect(result.current.status.files).toHaveLength(0);
+  });
+
+  it("drops a read that lands after the project left the registry", async () => {
+    let release: (status: Status) => void = () => undefined;
+    const git = {
+      status: vi.fn(
+        () =>
+          new Promise<Status>((resolve) => {
+            release = resolve;
+          }),
+      ),
+    };
+    const { result } = renderHook(({ root }: { root: string }) => useGitStatus(root, null, git), {
+      initialProps: { root: "/w/infra" },
+    });
+    await waitFor(() => {
+      expect(git.status).toHaveBeenCalledWith("/w/infra");
+    });
+
+    act(() => {
+      result.current.closeProject("/w/infra");
+    });
+    await act(async () => {
+      release(statusOf([file("a.yaml", { worktree: MODIFIED })]));
+    });
+
+    // A `git status` is a subprocess, so a removal lands mid-read easily. Its
+    // answer must not put the entry back that the removal just dropped.
+    expect(result.current.status.files).toHaveLength(0);
   });
 });

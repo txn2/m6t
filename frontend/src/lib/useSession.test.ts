@@ -85,9 +85,9 @@ function saved(over: Record<string, unknown> = {}): Session {
  * The workbench's hooks, wired the way `App` wires them.
  *
  * The real hooks rather than fakes, because what these tests are about is the
- * order the restore happens in — a tree that resets on a project switch, a
- * strip that must not be recorded before it is filled — and a fake of those
- * hooks would be a fake of the behaviour under test.
+ * order the restore happens in — a tree seeded once per project, a strip that
+ * must not be recorded before it is filled — and a fake of those hooks would
+ * be a fake of the behaviour under test.
  */
 function workbench(options: {
   store: SessionStore;
@@ -249,9 +249,12 @@ describe("restoring a workspace", () => {
     expect(result.current.editors.tabs).toHaveLength(0);
   });
 
-  // The tree is reset by a project switch, so unlike the strips it is restored
-  // every time — otherwise coming back to a project would show it collapsed.
-  it("puts the tree back each time a project comes back on screen", async () => {
+  // The tree hook retains a project's shape across a switch (#59), so the
+  // saved record seeds it once and the live tree is what remembers from then
+  // on. A restore that ran again on every activation would undo whatever the
+  // user had done to the tree since — collapsing a directory would last until
+  // they visited another project.
+  it("seeds the tree once, and leaves the user's own collapse alone after that", async () => {
     const { store } = fakeStore(
       saved({
         activeProject: "infra",
@@ -269,18 +272,24 @@ describe("restoring a workspace", () => {
     });
 
     act(() => {
+      result.current.tree.collapse("manifests");
+    });
+    act(() => {
       result.current.projects.select("apps");
     });
     await waitFor(() => {
-      expect(result.current.tree.state.expanded.has("manifests")).toBe(false);
+      expect(result.current.projects.activeName).toBe("apps");
     });
+    // The other project's tree is its own, and knows nothing of this one's.
+    expect(result.current.tree.state.expanded.has("manifests")).toBe(false);
 
     act(() => {
       result.current.projects.select("infra");
     });
     await waitFor(() => {
-      expect(result.current.tree.state.expanded.has("manifests")).toBe(true);
+      expect(result.current.projects.activeName).toBe("infra");
     });
+    expect(result.current.tree.state.expanded.has("manifests")).toBe(false);
   });
 
   it("starts at the defaults when the session cannot be read", async () => {
@@ -453,10 +462,9 @@ describe("recording a workspace", () => {
     expect(last().projects[0].editors).toEqual([]);
   });
 
-  // Each project's tree is its own. The strips make this easy — they only ever
-  // show the active project — but the tree is shared state that is reset and
-  // refilled on every switch, so what gets recorded for a project has to be the
-  // tree that was on screen while that project was.
+  // Each project's tree is its own, and the snapshot has to name the right one:
+  // the hook reads its entry during render, so from the first render of a
+  // switch `tree.state` is the project the record is being written for (#59).
   it("records each project's own tree across a switch and back", async () => {
     vi.useFakeTimers();
     const { store, last } = fakeStore(

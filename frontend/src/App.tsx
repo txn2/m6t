@@ -12,7 +12,7 @@ import { wailsFiles } from "./lib/files";
 import type { Git, Status } from "./lib/git";
 import { wailsGit } from "./lib/git";
 import type { Project, Registry } from "./lib/projects";
-import { projectLabel, wailsRegistry } from "./lib/projects";
+import { findProject, projectLabel, wailsRegistry } from "./lib/projects";
 import { useProjects } from "./lib/useProjects";
 import type { SessionStore } from "./lib/session";
 import { wailsSession } from "./lib/session";
@@ -145,32 +145,41 @@ export default function App({
   // until it was restarted.
   useEffect(() => watchAppearance(setAppearance), []);
 
-  const handleRemove = useCallback(
-    (name: string) => {
-      // The project's terminals and editor tabs go with it. Their panes would
-      // otherwise stay mounted for the life of the app with no tab left to
-      // reach them.
-      terminals.closeProject(name);
-      editors.closeProject(name);
-      projects.remove(name);
-    },
-    [projects, terminals, editors],
-  );
-
   const active = projects.active;
   // One binding for both hooks: they take the same path, and computing it
   // twice is two more branches in a component that has a ceiling on them.
   const activePath = active?.path ?? null;
   const tree = useFileTree(activePath, stream, directory);
   const gitStatus = useGitStatus(activePath, stream, git);
+
+  const handleRemove = useCallback(
+    (name: string) => {
+      // Everything the project was holding goes with it. Its terminal and
+      // editor panes would otherwise stay mounted for the life of the app with
+      // no tab left to reach them, and its retained tree and status would sit
+      // in maps nothing can reach either. The two halves are keyed
+      // differently: a pane belongs to a project by name, and a listing or a
+      // status belongs to the checkout it was read from.
+      terminals.closeProject(name);
+      editors.closeProject(name);
+      const removed = findProject(projects.list, name);
+      if (removed !== null) {
+        tree.closeProject(removed.path);
+        gitStatus.closeProject(removed.path);
+      }
+      projects.remove(name);
+    },
+    [projects, terminals, editors, tree, gitStatus],
+  );
+
   // The write half re-reads through the read half: an operation refreshes the
   // status it changed rather than reporting one of its own, so the panel has
   // one source for what the repository looks like (PROTOCOL.md §5, `git`).
   const gitOps = useGitOps(activePath, gitStatus.refresh, git);
 
-  // Declared after every hook it restores into: the tree resets itself on a
-  // project switch, and a restore registered ahead of that reset would be
-  // undone by it in the same commit.
+  // Declared after every hook it restores into, so that in any commit their
+  // effects have run before its own: a restore seeds a project's tree on its
+  // first activation, and the tree's own effects are what list what it opens.
   const { workspace, setWorkspace } = useSession({
     projects,
     editors,

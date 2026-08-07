@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Directory } from "./directory";
 import { wailsDirectory } from "./directory";
 import type { SocketFactory } from "./events";
 import { openEventsSocket } from "./events";
 import type { Endpoint } from "./stream";
+import type { ProjectTrees } from "./projectTrees";
+import { treeFor, withTree, withoutTree } from "./projectTrees";
 import type { Entry, RestoredTree, TreeState } from "./tree";
 import {
   ROOT,
@@ -11,8 +13,8 @@ import {
   ancestry,
   collapse,
   expand,
-  initialTree,
   joinPath,
+  openDirs,
   parentPath,
   locate,
   restoreTree,
@@ -28,14 +30,26 @@ import {
 } from "./tree";
 
 /**
- * The file tree's state and operations for whichever project is active
- * (DESIGN.md §5).
+ * The file tree's state and operations, one tree per project (DESIGN.md §5).
  *
- * Unlike the terminal strip (`useTerminals`), this is scoped to one project
- * at a time rather than flattened across all of them: only the active
- * project's tree is ever visible, so there is nothing to keep mounted for an
- * inactive one, and a project switch is a clean reset rather than a filter
- * over shared state.
+ * Only the active project's tree is on screen, so — unlike the terminal strip
+ * and the editor strip — nothing has to stay mounted for an inactive project.
+ * What it keeps instead is the state behind those rows: which directories were
+ * open, what was selected, whether hidden files were showing, and every
+ * listing already fetched. A switch changes which entry is read, not what is
+ * stored (#59).
+ *
+ * That is a choice rather than a saving. A pane holding a running shell or an
+ * unsaved buffer *cannot* be rebuilt, which is what forced the other two;
+ * a tree can be, merely at the cost of a burst of round trips and a loading
+ * state where the rows used to be, on every switch, forever. The listings
+ * themselves are names and `isDir` flags — a few hundred kilobytes across
+ * every project a user has open, once.
+ *
+ * Retained rows come with an obligation: the `/events` handler below ignores
+ * events for the project that is not on screen, so an inactive project's
+ * listings go stale by construction. Returning to one re-lists everything it
+ * has open, behind the rows it is already showing.
  */
 export interface FileTreeController {
   readonly state: TreeState;
@@ -51,6 +65,12 @@ export interface FileTreeController {
   readonly locate: (path: string) => void;
   /** Puts a saved tree shape back and re-lists what it had open (#58). */
   readonly restore: (saved: RestoredTree) => void;
+  /**
+   * Drops a project's retained tree, named by its root path — which is what
+   * keys them, so this takes a path where the editor and terminal strips take
+   * a project name.
+   */
+  readonly closeProject: (root: string) => void;
   readonly toggleHidden: () => void;
   readonly toggleChangedOnly: () => void;
   /** Resolves to an error message on failure, or null on success. */
@@ -66,30 +86,58 @@ export function useFileTree(
   /** Injectable for tests; defaults to opening a real WebSocket. */
   socketFactory?: SocketFactory,
 ): FileTreeController {
-  const [state, setState] = useState<TreeState>(initialTree);
+  const [trees, setTrees] = useState<ProjectTrees>({});
+  const state = useMemo(() => treeFor(trees, root), [trees, root]);
 
-  // The current state, for the /events handler: that callback is registered
-  // once per (root, endpoint) pair and must see what is actually loaded at
-  // the moment an event arrives, not what was loaded when it was registered.
+  // The backend seam, behind a ref so nothing below changes identity with it —
+  // the guard `useGitStatus` states in full and for the same reason. A caller
+  // passing an inline object, which is the ordinary way to write a test and an
+  // easy slip in a component, would otherwise rebuild `list` every render,
+  // re-run the listing effect, fetch, render, and rebuild it again: a loop that
+  // ends in an out-of-memory crash rather than a visible bug.
+  const seam = useRef(directory);
+  useEffect(() => {
+    seam.current = directory;
+  }, [directory]);
+
+  // The projects this hook is still holding a tree for: every one that has been
+  // on screen, less the ones removed from the registry since. A ref rather than
+  // state because nothing renders from it — it exists so that a listing still
+  // in flight when a project is removed cannot write the entry back a moment
+  // after `closeProject` dropped it, leaving the map holding a project the
+  // registry no longer has. `useGitStatus` keeps the same set for the same
+  // reason.
+  const held = useRef(new Set<string>());
+
+  /**
+   * Applies a change to one named project's tree.
+   *
+   * The project is a parameter rather than read off `root`, and that is what
+   * makes every asynchronous path here safe across a switch: a listing or a
+   * batch of manifest verdicts that lands after the user has moved on is
+   * written into the tree it was fetched for, which is still on the map and
+   * still worth updating. Before the map existed there was nowhere to put such
+   * an answer and the only option was to discard it.
+   */
+  const updateTree = useCallback(
+    (project: string, change: (current: TreeState) => TreeState) => {
+      if (!held.current.has(project)) {
+        return;
+      }
+      setTrees((current) => withTree(current, project, change(treeFor(current, project))));
+    },
+    [],
+  );
+
+  // The active project's state, for the /events handler and for the refresh
+  // below: both are registered once per project and must see what is actually
+  // loaded at the moment they run, not what was loaded when they were
+  // registered. Declared before the effects that read it so that in any commit
+  // it is assigned first.
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
-
-  // The project a late response has to be checked against — see `classify`.
-  const rootRef = useRef(root);
-  useEffect(() => {
-    rootRef.current = root;
-  }, [root]);
-
-  // A new project has nothing loaded yet, and the previous project's entries
-  // must not linger on screen while the fresh listing arrives. Changed-only
-  // mode is the one thing carried across: it is a property of how the user is
-  // working rather than of the project they are looking at, the same as the
-  // sidebar's width, and it behaved that way before it moved into this state.
-  useEffect(() => {
-    setState((current) => ({ ...initialTree(), changedOnly: current.changedOnly }));
-  }, [root]);
 
   /**
    * Reads the head of every plain-YAML file in a fresh listing and records
@@ -108,21 +156,14 @@ export function useFileTree(
     async (forRoot: string, dir: string, entries: readonly Entry[]) => {
       for (const paths of batched(yamlPaths(dir, entries))) {
         try {
-          const heads = await directory.prefixes(forRoot, paths);
-          // A project switch while this was in flight would otherwise write
-          // one project's verdicts into another's tree, where the paths are
-          // relative and can collide. The listing state is reset on switch;
-          // these would not be.
-          if (rootRef.current !== forRoot) {
-            return;
-          }
-          setState((current) => withManifests(current, heads, paths));
+          const heads = await seam.current.prefixes(forRoot, paths);
+          updateTree(forRoot, (current) => withManifests(current, heads, paths));
         } catch {
           // Left unclassified; the rows keep their name-derived icon.
         }
       }
     },
-    [directory],
+    [updateTree],
   );
 
   const list = useCallback(
@@ -130,7 +171,8 @@ export function useFileTree(
       if (root === null) {
         return;
       }
-      setState((current) => withLoading(current, dir));
+      const forRoot = root;
+      updateTree(forRoot, (current) => withLoading(current, dir));
       // An async body rather than .then/.catch directly on directory.list's
       // return value: the generated binding throws synchronously when there
       // is no Wails runtime behind it (App.tsx's own endpoint fetch has the
@@ -138,36 +180,67 @@ export function useFileTree(
       // is attached would otherwise escape this effect uncaught.
       void (async () => {
         try {
-          const entries = await directory.list(root, dir);
-          setState((current) => withListing(current, dir, entries));
-          await classify(root, dir, entries);
+          const entries = await seam.current.list(forRoot, dir);
+          updateTree(forRoot, (current) => withListing(current, dir, entries));
+          await classify(forRoot, dir, entries);
         } catch (error: unknown) {
-          setState((current) => withError(current, dir, describeError(error)));
+          updateTree(forRoot, (current) => withError(current, dir, describeError(error)));
         }
       })();
     },
-    [root, directory, classify],
+    [root, classify, updateTree],
   );
 
-  // Root's own listing is not behind an expand click — the top level of any
-  // file tree is visible as soon as there is a project to show.
+  /**
+   * Everything the project now on screen has open: root, which is never behind
+   * an expand click, and — for a project being returned to — every directory
+   * whose rows are already showing.
+   *
+   * The refresh is not optional. The `/events` subscription below only follows
+   * the active project, so a retained listing is exactly as old as the time
+   * spent in other projects; without this, a directory deleted while the user
+   * was elsewhere would still have a row on their return. `withLoading` keeps
+   * the last-known children, so the rows on screen are the retained ones until
+   * the fresh listing replaces them in place.
+   *
+   * It reads the state through the ref rather than depending on it: an effect
+   * that re-ran when a listing landed would ask for that listing again.
+   */
   useEffect(() => {
-    if (root !== null) {
-      list(ROOT);
+    if (root === null) {
+      return;
+    }
+    held.current.add(root);
+    for (const dir of openDirs(stateRef.current)) {
+      list(dir);
     }
   }, [root, list]);
 
-  const expandDir = useCallback(
-    (dir: string) => {
-      setState((current) => expand(current, dir));
-      list(dir);
+  /** Applies a change to the tree the user is looking at — every operation
+   * below is one the user performed on it, so none of them name a project. */
+  const updateActive = useCallback(
+    (change: (current: TreeState) => TreeState) => {
+      if (root !== null) {
+        updateTree(root, change);
+      }
     },
-    [list],
+    [root, updateTree],
   );
 
-  const collapseDir = useCallback((dir: string) => {
-    setState((current) => collapse(current, dir));
-  }, []);
+  const expandDir = useCallback(
+    (dir: string) => {
+      updateActive((current) => expand(current, dir));
+      list(dir);
+    },
+    [list, updateActive],
+  );
+
+  const collapseDir = useCallback(
+    (dir: string) => {
+      updateActive((current) => collapse(current, dir));
+    },
+    [updateActive],
+  );
 
   /**
    * Opens a directory and every directory above it (#43).
@@ -181,19 +254,19 @@ export function useFileTree(
    */
   const revealDir = useCallback(
     (dir: string) => {
-      setState((current) => reveal(current, dir));
+      updateActive((current) => reveal(current, dir));
       for (const path of ancestry(dir)) {
         if (!(path in stateRef.current.dirs)) {
           list(path);
         }
       }
     },
-    [list],
+    [list, updateActive],
   );
 
   const locateFile = useCallback(
     (path: string) => {
-      setState((current) => locate(current, path));
+      updateActive((current) => locate(current, path));
       // The chain above the file, not the file: listing a file is a backend
       // error, and the row appears as soon as its own directory is listed.
       for (const dir of ancestry(parentPath(path))) {
@@ -202,34 +275,37 @@ export function useFileTree(
         }
       }
     },
-    [list],
+    [list, updateActive],
   );
 
   /**
    * Restores a saved tree shape (#58).
    *
-   * Every saved directory is listed rather than only the ones this tree has
-   * not seen, which is the opposite of `reveal`'s and `locate`'s rule and
-   * deliberate: a restore runs in the same commit as the reset a project
-   * switch performs, and the loaded-listings ref is a render behind that —
-   * asked in this moment it still describes the project being switched away
-   * from. Listing them is what an expanded tree costs either way.
+   * It runs once per project, on the first activation — the session seeds a
+   * tree that has nothing in it yet, and from then on the retained state is
+   * what remembers. So every saved directory is listed: on a first activation
+   * none of them have been, and the ref that would say otherwise describes the
+   * project being switched away from until this commit's effects run.
    *
    * The root is skipped because the effect above already lists it for every
-   * project, and asking twice would mean two round trips for one directory on
-   * every switch.
+   * project, and asking twice would mean two round trips for one directory.
    */
   const restoreTreeState = useCallback(
     (saved: RestoredTree) => {
-      setState((current) => restoreTree(current, saved));
+      updateActive((current) => restoreTree(current, saved));
       for (const dir of saved.expanded) {
         if (dir !== ROOT) {
           list(dir);
         }
       }
     },
-    [list],
+    [list, updateActive],
   );
+
+  const closeProject = useCallback((closing: string) => {
+    held.current.delete(closing);
+    setTrees((current) => withoutTree(current, closing));
+  }, []);
 
   // /events: a coalesced batch names directories that may have changed
   // (PROTOCOL.md §5). Only directories this tree has already loaded are
@@ -263,14 +339,14 @@ export function useFileTree(
         return "no project is open";
       }
       try {
-        await directory.create(root, joinPath(dir, name), isDir);
+        await seam.current.create(root, joinPath(dir, name), isDir);
         list(dir);
         return null;
       } catch (error: unknown) {
         return describeError(error);
       }
     },
-    [root, directory, list],
+    [root, list],
   );
 
   const renameEntry = useCallback(
@@ -280,14 +356,14 @@ export function useFileTree(
       }
       const dir = parentPath(path);
       try {
-        await directory.rename(root, path, joinPath(dir, newName));
+        await seam.current.rename(root, path, joinPath(dir, newName));
         list(dir);
         return null;
       } catch (error: unknown) {
         return describeError(error);
       }
     },
-    [root, directory, list],
+    [root, list],
   );
 
   const deleteEntry = useCallback(
@@ -296,33 +372,37 @@ export function useFileTree(
         return "no project is open";
       }
       try {
-        await directory.remove(root, path);
+        await seam.current.remove(root, path);
         list(parentPath(path));
-        setState((current) => (current.selected === path ? select(current, null) : current));
+        updateActive((current) => (current.selected === path ? select(current, null) : current));
         return null;
       } catch (error: unknown) {
         return describeError(error);
       }
     },
-    [root, directory, list],
+    [root, list, updateActive],
   );
 
   return {
     state,
     expand: expandDir,
     collapse: collapseDir,
-    select: useCallback((path: string | null) => {
-      setState((current) => select(current, path));
-    }, []),
+    select: useCallback(
+      (path: string | null) => {
+        updateActive((current) => select(current, path));
+      },
+      [updateActive],
+    ),
     reveal: revealDir,
     locate: locateFile,
     restore: restoreTreeState,
+    closeProject,
     toggleHidden: useCallback(() => {
-      setState((current) => toggleHidden(current));
-    }, []),
+      updateActive(toggleHidden);
+    }, [updateActive]),
     toggleChangedOnly: useCallback(() => {
-      setState((current) => toggleChangedOnly(current));
-    }, []),
+      updateActive(toggleChangedOnly);
+    }, [updateActive]),
     createEntry,
     renameEntry,
     deleteEntry,

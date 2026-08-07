@@ -538,6 +538,26 @@ export function visibleRows(state: TreeState): TreeRow[] {
 }
 
 /**
+ * The directories whose listings are on screen: root, and every expanded
+ * directory the user can actually see.
+ *
+ * This is what a project being switched back to re-fetches (#59). Expanded is
+ * not enough on its own — a directory expanded underneath a collapsed parent
+ * draws nothing, and re-listing it would be a round trip for rows nobody is
+ * looking at. Walking the visible rows is what tells the two apart, and it is
+ * the same walk that produced the rows being refreshed.
+ */
+export function openDirs(state: TreeState): string[] {
+  const open = [ROOT];
+  for (const row of visibleRows(state)) {
+    if (row.isDir && state.expanded.has(row.path)) {
+      open.push(row.path);
+    }
+  }
+  return open;
+}
+
+/**
  * The subset of a "tree changed" event's directories (PROTOCOL.md §5,
  * `.`-for-root) that this tree has actually loaded, translated to this
  * package's `""`-for-root convention.
