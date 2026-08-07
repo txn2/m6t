@@ -14,10 +14,12 @@ import { wailsGit } from "./lib/git";
 import type { Project, Registry } from "./lib/projects";
 import { projectLabel, wailsRegistry } from "./lib/projects";
 import { useProjects } from "./lib/useProjects";
+import type { SessionStore } from "./lib/session";
+import { wailsSession } from "./lib/session";
+import { useSession } from "./lib/useSession";
 import type { Endpoint } from "./lib/stream";
 import type { Appearance } from "./lib/theme";
 import {
-  DEFAULT_FONT_SIZE,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
   clampFontSize,
@@ -55,6 +57,7 @@ export interface Backend {
   readonly directory: Directory;
   readonly files: Files;
   readonly git: Git;
+  readonly session: SessionStore;
 }
 
 /** Every seam backed by its generated Wails binding. */
@@ -63,6 +66,7 @@ export const wailsBackend: Backend = {
   directory: wailsDirectory,
   files: wailsFiles,
   git: wailsGit,
+  session: wailsSession,
 };
 
 export interface AppProps {
@@ -87,7 +91,7 @@ export default function App({
   endpoint = StreamEndpoint,
   backend,
 }: AppProps) {
-  const { registry, directory, files, git } = { ...wailsBackend, ...backend };
+  const { registry, directory, files, git, session } = { ...wailsBackend, ...backend };
 
   const [build, setBuild] = useState<BuildStatus>(initialStatus);
   const [stream, setStream] = useState<Endpoint | null>(null);
@@ -95,7 +99,6 @@ export default function App({
 
   const projects = useProjects(registry);
 
-  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [appearance, setAppearance] = useState<Appearance>(preferredAppearance);
 
   const terminals = useTerminals(projects.activeName);
@@ -165,6 +168,17 @@ export default function App({
   // one source for what the repository looks like (PROTOCOL.md §5, `git`).
   const gitOps = useGitOps(activePath, gitStatus.refresh, git);
 
+  // Declared after every hook it restores into: the tree resets itself on a
+  // project switch, and a restore registered ahead of that reset would be
+  // undone by it in the same commit.
+  const { workspace, setWorkspace } = useSession({
+    projects,
+    editors,
+    terminals,
+    tree,
+    store: session,
+  });
+
   const handleOpenFile = useCallback(
     (path: string) => {
       if (active !== null) {
@@ -206,6 +220,8 @@ export default function App({
           git={gitStatus}
           gitOps={gitOps}
           onOpenFile={handleOpenFile}
+          panes={workspace}
+          onPanes={setWorkspace}
           editor={
             <Editor
               project={active}
@@ -223,7 +239,7 @@ export default function App({
               stream={stream}
               streamError={streamError}
               terminals={terminals}
-              fontSize={fontSize}
+              fontSize={workspace.fontSize}
               appearance={appearance}
             />
           }
@@ -235,9 +251,9 @@ export default function App({
         <span className="statusbar__spacer" />
         <BuildLine build={build} />
         <FontSize
-          size={fontSize}
+          size={workspace.fontSize}
           onChange={(px) => {
-            setFontSize(clampFontSize(px));
+            setWorkspace({ fontSize: clampFontSize(px) });
           }}
         />
       </footer>

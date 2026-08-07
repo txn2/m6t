@@ -10,7 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { detachedBuild } from "./lib/build";
-import { project as models, watch } from "../wailsjs/go/models";
+import { project as models, session as sessionModels, watch } from "../wailsjs/go/models";
 import type { Directory } from "./lib/directory";
 import type { Files } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
@@ -1301,5 +1301,61 @@ describe("locating the open file in the tree (#56)", () => {
     await renderWith(["infra"]);
 
     expect(screen.queryByRole("button", { name: "Locate" })).toBeNull();
+  });
+});
+
+/**
+ * The session seam, wired through `App` rather than through the hook.
+ *
+ * `lib/useSession.test.ts` covers what restoring does; what is left to prove
+ * here is that the composition root actually hands the store to it, and hands
+ * the restored pane sizes to the workbench. Both are one line in `App` and
+ * both fail silently — the app simply comes back at its defaults.
+ */
+describe("the saved session (#58)", () => {
+  it("opens the project the session recorded rather than the first one", async () => {
+    const registry = fakeRegistry([project("infra"), project("apps")]);
+    const store = {
+      load: () =>
+        Promise.resolve(
+          sessionModels.State.createFrom({ version: 1, activeProject: "apps", projects: [] }),
+        ),
+      save: vi.fn(() => Promise.resolve()),
+    };
+
+    render(<App load={attached} endpoint={pending} backend={{ registry, session: store }} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "apps" }).getAttribute("aria-current"),
+      ).toBe("page");
+    });
+  });
+
+  it("draws the workbench at the pane sizes the session recorded", async () => {
+    const registry = fakeRegistry([project("infra")]);
+    const store = {
+      load: () =>
+        Promise.resolve(
+          sessionModels.State.createFrom({
+            version: 1,
+            activeProject: "infra",
+            sidebar: 342,
+            terminalHeight: 208,
+            projects: [],
+          }),
+        ),
+      save: vi.fn(() => Promise.resolve()),
+    };
+
+    const { container } = render(
+      <App load={attached} endpoint={pending} backend={{ registry, session: store }} />,
+    );
+
+    await waitFor(() => {
+      const workbench = container.querySelector(".workbench");
+      expect(workbench?.getAttribute("style")).toContain("342px");
+      expect(workbench?.getAttribute("style")).toContain("208px");
+    });
   });
 });

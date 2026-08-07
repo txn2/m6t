@@ -43,7 +43,13 @@ var structuralPins = map[string]packagePin{
 		why: "composition root: embeds the frontend, hands options to the Wails runtime",
 	},
 	"internal/app": {
-		loc: 700, exported: 2,
+		// 700 -> 760 in #58. session.go is two delegating bindings and their
+		// doc comments; the App gains one field, the session store's handle.
+		// The room #9's note set aside here was earmarked for #10's kube
+		// bindings, and #52's GitBlame took part of it before this did, so the
+		// number moves rather than the service being squeezed in under it.
+		// 704 is today's actual.
+		loc: 760, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/git": {
@@ -67,6 +73,14 @@ var structuralPins = map[string]packagePin{
 		// 650 -> 750 in #41. See locCeilingNote.
 		loc: 750, exported: 9,
 		why: "project registry: the persistent list of manifest repositories, their per-project settings and the order the tab strip shows them in",
+	},
+	"internal/session": {
+		// Measured: #58 landed it at 463 lines across two files — the session
+		// schema with the normalization every reader of an editable file needs,
+		// and the confined atomic store. 550 is that plus the same proportional
+		// follow-up room internal/pty and internal/project carry.
+		loc: 550, exported: 9,
+		why: "workspace session: what the window was showing when it was last closed — active project, per-project editor tabs, tree shape and terminal tabs — as a scratch file beside the registry that is replaced by defaults rather than reported when it will not parse",
 	},
 	"internal/pty": {
 		loc: 750, exported: 7,
@@ -313,7 +327,26 @@ var structuralPins = map[string]packagePin{
 // changed, so there is no new measurement to pin them to. No other ceiling here
 // needs the caveat: counts of packages, files and exported names do not grow
 // through ordinary editing.
-const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project, internal/watch and internal/git are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
+// internal/session is measured: it landed with #58 at 463 lines across two
+// files. state.go is the schema and its normalization, which is the bulk of it
+// and the part that has to exist: this file is editable by hand and readable by
+// a build that is not this one, so every reference it holds — a selection
+// naming a tab, an index into a strip, a terminal's directory — is checked
+// against what is actually there before the frontend is handed it. store.go is
+// the confined atomic write, deliberately mirroring internal/project/store.go
+// rather than sharing it, for the reason that package's own note gives about
+// extracting a seam its only caller does not need.
+//
+// The decomposition question this package invites is the opposite of the usual
+// one: why is it not part of internal/project, which already owns a file in the
+// same directory? Because the two files have opposite failure rules. A
+// projects.yaml that does not parse is an error the user is told about, since
+// silently starting from empty would present them with an app that appears to
+// have forgotten every project they have. A session.yaml that does not parse is
+// replaced by defaults without a word. Putting both behind one package would
+// mean one package with two contradictory contracts, and the day someone
+// applied the wrong one, the registry is what would be lost.
+const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project, internal/session, internal/watch and internal/git are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.

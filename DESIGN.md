@@ -171,6 +171,11 @@ registry gained in the meantime.
 Nothing is written into the managed repos in v1 — they stay pristine manifest
 repos. (A shared in-repo `.m6t.yaml` for team defaults is a v2 candidate.)
 
+The second file in that directory is `session.yaml`: the workspace m6t was last
+closed in — the open project, and per project the editor tabs, the tree's shape and the terminal tabs, plus the window-wide settings around them. It is written by `internal/session` half a second after the workspace stops changing, and it is deliberately not part of `projects.yaml`, because the two answer a broken file in opposite ways. A registry that will not parse is an error the user is shown, since starting from empty would look like an app that had forgotten every project they have. A session that will not parse is replaced by the defaults without a word: everything in it is a click away, and a dialog about a file nobody knew existed would be worse than the workspace it was describing.
+
+Restoring is per project and lazy. The window-wide settings come back at launch; a project's tabs come back the first time it is the project on screen, so a registry of ten repositories does not read a file and start a shell for each of their tabs before the user has asked for any of it. Every restored reference is checked against a workspace that may have moved on: a file that will not read is a tab that does not come back, a directory that is gone is a terminal opened at the project root instead, and a project the registry no longer holds loses its record.
+
 The kube context binding is **per project and explicit**. m6t never uses the
 kubeconfig current-context; a project with no bound context shows the cluster
 panel and apply actions disabled with a "bind a context" prompt.

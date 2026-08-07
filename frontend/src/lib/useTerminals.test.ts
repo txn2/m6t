@@ -136,3 +136,73 @@ describe("closing a project's terminals", () => {
     expect(result.current.tabs[0].project).toBe("beta");
   });
 });
+
+describe("restoring a session's terminals", () => {
+  it("reopens the saved tabs with their titles and directories, focused on the saved one", () => {
+    const { result } = renderHook(() => useTerminals("infra"));
+
+    act(() => {
+      result.current.restore("infra", {
+        tabs: [
+          { title: "build", cwd: "/w/infra" },
+          { title: "claude 1", cwd: "/w/infra/manifests" },
+        ],
+        active: 1,
+      });
+    });
+
+    expect(result.current.visible.map((tab) => tab.title)).toEqual(["build", "claude 1"]);
+    expect(result.current.visible.map((tab) => tab.cwd)).toEqual([
+      "/w/infra",
+      "/w/infra/manifests",
+    ]);
+    expect(result.current.activeKey).toBe(result.current.visible[1].key);
+  });
+
+  // A restored tab starts a shell, not the command that happened to be running
+  // in it: re-running the user's last command at launch is a side effect.
+  it("restores a tab as a plain shell", () => {
+    const { result } = renderHook(() => useTerminals("infra"));
+
+    act(() => {
+      result.current.restore("infra", {
+        tabs: [{ title: "claude 1", cwd: "/w/infra" }],
+        active: 0,
+      });
+    });
+
+    expect(result.current.visible[0].autorun).toBeNull();
+    expect(result.current.visible[0].status).toBe("starting");
+  });
+
+  it("does nothing when a project had no terminals open", () => {
+    const { result } = renderHook(() => useTerminals("infra"));
+
+    act(() => {
+      result.current.restore("infra", { tabs: [], active: 0 });
+    });
+
+    expect(result.current.visible).toHaveLength(0);
+    expect(result.current.activeKey).toBeNull();
+  });
+
+  // Keys are never reused, and a restored tab is no exception: one that
+  // collided with a closed tab's key would let React match a fresh pane to a
+  // dead terminal.
+  it("gives a restored tab a key no other tab has held", () => {
+    const { result } = renderHook(() => useTerminals("infra"));
+
+    act(() => {
+      result.current.create("infra", "/w/infra", null);
+    });
+    const created = result.current.visible[0].key;
+    act(() => {
+      result.current.close(created);
+    });
+    act(() => {
+      result.current.restore("infra", { tabs: [{ title: "shell 1", cwd: "/w/infra" }], active: 0 });
+    });
+
+    expect(result.current.visible[0].key).not.toBe(created);
+  });
+});

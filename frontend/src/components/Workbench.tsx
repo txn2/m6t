@@ -17,10 +17,9 @@ import { branchSummary } from "../lib/gitStatus";
 import {
   EDITOR_MIN_HEIGHT,
   EDITOR_MIN_WIDTH,
-  SIDEBAR_DEFAULT,
   SIDEBAR_MIN,
-  TERMINAL_DEFAULT,
   TERMINAL_MIN,
+  clampSplit,
 } from "../lib/panes";
 
 export interface WorkbenchProps {
@@ -38,6 +37,22 @@ export interface WorkbenchProps {
   readonly editor: ReactNode;
   /** The terminal strip and panes for this project. */
   readonly terminals: ReactNode;
+  /**
+   * The two split sizes, in pixels, and how a change to them is reported.
+   *
+   * They are the caller's rather than this component's because they outlive it:
+   * the session restores them at launch and records them as they are dragged
+   * (#58), and a workbench that owned them would reset both every time the
+   * project strip had no project to show.
+   */
+  readonly panes: PaneSizes;
+  readonly onPanes: (next: PaneSizes) => void;
+}
+
+/** The workbench's two split sizes, in pixels. */
+export interface PaneSizes {
+  readonly sidebar: number;
+  readonly terminalHeight: number;
 }
 
 /**
@@ -61,10 +76,31 @@ export function Workbench({
   onOpenFile,
   editor,
   terminals,
+  panes,
+  onPanes,
 }: WorkbenchProps) {
-  const [sidebar, setSidebar] = useState(SIDEBAR_DEFAULT);
-  const [terminalHeight, setTerminalHeight] = useState(TERMINAL_DEFAULT);
+  const { sidebar, terminalHeight } = panes;
   const { extent, frame } = useExtent();
+
+  const setSidebar = (next: number) => {
+    onPanes({ ...panes, sidebar: next });
+  };
+  const setTerminalHeight = (next: number) => {
+    onPanes({ ...panes, terminalHeight: next });
+  };
+
+  // A size can arrive too large for the window it is being drawn in: a session
+  // saved on a docked display, restored on the laptop alone. The separators
+  // clamp what a drag produces, which never runs for a size nobody dragged, so
+  // the same bounds are applied here the moment the workbench knows how big it
+  // is — and again whenever that changes, which is also what stops a pane from
+  // keeping a width the window no longer has after being shrunk.
+  useEffect(() => {
+    const fitted = fit(panes, extent);
+    if (fitted.sidebar !== sidebar || fitted.terminalHeight !== terminalHeight) {
+      onPanes(fitted);
+    }
+  }, [panes, extent, sidebar, terminalHeight, onPanes]);
 
   return (
     <div
@@ -121,6 +157,27 @@ export function Workbench({
       </section>
     </div>
   );
+}
+
+/** Both splits held inside the bounds an extent allows — `clampSplit`'s rules,
+ * applied to a pair. An unmeasured extent drops the upper bound, which is what
+ * keeps the minimums working in jsdom and in the first frame. */
+export function fit(
+  panes: PaneSizes,
+  extent: { readonly width: number; readonly height: number },
+): PaneSizes {
+  return {
+    sidebar: clampSplit(panes.sidebar, {
+      min: SIDEBAR_MIN,
+      minOther: EDITOR_MIN_WIDTH,
+      total: extent.width,
+    }),
+    terminalHeight: clampSplit(panes.terminalHeight, {
+      min: TERMINAL_MIN,
+      minOther: EDITOR_MIN_HEIGHT,
+      total: extent.height,
+    }),
+  };
 }
 
 /**

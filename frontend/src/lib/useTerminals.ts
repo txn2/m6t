@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { RestoredTerminals } from "./session";
 import type { SessionStatus, TerminalSession } from "./terminalSession";
 import type { TerminalTab } from "./tabs";
 import {
@@ -35,6 +36,8 @@ export interface Terminals {
     cwd: string,
     autorun: string | null,
   ) => void;
+  /** Reopens the terminal tabs a session recorded for a project (#58). */
+  readonly restore: (project: string, saved: RestoredTerminals) => void;
   readonly close: (key: string) => void;
   readonly closeProject: (project: string) => void;
   readonly rename: (key: string, title: string) => void;
@@ -122,6 +125,35 @@ export function useTerminals(activeProject: string | null): Terminals {
     [],
   );
 
+  /**
+   * Reopens the tabs a session recorded for a project (#58).
+   *
+   * A shell does not survive the app closing, so what comes back is the strip
+   * and not the session: the same titles in the same order, each starting a
+   * fresh shell in the directory it was started in before. Nothing autoruns —
+   * the tab that was running `claude` comes back as the shell it was launched
+   * as, because re-running a command the user did not ask for at startup is a
+   * side effect, not a restore.
+   *
+   * The titles are taken as recorded rather than renumbered through
+   * `nextTitle`: a tab the user named is the one thing about a terminal worth
+   * keeping, and a strip that came back as "shell 1, shell 2" would have
+   * quietly discarded it.
+   */
+  const restore = useCallback((project: string, saved: RestoredTerminals) => {
+    if (saved.tabs.length === 0) {
+      return;
+    }
+    const restored = saved.tabs.map((tab) => {
+      keys.current += 1;
+      return newTab(`tab-${String(keys.current)}`, project, tab.title, tab.cwd, null);
+    });
+    setTabs((current) => [...current, ...restored]);
+
+    const focus = restored[saved.active] ?? restored[0];
+    setActiveByProject((current) => ({ ...current, [project]: focus.key }));
+  }, []);
+
   const close = useCallback(
     (key: string) => {
       // Ending the session is the point of closing a tab. Unmounting the pane
@@ -177,6 +209,7 @@ export function useTerminals(activeProject: string | null): Terminals {
     activeKey,
     select,
     create,
+    restore,
     close,
     closeProject,
     rename,

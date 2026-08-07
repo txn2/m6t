@@ -124,6 +124,7 @@ function fakeController(
     select: vi.fn(),
     reveal: vi.fn(),
     locate: vi.fn(),
+    restore: vi.fn(),
     toggleHidden: vi.fn(),
     toggleChangedOnly: vi.fn(),
     createEntry: vi.fn().mockResolvedValue(null),
