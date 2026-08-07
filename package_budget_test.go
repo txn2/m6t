@@ -55,8 +55,9 @@ var structuralPins = map[string]packagePin{
 		// they are unreachable code. Both figures ratchet down rather than
 		// standing still, because a ceiling left where a package used to be
 		// is room for the next thing to move in unnoticed.
-		loc: 900, exported: 21,
-		why: "git service: both halves of DESIGN.md §7 over the system git — porcelain v2 status with its two degraded states reported as values rather than errors, and the writes the terminal is a bad place for (pull, push, branch switch)",
+		// 900 -> 1100 and 21 -> 25 in #52. See locCeilingNote.
+		loc: 1100, exported: 25,
+		why: "git service: DESIGN.md §7 over the system git — porcelain v2 status with its two degraded states reported as values rather than errors, porcelain blame for the editor's per-line attribution, and the writes the terminal is a bad place for (pull, push, branch switch)",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,
@@ -234,6 +235,37 @@ var structuralPins = map[string]packagePin{
 // (ErrNoPaths, ErrOutsideRoot, ErrEmptyMessage, ErrInvalidRef) that callers
 // match with errors.Is — the bound surface is a public API, so its refusals
 // are part of the contract rather than strings to compare.
+//
+// 900 -> 1100 and 21 -> 25 in #52, and the paragraph above named this exact
+// case as one that should go the other way, so it has to be answered rather
+// than quietly overruled. What it said is that a reader parsing a different
+// format for a different consumer, sharing only the binary, should land as
+// its own package. blame.go is that reader — porcelain blame, for the
+// editor's gutter rather than the tree's badges — and it did not land as one.
+//
+// The reason is the sentence before it, which turns out to bind harder than
+// the sentence after: a sibling package cannot reach runGit, so
+// internal/blame only compiles by extracting the runner into a second
+// dependency-root package beside internal/buildinfo. The runner is not
+// incidental here. It is what pins LC_ALL so the not-a-repository match keeps
+// working, what passes --no-optional-locks so a read does not publish a
+// change event that triggers another read, what bounds a call against a
+// hung network mount, and what carries git's stderr out verbatim. A blame
+// package that duplicated any of that would be a second answer to a question
+// this repository has already answered once; one that imported it would need
+// the layering rule loosened for a package with a single consumer.
+//
+// So the split #35 was told to make is real, and the seam is not where that
+// paragraph put it. It is the runner, not the parser — and extracting it is a
+// refactor of #8 and #9's code with its own blast radius, which is not
+// something to do inside a ticket about a column in the editor. It is #53,
+// which blocks #35, rather than something done here.
+//
+// 1072 is today's actual and 1100 is the same slim follow-up room the rest of
+// this table carries — deliberately not enough for #35 to move in under. The
+// surface goes to 25 with the usual zero slack: Blame and BlameCommit cross
+// the bridge, LoadBlame is the operation, and ErrInvalidPath is a refusal a
+// caller matches with errors.Is, the same reason ErrInvalidRef is exported.
 //
 // 620 -> 700 in #9. git.go gains the mutating half of the git service: eight
 // delegating bindings, each four lines because each names its own operation

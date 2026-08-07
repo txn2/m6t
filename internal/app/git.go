@@ -30,6 +30,23 @@ func (*App) GitStatus(root string) (git.Status, error) {
 	return status, nil
 }
 
+// GitBlame attributes each line of one file to the commit that last touched
+// it (#52), for the editor's blame column. relPath is root-relative and
+// slash-separated, the form ReadFile and the file tree already use.
+//
+// It is a second reader beside GitStatus rather than part of it: a status is
+// read for a whole project on every filesystem event, and a blame is read for
+// one file only while a user has the column turned on. Folding a per-file
+// subprocess into the event-driven call would run `git blame` on every save of
+// every file, for a column nobody asked to see.
+func (*App) GitBlame(root, relPath string) (git.Blame, error) {
+	blame, err := git.LoadBlame(root, relPath)
+	if err != nil {
+		return git.Blame{}, fmt.Errorf("blaming %s in %s: %w", relPath, root, err)
+	}
+	return blame, nil
+}
+
 // The mutating half of DESIGN.md §7. Each of these is one operation the
 // branch bar puts a control on, and each is a thin pass through to
 // internal/git — the binding layer composes services, it does not implement

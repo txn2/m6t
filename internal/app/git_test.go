@@ -140,6 +140,40 @@ func TestGitRemotesReportsWhatIsConfigured(t *testing.T) {
 	}
 }
 
+func TestGitBlameAttributesLinesThroughTheBinding(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+	writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
+	runRepoGit(t, dir, "add", "-A")
+	runRepoGit(t, dir, "commit", "-qm", "first")
+
+	blame, err := a.GitBlame(dir, "deploy.yaml")
+	if err != nil {
+		t.Fatalf("GitBlame: %v", err)
+	}
+	if len(blame.Lines) != 1 {
+		t.Fatalf("lines = %v, want one", blame.Lines)
+	}
+	if got := blame.Commits[blame.Lines[0]].Author; got != "m6t tests" {
+		t.Errorf("author = %q, want the fixture's committer", got)
+	}
+}
+
+// A path the file tree would never emit is refused before git runs, and the
+// refusal names the project it was refused in like every other binding here.
+func TestGitBlameRefusesAPathOutsideTheProject(t *testing.T) {
+	a := testApp(t)
+	dir := gitRepoDir(t)
+
+	_, err := a.GitBlame(dir, "../escape.yaml")
+	if !errors.Is(err, git.ErrInvalidPath) {
+		t.Fatalf("GitBlame(../escape.yaml) = %v, want ErrInvalidPath", err)
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("error = %q, want it to name the project path", err)
+	}
+}
+
 // A failing operation reaches the frontend with git's own words in it. The
 // binding wraps; it does not summarize (DESIGN.md §7).
 func TestGitOperationsSurfaceGitsOwnWords(t *testing.T) {

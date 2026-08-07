@@ -14,6 +14,7 @@ import {
   initialTree,
   joinPath,
   parentPath,
+  locate,
   reveal,
   select,
   toggleChangedOnly,
@@ -43,6 +44,10 @@ export interface FileTreeController {
   /** Opens a directory and everything above it, and selects it — what a
    * breadcrumb segment click does (#43). */
   readonly reveal: (dir: string) => void;
+  /** Brings one file on screen and selects it (#56): the directories above it
+   * expand, the filters that would have hidden it clear, and the row scrolls
+   * into view once its listing lands. */
+  readonly locate: (path: string) => void;
   readonly toggleHidden: () => void;
   readonly toggleChangedOnly: () => void;
   /** Resolves to an error message on failure, or null on success. */
@@ -183,6 +188,20 @@ export function useFileTree(
     [list],
   );
 
+  const locateFile = useCallback(
+    (path: string) => {
+      setState((current) => locate(current, path));
+      // The chain above the file, not the file: listing a file is a backend
+      // error, and the row appears as soon as its own directory is listed.
+      for (const dir of ancestry(parentPath(path))) {
+        if (!(dir in stateRef.current.dirs)) {
+          list(dir);
+        }
+      }
+    },
+    [list],
+  );
+
   // /events: a coalesced batch names directories that may have changed
   // (PROTOCOL.md §5). Only directories this tree has already loaded are
   // worth re-fetching — see affectedTrackedDirs for why.
@@ -267,6 +286,7 @@ export function useFileTree(
       setState((current) => select(current, path));
     }, []),
     reveal: revealDir,
+    locate: locateFile,
     toggleHidden: useCallback(() => {
       setState((current) => toggleHidden(current));
     }, []),

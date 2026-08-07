@@ -63,6 +63,21 @@ export interface TreeState {
    * the classification happen once per file for the life of the tree.
    */
   readonly manifests: ReadonlyMap<string, boolean>;
+  /**
+   * How many times a locate has been asked for (#56).
+   *
+   * A counter rather than a flag, and it exists because "the selection
+   * changed" and "the user asked to be shown this file" need different
+   * answers from the tree: an ordinary selection scrolls the row just far
+   * enough to be visible, and a locate puts it in the middle of the pane. The
+   * two are indistinguishable from `selected` alone — pressing Locate on a
+   * file that is already selected changes nothing about it.
+   *
+   * Nothing reads the value. What matters is that it differs from the last
+   * one the view acted on, which is also what makes a second locate of the
+   * same file work.
+   */
+  readonly locateRequest: number;
 }
 
 /** A tree with nothing loaded yet, root pre-expanded — the top level of any
@@ -75,6 +90,7 @@ export function initialTree(): TreeState {
     showHidden: false,
     changedOnly: false,
     manifests: new Map(),
+    locateRequest: 0,
   };
 }
 
@@ -411,6 +427,32 @@ export function reveal(state: TreeState, dir: string): TreeState {
     selected: dir,
     showHidden: state.showHidden || chain.some((path) => isHidden({ name: baseName(path) })),
     changedOnly: false,
+  };
+}
+
+/**
+ * Brings a file on screen: every directory above it expanded, the file itself
+ * selected, and every filter that would have hidden it cleared (#56).
+ *
+ * It is not `reveal` with a file path. `reveal` expands what it is given, and
+ * a file in the expanded set is a directory listing nobody will ever fetch —
+ * `useFileTree.reveal` would ask the backend to list a file. This expands the
+ * chain above the file and stops there.
+ *
+ * The hidden check runs over the file's own chain rather than its parent's,
+ * which is the case a parent-only check gets wrong: `.gitignore` at the root
+ * has no hidden ancestor, so revealing its parent would leave `showHidden`
+ * off and the tree would answer the locate by doing nothing at all.
+ */
+export function locate(state: TreeState, path: string): TreeState {
+  const revealed = reveal(state, parentPath(path));
+  return {
+    ...revealed,
+    selected: path,
+    locateRequest: state.locateRequest + 1,
+    showHidden:
+      revealed.showHidden ||
+      ancestry(path).some((step) => isHidden({ name: baseName(step) })),
   };
 }
 

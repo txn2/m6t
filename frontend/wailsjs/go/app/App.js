@@ -18,6 +18,10 @@ export function DeleteEntry(arg1, arg2) {
   return window['go']['app']['App']['DeleteEntry'](arg1, arg2);
 }
 
+export function GitBlame(arg1, arg2) {
+  return window['go']['app']['App']['GitBlame'](arg1, arg2);
+}
+
 export function GitBranches(arg1) {
   return window['go']['app']['App']['GitBranches'](arg1);
 }

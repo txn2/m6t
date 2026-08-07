@@ -92,7 +92,7 @@ function toneOf(row: HTMLElement): string | null {
 }
 
 function showChangedOnly(): void {
-  fireEvent.click(screen.getByRole("button", { name: "show changed files only" }));
+  fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
 }
 
 function loadedRoot(): TreeState {
@@ -123,6 +123,7 @@ function fakeController(
     collapse: vi.fn(),
     select: vi.fn(),
     reveal: vi.fn(),
+    locate: vi.fn(),
     toggleHidden: vi.fn(),
     toggleChangedOnly: vi.fn(),
     createEntry: vi.fn().mockResolvedValue(null),
@@ -271,22 +272,114 @@ describe("keyboard navigation", () => {
   });
 });
 
+describe("scrolling the selected row (#56)", () => {
+  /**
+   * The tree without the changed-only Harness above.
+   *
+   * These re-render with a new state, and the Harness pins its own copy at
+   * mount — so through it the component would never see the second state and
+   * every assertion here would pass over a tree that had not moved.
+   */
+  function renderPlain(state: TreeState) {
+    const { rerender } = render(
+      <FileTree tree={fakeController(state)} status={emptyStatus()} onOpenFile={vi.fn()} />,
+    );
+    return (next: TreeState) => {
+      rerender(
+        <FileTree tree={fakeController(next)} status={emptyStatus()} onOpenFile={vi.fn()} />,
+      );
+    };
+  }
+
+  const at = (path: string | null, locateRequest: number): TreeState => ({
+    ...loadedManifests(loadedRoot()),
+    selected: path,
+    locateRequest,
+  });
+
+  /** The alignment each scrollIntoView call asked for, in order. */
+  const blocks = (spy: ReturnType<typeof vi.spyOn>) =>
+    spy.mock.calls.map(([options]) => (options as ScrollIntoViewOptions).block);
+
+  it("puts a located row in the middle of the pane", () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    const rerender = renderPlain(at(null, 0));
+    spy.mockClear();
+
+    rerender(at("manifests/prod.yaml", 1));
+
+    expect(blocks(spy)).toContain("center");
+  });
+
+  // Centring every selection would drag the tree out from under someone
+  // arrowing through it.
+  it("moves an ordinarily selected row only as far as it must", () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    const rerender = renderPlain(at("manifests", 0));
+    spy.mockClear();
+
+    rerender(at("manifests/prod.yaml", 0));
+
+    expect(blocks(spy)).toContain("nearest");
+    expect(blocks(spy)).not.toContain("center");
+  });
+
+  // Pressing Locate on the file already selected must still centre it: the
+  // selection does not change, so only the request tells the two apart.
+  it("centres again when the same file is located twice", () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    const rerender = renderPlain(at("manifests/prod.yaml", 1));
+    spy.mockClear();
+
+    rerender(at("manifests/prod.yaml", 2));
+
+    expect(blocks(spy)).toContain("center");
+  });
+
+  // The row a locate asks for often does not exist yet: its directory is
+  // still being listed. The centring has to survive until it does, or the
+  // file arrives on screen pinned to whichever edge it came in on.
+  it("centres the row when it arrives after the locate", () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    const rerender = renderPlain(at(null, 0));
+    spy.mockClear();
+
+    // The locate lands first: the file is selected, but the directory holding
+    // it has not been listed, so it has no row to scroll to.
+    rerender({ ...loadedRoot(), selected: "manifests/prod.yaml", locateRequest: 1 });
+    expect(blocks(spy)).toEqual([]);
+
+    // The listing arrives.
+    rerender(at("manifests/prod.yaml", 1));
+
+    expect(blocks(spy)).toContain("center");
+  });
+});
+
 describe("the hidden-files toggle", () => {
-  it("calls toggleHidden and reflects the current state", () => {
+  const toggle = () => screen.getByRole("button", { name: "Show hidden" });
+
+  it("calls toggleHidden", () => {
     const tree = fakeController(loadedRoot());
     renderTree({ tree });
 
-    const toggle = screen.getByRole("button", { name: "show dotfiles" });
-    fireEvent.click(toggle);
+    fireEvent.click(toggle());
 
     expect(tree.toggleHidden).toHaveBeenCalled();
   });
 
-  it("labels the button by whether hidden files are already shown", () => {
-    const shown = { ...loadedRoot(), showHidden: true };
-    renderTree({ tree: fakeController(shown) });
+  // It used to rename itself — `show dotfiles`, then `hide dotfiles` — which
+  // leaves a user unable to tell whether the words describe the state they are
+  // in or the one the click leads to, and a screen reader announcing a
+  // different control each time it is pressed (#54).
+  it("keeps its name in both states and reports the state as pressed", () => {
+    renderTree({ tree: fakeController(loadedRoot()) });
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
 
-    expect(screen.getByRole("button", { name: "hide dotfiles" })).toBeDefined();
+    cleanup();
+    renderTree({ tree: fakeController({ ...loadedRoot(), showHidden: true }) });
+
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
   });
 });
 
@@ -295,7 +388,7 @@ describe("creating an entry", () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []));
     renderTree({ tree });
 
-    fireEvent.click(screen.getByRole("button", { name: "new file" }));
+    fireEvent.click(screen.getByRole("button", { name: "New file" }));
     const field = screen.getByRole("textbox", { name: "new file name" });
     fireEvent.change(field, { target: { value: "values.yaml" } });
     fireEvent.keyDown(field, { key: "Enter" });
@@ -309,7 +402,7 @@ describe("creating an entry", () => {
     });
     renderTree({ tree });
 
-    fireEvent.click(screen.getByRole("button", { name: "new file" }));
+    fireEvent.click(screen.getByRole("button", { name: "New file" }));
     const field = screen.getByRole("textbox", { name: "new file name" });
     fireEvent.change(field, { target: { value: "deploy.yaml" } });
     fireEvent.keyDown(field, { key: "Enter" });
@@ -322,7 +415,7 @@ describe("creating an entry", () => {
     const tree = fakeController(withListing(initialTree(), ROOT, []));
     renderTree({ tree });
 
-    fireEvent.click(screen.getByRole("button", { name: "new folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }));
     const field = screen.getByRole("textbox", { name: "new folder name" });
     fireEvent.keyDown(field, { key: "Escape" });
 
@@ -647,7 +740,7 @@ describe("the changed-only mode (#40)", () => {
     renderTree({ tree: fakeController(loadedRoot()), status: deep });
 
     showChangedOnly();
-    fireEvent.click(screen.getByRole("button", { name: "show all files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
 
     expect(screen.getAllByRole("treeitem").map((el) => el.textContent)).toEqual([
       "manifests•",

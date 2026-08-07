@@ -262,6 +262,54 @@ describe("expanding a directory", () => {
   });
 });
 
+describe("locating a file (#56)", () => {
+  function nested() {
+    return fakeDirectory({
+      [ROOT]: [{ name: "manifests", isDir: true }],
+      manifests: [{ name: "prod", isDir: true }],
+      "manifests/prod": [{ name: "ingress.yaml", isDir: false }],
+    });
+  }
+
+  it("opens the directories above the file and selects it", async () => {
+    const directory = nested();
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+
+    act(() => {
+      result.current.locate("manifests/prod/ingress.yaml");
+    });
+
+    expect(result.current.state.expanded.has("manifests/prod")).toBe(true);
+    expect(result.current.state.selected).toBe("manifests/prod/ingress.yaml");
+    await waitFor(() => {
+      expect(result.current.state.dirs["manifests/prod"]?.status).toBe("loaded");
+    });
+  });
+
+  // Listing a file is an error from the backend, and the row appears as soon
+  // as its own directory is listed — so the file must never be asked for.
+  it("never asks the backend to list the file", async () => {
+    const directory = nested();
+    const { result } = renderHook(() => useFileTree("/w/infra", null, directory));
+    await waitFor(() => {
+      expect(result.current.state.dirs[ROOT]?.status).toBe("loaded");
+    });
+
+    act(() => {
+      result.current.locate("manifests/prod/ingress.yaml");
+    });
+    await waitFor(() => {
+      expect(result.current.state.dirs["manifests/prod"]?.status).toBe("loaded");
+    });
+
+    const asked = directory.list.mock.calls.map(([, path]) => path);
+    expect(asked).not.toContain("manifests/prod/ingress.yaml");
+  });
+});
+
 describe("revealing a directory (#43)", () => {
   /** A project three levels deep, with only its root listed so far. */
   function nested() {

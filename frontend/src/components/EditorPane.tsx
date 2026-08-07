@@ -3,6 +3,7 @@ import type { MountedEditor } from "../lib/codemirror";
 import { mountEditor } from "../lib/codemirror";
 import type { EditorTab } from "../lib/editorTabs";
 import { readOnlyNotice } from "../lib/editorTabs";
+import type { BlameState } from "../lib/useBlame";
 import type { Appearance } from "../lib/theme";
 import { MarkdownPreview } from "./MarkdownPreview";
 
@@ -10,6 +11,9 @@ export interface EditorPaneProps {
   readonly tab: EditorTab;
   readonly active: boolean;
   readonly appearance: Appearance;
+  /** This pane's blame column (#52). Only the active tab's is ever read, so
+   * every other pane is handed the empty state. */
+  readonly blame: BlameState;
   onChange: (key: string, content: string) => void;
   onSave: (key: string) => void;
   onKeepMine: (key: string) => void;
@@ -31,6 +35,7 @@ export function EditorPane({
   tab,
   active,
   appearance,
+  blame,
   onChange,
   onSave,
   onKeepMine,
@@ -57,11 +62,12 @@ export function EditorPane({
         </p>
       )}
 
-      {tab.error !== null && (
-        <p className="editor-pane__error" role="alert">
-          {tab.error}
-        </p>
-      )}
+      <ErrorLine message={tab.error} />
+
+      {/* git's own words, not a translation of them (DESIGN.md §7). It is a
+          separate line from the tab's error because they are separate
+          failures: this one costs the column, not the file. */}
+      <ErrorLine message={blame.error} />
 
       {tab.status === "loading" && <p className="placeholder">Opening {tab.title}…</p>}
 
@@ -72,12 +78,27 @@ export function EditorPane({
           <CodeMirrorHost
             tab={tab}
             appearance={appearance}
+            blame={blame}
             onChange={onChange}
             onSave={onSave}
             mount={mount}
           />
         ))}
     </div>
+  );
+}
+
+/** One failure, or nothing. A component rather than a conditional at each call
+ * site: the pane shows two of these and they are rendered identically, so the
+ * markup and the role belong in one place. */
+function ErrorLine({ message }: { readonly message: string | null }) {
+  if (message === null) {
+    return null;
+  }
+  return (
+    <p className="editor-pane__error" role="alert">
+      {message}
+    </p>
   );
 }
 
@@ -126,6 +147,7 @@ function ConflictBar({ tab, onKeepMine, onTakeDisk }: ConflictBarProps) {
 interface CodeMirrorHostProps {
   readonly tab: EditorTab;
   readonly appearance: Appearance;
+  readonly blame: BlameState;
   onChange: (key: string, content: string) => void;
   onSave: (key: string) => void;
   readonly mount: typeof mountEditor;
@@ -142,6 +164,7 @@ interface CodeMirrorHostProps {
 function CodeMirrorHost({
   tab,
   appearance,
+  blame,
   onChange,
   onSave,
   mount,
@@ -200,6 +223,13 @@ function CodeMirrorHost({
   useEffect(() => {
     editor.current?.setReadOnly(tab.readOnly);
   }, [tab.readOnly]);
+
+  // Two arguments, because the column being on and the column having entries
+  // are two states: an unsaved edit invalidates the line numbers a blame is
+  // stated in, so the entries go and the column stays (#52).
+  useEffect(() => {
+    editor.current?.setBlame(tab.blame, blame.blame);
+  }, [tab.blame, blame.blame]);
 
   return <div className="editor-pane__cm" ref={host} data-testid="codemirror-host" />;
 }

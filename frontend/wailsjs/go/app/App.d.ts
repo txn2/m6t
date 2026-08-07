@@ -14,6 +14,8 @@ export function CreateEntry(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function DeleteEntry(arg1:string,arg2:string):Promise<void>;
 
+export function GitBlame(arg1:string,arg2:string):Promise<git.Blame>;
+
 export function GitBranches(arg1:string):Promise<Array<string>>;
 
 export function GitCheckout(arg1:string,arg2:string):Promise<void>;
