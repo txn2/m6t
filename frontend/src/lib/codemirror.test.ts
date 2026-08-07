@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { languageFor, mountEditor, readOnlyExtension } from "./codemirror";
+import { undo } from "@codemirror/commands";
+import { EditorView } from "@codemirror/view";
+import { blameExtension, languageFor, mountEditor, readOnlyExtension } from "./codemirror";
+import type { Blame } from "./git";
 
 const mounted: { dispose: () => void }[] = [];
 
@@ -35,6 +38,16 @@ function mount(over: Seed = {}) {
   });
   mounted.push(editor);
   return { editor, options: { onChange, onSave }, container };
+}
+
+/** The live view behind a mounted editor, for the few assertions that are
+ * about editor state rather than about what is on screen. */
+function viewIn(container: HTMLElement): EditorView {
+  const view = EditorView.findFromDOM(container);
+  if (view === null) {
+    throw new Error("no CodeMirror view in this container");
+  }
+  return view;
 }
 
 /** The document as CodeMirror currently holds it, read off the DOM so the
@@ -151,6 +164,132 @@ describe("the read-only extension", () => {
     // EditorView.editable (which blocks the DOM). Dropping either one leaves
     // a file the user can appear to type into.
     expect(readOnlyExtension(true)).toHaveLength(2);
+  });
+});
+
+/** A blame attributing every line to one of two commits, by index. */
+function blameOver(lines: number[]): Blame {
+  return {
+    commits: [
+      {
+        sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        author: "Craig Johnston",
+        authorTime: Math.floor(new Date(2026, 7, 6, 9, 30).getTime() / 1000),
+        summary: "Give editor tabs a context menu",
+        uncommitted: false,
+      },
+      {
+        sha: "0000000000000000000000000000000000000000",
+        author: "Not Committed Yet",
+        authorTime: 0,
+        summary: "",
+        uncommitted: true,
+      },
+    ],
+    lines,
+  };
+}
+
+/** The blame column's rendered entries, in line order. */
+function entriesIn(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>(".cm-blame .cm-blame-entry")];
+}
+
+describe("the blame column", () => {
+  it("is absent until it is asked for", () => {
+    const { container } = mount({ content: "a: 1\nb: 2\n" });
+
+    expect(container.querySelector(".cm-blame")).toBeNull();
+  });
+
+  it("shows an entry per line, attributed to that line's commit", () => {
+    const { editor, container } = mount({ content: "a: 1\nb: 2\n" });
+
+    editor.setBlame(true, blameOver([0, 1]));
+
+    const entries = entriesIn(container);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].textContent).toBe("CJ 2026-08-06");
+    expect(entries[0].title).toContain("Give editor tabs a context menu");
+    expect(entries[1].textContent).toBe("uncommitted");
+  });
+
+  it("marks an uncommitted entry, so it is not read as a name", () => {
+    const { editor, container } = mount({ content: "a: 1\nb: 2\n" });
+
+    editor.setBlame(true, blameOver([0, 1]));
+
+    const entries = entriesIn(container);
+    expect(entries[0].className).not.toContain("uncommitted");
+    expect(entries[1].className).toContain("cm-blame-entry--uncommitted");
+  });
+
+  // The dirty-buffer case (#52): the toggle is still on, the line numbers the
+  // blame was stated in are no longer the buffer's, and the column holds its
+  // place so the code does not shift when the entries go.
+  it("keeps the column and drops the entries when there is no blame to show", () => {
+    const { editor, container } = mount({ content: "a: 1\nb: 2\n" });
+    editor.setBlame(true, blameOver([0, 1]));
+
+    editor.setBlame(true, null);
+
+    expect(container.querySelector(".cm-blame")).not.toBeNull();
+    expect(entriesIn(container)).toHaveLength(0);
+  });
+
+  it("takes the column away when the toggle goes off", () => {
+    const { editor, container } = mount({ content: "a: 1\n" });
+    editor.setBlame(true, blameOver([0]));
+
+    editor.setBlame(false, null);
+
+    expect(container.querySelector(".cm-blame")).toBeNull();
+  });
+
+  it("leaves a line the blame does not reach without an entry", () => {
+    // A buffer longer than the blame — what an external change produces
+    // between the reload and the re-read.
+    const { editor, container } = mount({ content: "a: 1\nb: 2\nc: 3\n" });
+
+    editor.setBlame(true, blameOver([0, 0]));
+
+    expect(entriesIn(container)).toHaveLength(2);
+  });
+
+  it("does not touch the document, the way every other setter here does not", () => {
+    const { editor, container } = mount({ content: "a: 1\n" });
+
+    editor.setBlame(true, blameOver([0]));
+
+    expect(textOf(container)).toContain("a: 1");
+  });
+
+  // The column is a view, not an edit. Turning it on must cost the user
+  // nothing they were in the middle of — a reconfiguration that moved the
+  // caret or emptied the undo stack would make the toggle unusable while
+  // working, which is the only time anyone reaches for it.
+  it("leaves the selection and the undo history alone", () => {
+    const { editor, container } = mount({ content: "a: 1\nb: 2\n" });
+    editor.setContent("a: 1\nb: 2\nc: 3\n");
+    const view = viewIn(container);
+    view.dispatch({ selection: { anchor: 3 } });
+
+    editor.setBlame(true, blameOver([0, 0, 0]));
+    editor.setBlame(false, null);
+
+    expect(view.state.selection.main.anchor).toBe(3);
+    // The edit above is still undoable: a lost history would leave the
+    // document as it is.
+    undo(view);
+    expect(view.state.doc.toString()).toBe("a: 1\nb: 2\n");
+  });
+});
+
+describe("the blame extension", () => {
+  it("adds nothing at all when the column is off", () => {
+    // Not merely an empty gutter: a file nobody asked to blame should carry no
+    // per-line callback for CodeMirror to run on every update.
+    expect(blameExtension(false, blameOver([0]))).toEqual([]);
   });
 });
 

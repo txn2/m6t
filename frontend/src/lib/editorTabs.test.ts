@@ -18,6 +18,8 @@ import {
   resolveTakeDisk,
   selectionAfterClose,
   tabsForProject,
+  blameIsCurrent,
+  withBlame,
   withEdit,
   withError,
   withExternalChange,
@@ -351,6 +353,41 @@ describe("the strip", () => {
 
   it("selects nothing when the last tab closes", () => {
     expect(selectionAfterClose(strip("a"), "k0", "k0")).toBeNull();
+  });
+});
+
+describe("the blame column (#52)", () => {
+  it("is off on a tab nobody has asked about", () => {
+    expect(blank().blame).toBe(false);
+  });
+
+  it("turns on and off for one tab", () => {
+    const on = withBlame(ready("a: 1\n"), true);
+
+    expect(on.blame).toBe(true);
+    expect(withBlame(on, false).blame).toBe(false);
+  });
+
+  // The whole rule the column rests on: a blame is stated in the line numbers
+  // of the file git measured, and an unsaved insertion moves every line below
+  // it. `baseline` is the disk content by definition, so matching it is the
+  // test — nothing else needs asking.
+  it("describes the buffer only while it matches disk", () => {
+    const clean = ready("a: 1\n");
+
+    expect(blameIsCurrent(clean)).toBe(true);
+    expect(blameIsCurrent(withEdit(clean, "inserted\na: 1\n"))).toBe(false);
+  });
+
+  it("describes a tab whose edit was undone back to disk", () => {
+    const clean = ready("a: 1\n");
+
+    expect(blameIsCurrent(withEdit(withEdit(clean, "a: 2\n"), "a: 1\n"))).toBe(true);
+  });
+
+  it("describes nothing about a tab that has not loaded", () => {
+    expect(blameIsCurrent(blank())).toBe(false);
+    expect(blameIsCurrent(withError(blank(), "gone"))).toBe(false);
   });
 });
 

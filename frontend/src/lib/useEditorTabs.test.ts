@@ -480,6 +480,55 @@ describe("the strip across projects", () => {
   });
 });
 
+describe("the blame toggle (#52)", () => {
+  it("turns one tab's column on without touching another's", async () => {
+    const files = fakeFiles({ "a.yaml": content("a: 1\n"), "b.yaml": content("b: 2\n") });
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    act(() => {
+      result.current.open("infra", "/w/infra", "a.yaml");
+    });
+    await waitFor(() => {
+      expect(result.current.visible).toHaveLength(1);
+    });
+    act(() => {
+      result.current.open("infra", "/w/infra", "b.yaml");
+    });
+    await waitFor(() => {
+      expect(result.current.visible).toHaveLength(2);
+    });
+
+    act(() => {
+      result.current.setBlame(result.current.visible[0].key, true);
+    });
+
+    expect(result.current.visible[0].blame).toBe(true);
+    expect(result.current.visible[1].blame).toBe(false);
+  });
+
+  it("turns it off again", async () => {
+    const files = fakeFiles({ "a.yaml": content("a: 1\n") });
+    const { result } = renderHook(() => useEditorTabs("infra", null, files));
+
+    act(() => {
+      result.current.open("infra", "/w/infra", "a.yaml");
+    });
+    await waitFor(() => {
+      expect(result.current.visible).toHaveLength(1);
+    });
+    const key = result.current.visible[0].key;
+
+    act(() => {
+      result.current.setBlame(key, true);
+    });
+    act(() => {
+      result.current.setBlame(key, false);
+    });
+
+    expect(result.current.visible[0].blame).toBe(false);
+  });
+});
+
 describe("tabsInChangedDirs", () => {
   const tab = (path: string, root = "/w/infra") =>
     newTab(`k-${path}`, "infra", root, path, "yaml");

@@ -38,6 +38,11 @@ export interface EditorTab {
   readonly title: string;
   readonly kind: EditorTabKind;
   readonly mode: EditorMode;
+  /** Whether the blame column is turned on for this tab (#52). It is per tab
+   * rather than per strip: blame answers a question about one file, and a
+   * user who turned it on to read a manifest should not find it on the
+   * README they open next. */
+  readonly blame: boolean;
   readonly status: EditorTabStatus;
   /** The buffer as the user is editing it, LF-normalized. */
   readonly content: string;
@@ -190,6 +195,7 @@ export function newTab(
     // Markdown opens in rendered preview by default (the issue's own
     // wording); yaml and text have no preview to default away from.
     mode: kind === "markdown" ? "preview" : "edit",
+    blame: false,
     status: "loading",
     content: "",
     baseline: "",
@@ -341,6 +347,24 @@ export function withReloadFailed(tab: EditorTab, message: string): EditorTab {
 /** Switches a markdown tab between rendered preview and CodeMirror edit. */
 export function withMode(tab: EditorTab, mode: EditorMode): EditorTab {
   return { ...tab, mode };
+}
+
+/** Turns this tab's blame column on or off (#52). */
+export function withBlame(tab: EditorTab, blame: boolean): EditorTab {
+  return { ...tab, blame };
+}
+
+/**
+ * Whether a tab's blame entries describe the buffer on screen.
+ *
+ * `git blame` measures the file on disk and answers in line numbers. One
+ * unsaved insertion moves every line below it, so a blame read before that
+ * edit now names the wrong author for most of the file. Dirty is the whole
+ * test: `baseline` is the disk content by definition, so a tab that matches it
+ * is a tab git measured.
+ */
+export function blameIsCurrent(tab: EditorTab): boolean {
+  return tab.status === "ready" && !isDirty(tab);
 }
 
 /**

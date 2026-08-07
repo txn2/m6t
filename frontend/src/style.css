@@ -151,6 +151,36 @@ body {
   height: 100%;
   background: var(--m6t-bg);
   color: var(--m6t-fg);
+  /* Chrome is not a document: a tab, a tree row, a breadcrumb and a toolbar
+     label are controls that happen to be made of words, and none of them
+     should take a selection. WebKit selects the word under the pointer when a
+     context menu opens, so without this a right-click on a project tab
+     highlights its name.
+
+     App-wide rather than per-component, because it was per-component and that
+     is how the project strip ended up as the one row nobody had covered.
+     Content opts back in below — that list is short and reviewable, which the
+     inverse never was.
+
+     The prefix is load-bearing, not decoration. Unprefixed `user-select` only
+     reached WebKit in Safari 17, and m6t's window is a WKWebView on macOS and
+     a WebKitGTK one on Linux: on anything older the unprefixed property is
+     dropped and every rule here silently does nothing — while testing clean in
+     a Chromium browser, which supports both. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The three places that hold a document rather than chrome, plus the fields
+   the user types into. Selecting a line of YAML, a paragraph of rendered
+   markdown, or terminal output is the point of those panes. */
+.cm-editor,
+.markdown,
+.xterm,
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .shell__error {
@@ -183,9 +213,6 @@ body {
   padding: 0;
   list-style: none;
   overflow-x: auto;
-  /* Dragging a tab across the strip would otherwise select the labels it
-     passes over, the same reason the terminal strip carries this. */
-  user-select: none;
 }
 
 /* Square, edge-to-edge tabs marked by an accent rule rather than a rounded
@@ -500,38 +527,22 @@ body {
   align-items: center;
   gap: var(--m6t-space-2);
   height: var(--m6t-row);
-  padding: 0 var(--m6t-space-3);
+  /* Half the inset the row used to carry: the controls now bring their own
+     padding, and the two together put the first icon back on the 8px the
+     header has always started its content at. It is also what keeps the row
+     inside the 180px sidebar minimum. */
+  padding: 0 var(--m6t-space-2);
   border-bottom: 1px solid var(--m6t-border);
   color: var(--m6t-muted);
   font-size: var(--m6t-font-size-sm);
 }
 
-.tree__header button {
-  height: 100%;
-  padding: 0 var(--m6t-space-2);
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: var(--m6t-font-size-sm);
-}
-
-/* The mode toggle is an icon and the dotfile toggle is words, so the icon
-   takes the square the other buttons' glyphs take rather than the width of a
-   label the header has no room for. */
-.tree__mode-toggle {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-}
-
-.tree__mode-toggle[aria-pressed="true"] {
-  color: var(--m6t-accent);
-}
-
-.tree__hidden-toggle {
-  white-space: nowrap;
+/* The two act-once controls sit left, the two toggles right. A spacer rather
+   than `margin-left: auto` on the first toggle: the gap belongs to the row's
+   arrangement, and a control that carried it could not be reordered without
+   taking the layout with it. */
+.tree__header-gap {
+  flex: 1;
 }
 
 .tree__rows {
@@ -560,7 +571,6 @@ body {
   padding-right: var(--m6t-space-2);
   padding-left: calc(var(--m6t-space-3) + var(--m6t-indent) * var(--depth, 0));
   cursor: pointer;
-  user-select: none;
   white-space: nowrap;
 }
 
@@ -700,7 +710,6 @@ button:hover {
   border-bottom: 1px solid var(--m6t-border);
   background: var(--m6t-panel);
   overflow-x: auto;
-  user-select: none;
 }
 
 .tab {
@@ -1089,7 +1098,6 @@ button:hover {
      editor's top edge. */
   overflow-x: auto;
   white-space: nowrap;
-  user-select: none;
 }
 
 .breadcrumb__crumb {
@@ -1121,6 +1129,78 @@ button:hover {
   width: var(--m6t-space-3);
   height: var(--m6t-space-3);
   color: var(--m6t-muted);
+}
+
+/* The active file's toolbar (#52), under the breadcrumb. It carries no border
+   of its own: the breadcrumb's bottom rule is directly above it, and a second
+   hairline one row down reads as a boxed strip rather than as chrome.
+
+   Nothing insets the first control from the left. The row it has to agree with
+   is the editor below, not the breadcrumb above: the blame column starts hard
+   against the pane's left edge, and a control floating a few pixels in from it
+   reads as misplaced however carefully those pixels were chosen. The trailing
+   padding stays, for a control that ends up right-aligned in this row. */
+.view-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-3) 0 0;
+  border-bottom: 1px solid var(--m6t-border);
+}
+
+/* The first control's box starts on the pane's edge and its own padding insets
+   the glyph. Pulling the box further left instead would put the pressed fill
+   outside the pane it belongs to. */
+
+/* =============================================================================
+   Controls (#52, #54)
+   =============================================================================
+
+   The one shape for a piece of chrome the user presses: the editor toolbar's
+   toggles and the file tree's header. Defined once because the two rows sit
+   four pixels apart in the same window and had three looks between them before
+   this existed. See components/Control.tsx for the naming rule that goes with
+   it — the look is only half of what made those rows inconsistent.
+
+   The padding is the control's own, not the row's. It is what the pressed box
+   is drawn around — a filled rectangle flush against the glyphs it contains
+   reads as a rendering fault rather than as a state — and it doubles the hit
+   target of an icon-only toggle. The row cancels it on the first control so
+   that the icon still starts on the row's own left edge; see `.view-toolbar`.
+
+   No border, though: a border would move the label by a pixel when a toggle
+   goes on. The pressed outline is drawn inside instead.
+   ========================================================================== */
+.control {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  height: var(--m6t-row);
+  padding: 0 var(--m6t-space-2);
+  border: none;
+  border-radius: var(--m6t-radius);
+  background: none;
+  color: var(--m6t-muted);
+  font: inherit;
+  font-size: var(--m6t-font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.control:hover,
+.control:focus-visible {
+  color: var(--m6t-fg);
+}
+
+/* A pressed toggle is a state, not a hover: it keeps its fill while the
+   pointer is elsewhere, which is what tells a user the column they are looking
+   at is one they turned on. */
+.control--on {
+  box-shadow: inset 0 0 0 1px var(--m6t-border);
+  background: var(--m6t-panel-alt);
+  color: var(--m6t-fg);
 }
 
 /* =============================================================================

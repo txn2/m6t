@@ -14,6 +14,7 @@ import {
   looksLikeManifest,
   parentPath,
   resolveIconKind,
+  locate,
   reveal,
   select,
   toggleChangedOnly,
@@ -343,6 +344,81 @@ describe("the ancestor chain (#43)", () => {
 
   it("drops empty segments rather than emitting a nameless one", () => {
     expect(ancestry("a//b")).toEqual(["a", "a/b"]);
+  });
+});
+
+describe("locating a file (#56)", () => {
+  it("expands the directories above it and selects the file", () => {
+    const state = locate(initialTree(), "manifests/prod/ingress.yaml");
+
+    expect([...state.expanded].sort()).toEqual([ROOT, "manifests", "manifests/prod"]);
+    expect(state.selected).toBe("manifests/prod/ingress.yaml");
+  });
+
+  // The difference from `reveal`, and the reason this is not just a call to
+  // it: a file in the expanded set is a directory listing nobody will fetch,
+  // and the hook would ask the backend to list a file.
+  it("does not expand the file itself", () => {
+    const state = locate(initialTree(), "manifests/prod/ingress.yaml");
+
+    expect(state.expanded.has("manifests/prod/ingress.yaml")).toBe(false);
+  });
+
+  it("selects a file at the root without expanding anything new", () => {
+    const state = locate(initialTree(), "README.md");
+
+    expect(state.selected).toBe("README.md");
+    expect([...state.expanded]).toEqual([ROOT]);
+  });
+
+  it("leaves changed-only mode, which would otherwise hide the file", () => {
+    const filtered = toggleChangedOnly(initialTree());
+
+    expect(locate(filtered, "manifests/ingress.yaml").changedOnly).toBe(false);
+  });
+
+  // The case a parent-only hidden check gets wrong: this file has no hidden
+  // ancestor, so revealing its parent alone would leave the filter on and the
+  // locate would do nothing at all.
+  it("shows hidden files for a dotfile at the root", () => {
+    expect(locate(initialTree(), ".gitignore").showHidden).toBe(true);
+  });
+
+  it("shows hidden files for a file under a hidden directory", () => {
+    const state = locate(initialTree(), ".github/workflows/ci.yml");
+
+    expect(state.showHidden).toBe(true);
+    expect(state.expanded.has(".github/workflows")).toBe(true);
+  });
+
+  it("leaves the filter alone for an ordinary file", () => {
+    expect(locate(initialTree(), "manifests/ingress.yaml").showHidden).toBe(false);
+  });
+
+  // The view scrolls a located row to the middle of the pane and an ordinary
+  // selection only into view, and it cannot tell the two apart from `selected`
+  // alone — locating a file that is already selected changes nothing else.
+  it("records a request every time, including for the file already selected", () => {
+    const first = locate(initialTree(), "manifests/ingress.yaml");
+    const again = locate(first, "manifests/ingress.yaml");
+
+    expect(first.locateRequest).toBe(initialTree().locateRequest + 1);
+    expect(again.locateRequest).toBe(first.locateRequest + 1);
+    expect(again.selected).toBe(first.selected);
+  });
+
+  it("is the only thing that records one", () => {
+    const located = locate(initialTree(), "manifests/ingress.yaml");
+
+    for (const state of [
+      select(located, "other.yaml"),
+      reveal(located, "manifests"),
+      expand(located, "manifests"),
+      toggleHidden(located),
+      toggleChangedOnly(located),
+    ]) {
+      expect(state.locateRequest).toBe(located.locateRequest);
+    }
   });
 });
 

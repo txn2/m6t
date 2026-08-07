@@ -182,6 +182,24 @@ describe("the style tokens", () => {
     ).toEqual([]);
   });
 
+  // A property whose unprefixed form WebKit only learned in Safari 17. Every
+  // `user-select` in this file was unprefixed, which meant the whole app's
+  // chrome was selectable in the window it actually ships in while testing
+  // clean in a Chromium browser — the failure mode a gate is for.
+  it("pairs every user-select with its WebKit prefix", () => {
+    const plain = (css.match(/(^|[;{])\s*user-select\s*:/g) ?? []).length;
+    const prefixed = (css.match(/-webkit-user-select\s*:/g) ?? []).length;
+
+    expect(
+      plain,
+      "every `user-select` needs a `-webkit-user-select` beside it: the window " +
+        "is a WKWebView on macOS and a WebKitGTK one on Linux, and neither " +
+        "honours the unprefixed property before Safari 17.",
+    ).toBe(prefixed);
+    // The premise: if the declarations vanish, the equality above is 0 === 0.
+    expect(plain).toBeGreaterThan(0);
+  });
+
   // The gate is worthless if its matcher does not fire. These are the exact
   // shapes the old stylesheet was full of.
   it("catches the shapes it was written for", () => {

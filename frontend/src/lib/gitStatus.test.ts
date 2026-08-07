@@ -21,6 +21,7 @@ import {
   changedCount,
   changedRows,
   fileBadge,
+  isTracked,
 } from "./gitStatus";
 
 /** One changed path, defaulting every field the case under test is not
@@ -292,6 +293,48 @@ describe("the changed-only rows (#40)", () => {
     expect(rows.map((r) => `${r.path}@${String(r.depth)}`)).toEqual(["a@0", "a/build@1"]);
     expect(rows.map((r) => r.name)).toEqual(["a", "build"]);
     expect(rows.every((r) => r.isDir)).toBe(true);
+  });
+});
+
+describe("whether a path is tracked (#52)", () => {
+  // git emits a record only for a path that differs, so a path it did not
+  // mention is a tracked path with nothing to report. Reading the absence the
+  // other way would take the blame column off every unmodified file in the
+  // repository — which is most of them.
+  it("counts a path git did not mention as tracked", () => {
+    expect(isTracked(statusOf([file("other.yaml", { worktree: MODIFIED })]), "deploy.yaml")).toBe(
+      true,
+    );
+  });
+
+  it("counts a changed path as tracked", () => {
+    expect(isTracked(statusOf([file("deploy.yaml", { worktree: MODIFIED })]), "deploy.yaml")).toBe(
+      true,
+    );
+  });
+
+  it("counts a staged new path as tracked", () => {
+    // `git add` on a new file puts it in the index, and blame answers for it:
+    // every line comes back uncommitted.
+    expect(isTracked(statusOf([file("new.yaml", { staged: ADDED })]), "new.yaml")).toBe(true);
+  });
+
+  it("does not count an untracked path", () => {
+    expect(isTracked(statusOf([file("scratch.yaml", { worktree: UNTRACKED })]), "scratch.yaml")).toBe(
+      false,
+    );
+  });
+
+  it("counts nothing when git is missing or the project is not a repository", () => {
+    for (const availability of [NO_GIT, NOT_A_REPOSITORY]) {
+      expect(isTracked({ ...emptyStatus(), availability }, "deploy.yaml")).toBe(false);
+    }
+  });
+
+  it("matches the whole path, not a suffix of it", () => {
+    const status = statusOf([file("deploy/deploy.yaml", { worktree: UNTRACKED })]);
+
+    expect(isTracked(status, "deploy.yaml")).toBe(true);
   });
 });
 

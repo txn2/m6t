@@ -5,7 +5,7 @@ import { ROOT, parentPath, visibleRows } from "../lib/tree";
 import type { Status } from "../lib/git";
 import type { Badges } from "../lib/gitStatus";
 import { badgeAt, badgeTone, badgesFor, changedRows } from "../lib/gitStatus";
-import { UiIcon } from "./Icon";
+import { Control } from "./Control";
 import { RowView } from "./FileTreeRow";
 import { CreateRow } from "./InlineField";
 
@@ -85,11 +85,29 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
   // lands, which is what makes a row that did not exist yet still arrive on
   // screen.
   const selectedIndex = rows.findIndex((row) => row.path === tree.state.selected);
+  const { locateRequest } = tree.state;
+  // The last locate this pane has already scrolled for. A ref rather than
+  // state: acting on it must not cause the render that would act on it again.
+  const centredFor = useRef(locateRequest);
   useEffect(() => {
-    if (selectedIndex >= 0) {
-      rowRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
+    if (selectedIndex < 0) {
+      return;
     }
-  }, [selectedIndex]);
+    // A locate puts the row in the middle of the pane; an ordinary selection
+    // moves it just far enough to be visible. Centring every selection would
+    // drag the tree out from under someone arrowing through it, and scrolling
+    // a locate only into view leaves the file the user asked for pinned to
+    // whichever edge it came in on, with no context above or below it.
+    //
+    // `center` is a request, not a guarantee: a row near either end of the
+    // list stops at the scroll extreme, which is as close to the middle as it
+    // can be.
+    const centring = locateRequest !== centredFor.current;
+    centredFor.current = locateRequest;
+    rowRefs.current[selectedIndex]?.scrollIntoView({
+      block: centring ? "center" : "nearest",
+    });
+  }, [selectedIndex, locateRequest]);
 
   // Roving tabindex: only move DOM focus when the tree itself already has
   // it, so a background listing refresh (an /events update) never steals
@@ -157,38 +175,55 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
 
   return (
     <div className="tree">
+      {/* One control shape for the whole row (#54), and one name per control
+          whatever state it is in — see components/Control.tsx.
+
+          The toggles are compact and the actions are not, which is a width
+          decision rather than a taste one: four labelled controls measure
+          274px and the sidebar's default is 260, its minimum 180. This row
+          measures 180 exactly, so it survives a drag to the minimum — and any
+          control added to it has to be compact or the row stops fitting. */}
       <div className="tree__header">
-        <button type="button" aria-label="new file" onClick={() => { startCreating(ROOT, false); }}>
-          <UiIcon name="plus" />
-          file
-        </button>
-        <button type="button" aria-label="new folder" onClick={() => { startCreating(ROOT, true); }}>
-          <UiIcon name="plus" />
-          folder
-        </button>
-        <button
-          type="button"
-          className="tree__mode-toggle"
-          aria-pressed={changedOnly}
-          aria-label={changedOnly ? "show all files" : "show changed files only"}
-          title={changedOnly ? "Show all files" : "Show changed files only"}
+        <Control
+          icon="plus"
+          label="File"
+          name="New file"
+          title="New file in this project"
+          onClick={() => {
+            startCreating(ROOT, false);
+          }}
+        />
+        <Control
+          icon="plus"
+          label="Folder"
+          name="New folder"
+          title="New folder in this project"
+          onClick={() => {
+            startCreating(ROOT, true);
+          }}
+        />
+        <span className="tree__header-gap" />
+        <Control
+          icon="filter"
+          label="Changed only"
+          title="Show changed files only"
+          compact
+          pressed={changedOnly}
           onClick={() => {
             tree.toggleChangedOnly();
             // The two lists are different lengths and different orders; a
             // cursor carried across means landing on an unrelated row.
             setCursor(0);
           }}
-        >
-          <UiIcon name="filter" />
-        </button>
-        <button
-          type="button"
-          className="tree__hidden-toggle"
-          aria-pressed={tree.state.showHidden}
+        />
+        <Control
+          icon="hidden"
+          label="Show hidden"
+          title="Show hidden files"
+          compact
+          pressed={tree.state.showHidden}
           onClick={tree.toggleHidden}
-        >
-          {tree.state.showHidden ? "hide dotfiles" : "show dotfiles"}
-        </button>
+        />
       </div>
 
       <div

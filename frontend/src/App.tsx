@@ -9,7 +9,7 @@ import type { Directory } from "./lib/directory";
 import { wailsDirectory } from "./lib/directory";
 import type { Files } from "./lib/files";
 import { wailsFiles } from "./lib/files";
-import type { Git } from "./lib/git";
+import type { Git, Status } from "./lib/git";
 import { wailsGit } from "./lib/git";
 import type { Project, Registry } from "./lib/projects";
 import { projectLabel, wailsRegistry } from "./lib/projects";
@@ -24,6 +24,7 @@ import {
   preferredAppearance,
   watchAppearance,
 } from "./lib/theme";
+import { NO_BLAME, useBlame } from "./lib/useBlame";
 import { useEditorTabs } from "./lib/useEditorTabs";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitOps } from "./lib/useGitOps";
@@ -32,6 +33,7 @@ import { useTerminals } from "./lib/useTerminals";
 import { Breadcrumb } from "./components/Breadcrumb";
 import { EditorPane } from "./components/EditorPane";
 import { EditorTabs } from "./components/EditorTabs";
+import { ViewToolbar } from "./components/ViewToolbar";
 
 const initialStatus: BuildStatus = { info: detachedBuild, attached: false };
 
@@ -208,6 +210,9 @@ export default function App({
             <Editor
               project={active}
               editors={editors}
+              status={gitStatus.status}
+              git={git}
+              onLocate={tree.locate}
               appearance={appearance}
               onReveal={tree.reveal}
             />
@@ -292,6 +297,13 @@ function BuildLine({ build }: { readonly build: BuildStatus }) {
 interface EditorProps {
   readonly project: Project;
   readonly editors: ReturnType<typeof useEditorTabs>;
+  /** This project's git status (#8): what decides whether a file has a blame
+   * column to offer (#52). */
+  readonly status: Status;
+  /** The git seam, for the blame the column shows (#52). */
+  readonly git: Git;
+  /** Selects the open file in the tree — `FileTreeController.locate` (#56). */
+  onLocate: (path: string) => void;
   readonly appearance: Appearance;
   /** What a breadcrumb segment opens in the tree (#43). */
   onReveal: (dir: string) => void;
@@ -305,10 +317,20 @@ interface EditorProps {
  * unmounted on a project switch would drop its CodeMirror view, and with it
  * the undo history behind whatever unsaved work the tab is holding.
  */
-function Editor({ project, editors, appearance, onReveal }: EditorProps) {
+function Editor({
+  project,
+  editors,
+  status,
+  git,
+  onLocate,
+  appearance,
+  onReveal,
+}: EditorProps) {
   // The strip's own tabs, not every project's: the breadcrumb describes what
   // is on screen, and `activeKey` is per project.
   const active = editors.visible.find((tab) => tab.key === editors.activeKey) ?? null;
+  // One blame, for the file on screen. See useBlame for why it is not per tab.
+  const blame = useBlame(active, git);
 
   return (
     <>
@@ -325,6 +347,13 @@ function Editor({ project, editors, appearance, onReveal }: EditorProps) {
 
       <Breadcrumb tab={active} onReveal={onReveal} />
 
+      <ViewToolbar
+        tab={active}
+        status={status}
+        onLocate={onLocate}
+        onToggleBlame={editors.setBlame}
+      />
+
       <div className="editor-panes">
         {editors.tabs.map((tab) => (
           <EditorPane
@@ -332,6 +361,7 @@ function Editor({ project, editors, appearance, onReveal }: EditorProps) {
             tab={tab}
             active={tab.key === editors.activeKey}
             appearance={appearance}
+            blame={tab.key === editors.activeKey ? blame : NO_BLAME}
             onChange={editors.edit}
             onSave={(key) => {
               void editors.save(key);

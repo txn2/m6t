@@ -4,6 +4,8 @@ import type { MountedEditor } from "../lib/codemirror";
 import type { EditorTab, EditorTabKind } from "../lib/editorTabs";
 import { newTab, withExternalChange, withLoaded } from "../lib/editorTabs";
 import type { FileContent } from "../lib/files";
+import type { Blame } from "../lib/git";
+import { NO_BLAME } from "../lib/useBlame";
 import { EditorPane } from "./EditorPane";
 
 afterEach(cleanup);
@@ -26,10 +28,20 @@ function fakeEditor(): MountedEditor {
     setContent: vi.fn(),
     setTheme: vi.fn(),
     setReadOnly: vi.fn(),
+    setBlame: vi.fn(),
     focus: vi.fn(),
     dispose: vi.fn(),
   };
 }
+
+/** A one-line blame, for the pane's own wiring — what it says is
+ * `blame.test.ts`'s subject, not this file's. */
+const someBlame: Blame = {
+  commits: [
+    { sha: "a1b2c3d", author: "Craig Johnston", authorTime: 1, summary: "x", uncommitted: false },
+  ],
+  lines: [0],
+};
 
 function renderPane(tab: EditorTab, over: Partial<Parameters<typeof EditorPane>[0]> = {}) {
   const editor = fakeEditor();
@@ -38,6 +50,7 @@ function renderPane(tab: EditorTab, over: Partial<Parameters<typeof EditorPane>[
     tab,
     active: true,
     appearance: "dark" as const,
+    blame: NO_BLAME,
     onChange: vi.fn(),
     onSave: vi.fn(),
     onKeepMine: vi.fn(),
@@ -45,11 +58,12 @@ function renderPane(tab: EditorTab, over: Partial<Parameters<typeof EditorPane>[
     mount,
     ...over,
   };
-  const { rerender } = render(<EditorPane {...props} />);
+  const { rerender, container } = render(<EditorPane {...props} />);
   return {
     props,
     editor,
     mount,
+    container,
     rerender: (next: Partial<Parameters<typeof EditorPane>[0]>) => {
       rerender(<EditorPane {...props} {...next} />);
     },
@@ -113,6 +127,47 @@ describe("mounting an editor", () => {
     rerender({ tab: { ...tab, readOnly: true } });
 
     expect(editor.setReadOnly).toHaveBeenCalledWith(true);
+  });
+
+  it("pushes the blame column into the existing view rather than rebuilding it", () => {
+    const tab = ready();
+    const { mount, editor, rerender } = renderPane(tab);
+
+    rerender({ tab: { ...tab, blame: true }, blame: { blame: someBlame, error: null } });
+
+    expect(mount).toHaveBeenCalledTimes(1);
+    expect(editor.setBlame).toHaveBeenLastCalledWith(true, someBlame);
+  });
+
+  // The dirty case (#52): the toggle stays on and the entries go, because the
+  // line numbers they are stated in are no longer the buffer's.
+  it("keeps the column shown with no entries when the blame goes stale", () => {
+    const tab = { ...ready(), blame: true };
+    const { editor, rerender } = renderPane(tab, {
+      blame: { blame: someBlame, error: null },
+    });
+
+    rerender({ blame: NO_BLAME });
+
+    expect(editor.setBlame).toHaveBeenLastCalledWith(true, null);
+  });
+
+  it("shows git's own words when a blame fails", () => {
+    renderPane(ready(), {
+      blame: { blame: null, error: "fatal: no such path 'x.yaml' in HEAD" },
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain("no such path");
+  });
+
+  // The blame failed, not the file. Replacing the buffer with a message would
+  // cost the user the editor over a column they can turn off.
+  it("keeps the file on screen when its blame fails", () => {
+    const { container } = renderPane(ready("a: 1\n"), {
+      blame: { blame: null, error: "fatal: nope" },
+    });
+
+    expect(container.querySelector("[data-testid=codemirror-host]")).not.toBeNull();
   });
 
   // A stale handler would report a later tab's keystrokes against the key the

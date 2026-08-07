@@ -1,4 +1,5 @@
 import {
+  GitBlame,
   GitBranches,
   GitCheckout,
   GitPull,
@@ -47,6 +48,34 @@ export interface Status {
   readonly files: readonly FileStatus[];
 }
 
+/** One commit a file's lines are attributed to (#52), matching
+ * `internal/git.BlameCommit`. */
+export interface BlameCommit {
+  readonly sha: string;
+  readonly author: string;
+  /** When the author wrote it, in Unix seconds; 0 when git reported no
+   * readable time. */
+  readonly authorTime: number;
+  /** The commit's subject line. */
+  readonly summary: string;
+  /** git's all-zero SHA: work in the working tree and in no commit. Such a
+   * commit has no author or date worth showing. */
+  readonly uncommitted: boolean;
+}
+
+/**
+ * One file's per-line attribution, in the shape git's porcelain format states
+ * it: each commit once, and a line-by-line reference into them.
+ *
+ * `lines` holds one index into `commits` per line of the file, line 1 first.
+ * An index outside `commits` means the blame did not cover that line — see
+ * `commitAt` in `blame.ts`, which is the only thing that should read this.
+ */
+export interface Blame {
+  readonly commits: readonly BlameCommit[];
+  readonly lines: readonly number[];
+}
+
 /**
  * Why a project has no readable git state, matching
  * `internal/git.Availability`.
@@ -87,6 +116,10 @@ export const UNTRACKED = "untracked";
  */
 export interface Git {
   status: (root: string) => Promise<Status>;
+  /** One file's per-line attribution (#52). `path` is root-relative and
+   * slash-separated; a path git will not blame rejects with git's own words
+   * rather than resolving to an empty blame. */
+  blame: (root: string, path: string) => Promise<Blame>;
   pull: (root: string) => Promise<void>;
   /** `remote` takes effect only when `setUpstream` is true; otherwise the
    * repository's own push configuration decides where the branch goes. */
@@ -99,12 +132,19 @@ export interface Git {
 /** The git seam backed by the generated Wails bindings. */
 export const wailsGit: Git = {
   status: (root) => GitStatus(root),
+  blame: (root, path) => GitBlame(root, path),
   pull: (root) => GitPull(root),
   push: (root, remote, setUpstream) => GitPush(root, remote, setUpstream),
   checkout: (root, branch) => GitCheckout(root, branch),
   branches: (root) => GitBranches(root),
   remotes: (root) => GitRemotes(root),
 };
+
+/** A blame with nothing in it — a file of no lines. Every consumer already
+ * handles a line the blame does not cover, so this needs no special case. */
+export function emptyBlame(): Blame {
+  return { commits: [], lines: [] };
+}
 
 /** A status for a project nothing has been read for yet: available-shaped and
  * empty, so every consumer renders it without a null check. */

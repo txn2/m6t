@@ -11,6 +11,7 @@ import {
   resolveTakeDisk,
   selectionAfterClose,
   tabsForProject,
+  withBlame,
   withEdit,
   withError,
   withExternalChange,
@@ -55,6 +56,8 @@ export interface EditorTabs {
   readonly close: (key: string) => void;
   readonly closeProject: (project: string) => void;
   readonly setMode: (key: string, mode: EditorMode) => void;
+  /** Turns one tab's blame column on or off (#52). */
+  readonly setBlame: (key: string, blame: boolean) => void;
   readonly keepMine: (key: string) => void;
   readonly takeDisk: (key: string) => void;
 }
@@ -194,6 +197,10 @@ export function useEditorTabs(
     setTabs((current) => mapTab(current, key, (tab) => withMode(tab, mode)));
   }, []);
 
+  const setBlame = useCallback((key: string, blame: boolean) => {
+    setTabs((current) => mapTab(current, key, (tab) => withBlame(tab, blame)));
+  }, []);
+
   const keepMine = useCallback((key: string) => {
     setTabs((current) => mapTab(current, key, resolveKeepMine));
   }, []);
@@ -261,6 +268,7 @@ export function useEditorTabs(
     close,
     closeProject,
     setMode,
+    setBlame,
     keepMine,
     takeDisk,
   };

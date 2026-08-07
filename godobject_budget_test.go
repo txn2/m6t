@@ -183,7 +183,21 @@ const (
 	// frontend rewrite every path and kube binding in the same call; this one
 	// takes names, must name exactly the registered set, and cannot change
 	// anything else about a project.
-	maxAppMethods = 22
+	//
+	// 22 -> 23 in #52. One binding, GitBlame. It passes the #9 test — the
+	// editor asks about one file when the user turns the column on, gets its
+	// attribution back, and is done — and it takes no field, because
+	// internal/git still keeps nothing between calls.
+	//
+	// What is worth stating is why it is not part of GitStatus, which is the
+	// binding it most resembles. A status is read for a whole project on every
+	// filesystem event the watcher publishes; a blame is one subprocess per
+	// file, wanted only while a column is on. Folding the blame into the
+	// status would run `git blame` on every open file every time any of them
+	// was saved, for a column nobody asked to see — the same cost the #38
+	// paragraph above refused to fold into ListDirectory, arriving from the
+	// other direction.
+	maxAppMethods = 23
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

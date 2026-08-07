@@ -16,7 +16,7 @@ import type { Files } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
 import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
-import { MODIFIED, NOT_A_REPOSITORY, emptyStatus } from "./lib/git";
+import { MODIFIED, NOT_A_REPOSITORY, UNTRACKED, emptyBlame, emptyStatus } from "./lib/git";
 
 /**
  * A full `Git` seam from the one or two calls a test actually cares about.
@@ -28,6 +28,7 @@ import { MODIFIED, NOT_A_REPOSITORY, emptyStatus } from "./lib/git";
 function stubGit(overrides: Partial<Git> = {}): Git {
   return {
     status: () => Promise.resolve(emptyStatus()),
+    blame: () => Promise.resolve(emptyBlame()),
     pull: () => Promise.resolve(),
     push: () => Promise.resolve(),
     checkout: () => Promise.resolve(),
@@ -1065,12 +1066,12 @@ describe("the breadcrumb above the editor (#43)", () => {
   // changed under it has no row in that list to reveal.
   it("leaves changed-only mode to show a directory it was filtering out", async () => {
     const bar = await openTheFile();
-    fireEvent.click(screen.getByRole("button", { name: "show changed files only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
     expect(screen.getByText("Nothing has changed in this project.")).toBeDefined();
 
     fireEvent.click(within(bar).getByRole("button", { name: "manifests" }));
 
-    expect(screen.getByRole("button", { name: "show changed files only" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Changed only" })).toBeDefined();
     expect(screen.getByRole("treeitem", { name: /manifests/ })).toBeDefined();
   });
 
@@ -1079,5 +1080,226 @@ describe("the breadcrumb above the editor (#43)", () => {
 
     // By name, because the project strip is a landmark of its own.
     expect(screen.queryByRole("navigation", { name: /^path of/ })).toBeNull();
+  });
+});
+
+describe("the blame column above the editor (#52)", () => {
+  const blame = {
+    commits: [
+      {
+        sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        author: "Craig Johnston",
+        authorTime: Math.floor(new Date(2026, 7, 6, 9, 30).getTime() / 1000),
+        summary: "Add the ingress",
+        uncommitted: false,
+      },
+      {
+        sha: "0000000000000000000000000000000000000000",
+        author: "Not Committed Yet",
+        authorTime: 0,
+        summary: "",
+        uncommitted: true,
+      },
+    ],
+    lines: [0, 1],
+  };
+
+  function stubDirectory(): Directory {
+    return {
+      list: (_root, relPath) =>
+        Promise.resolve(relPath === "" ? [{ name: "ingress.yaml", isDir: false }] : []),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  function stubFiles(): Files {
+    return {
+      read: () =>
+        Promise.resolve(
+          watch.FileContent.createFrom({
+            content: "kind: Ingress\nname: web\n",
+            crlf: false,
+            mixedEol: false,
+            readOnly: false,
+            size: 24,
+          }),
+        ),
+      write: () => Promise.resolve(),
+    };
+  }
+
+  /** Opens the one file, with git answering `status` and `blame` as told. */
+  async function openTheFile(git = stubGit({ blame: () => Promise.resolve(blame) })) {
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          directory: stubDirectory(),
+          files: stubFiles(),
+          git,
+        }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("treeitem", { name: /ingress\.yaml/ }));
+    await screen.findByRole("navigation", { name: "path of ingress.yaml" });
+  }
+
+  /** The rendered entries of the blame column, in line order. */
+  function entries(): string[] {
+    return [...document.querySelectorAll(".cm-blame-entry")].map((el) => el.textContent ?? "");
+  }
+
+  it("attributes each line once the column is turned on", async () => {
+    await openTheFile();
+
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+
+    await waitFor(() => {
+      expect(entries()).toEqual(["CJ 2026-08-06", "uncommitted"]);
+    });
+  });
+
+  it("does not read a blame for a file nobody asked about", async () => {
+    const git = stubGit({ blame: vi.fn(() => Promise.resolve(blame)) });
+    await openTheFile(git);
+
+    expect(git.blame).not.toHaveBeenCalled();
+  });
+
+  it("takes the column away again", async () => {
+    await openTheFile();
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+    await waitFor(() => {
+      expect(entries()).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+
+    expect(document.querySelector(".cm-blame")).toBeNull();
+  });
+
+  it("offers nothing to blame for an untracked file", async () => {
+    await openTheFile(
+      stubGit({
+        status: () =>
+          Promise.resolve({
+            ...emptyStatus(),
+            files: [
+              {
+                path: "ingress.yaml",
+                staged: "",
+                worktree: UNTRACKED,
+                conflicted: false,
+                origPath: "",
+              },
+            ],
+          }),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Blame" })).toBeNull();
+    });
+  });
+
+  it("reports git's refusal in git's own words", async () => {
+    await openTheFile(
+      stubGit({
+        blame: () => Promise.reject(new Error("fatal: no such path in HEAD")),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("no such path in HEAD");
+  });
+});
+
+describe("locating the open file in the tree (#56)", () => {
+  const listings: Record<string, { name: string; isDir: boolean }[]> = {
+    "": [{ name: "manifests", isDir: true }],
+    manifests: [{ name: "prod", isDir: true }],
+    "manifests/prod": [{ name: "ingress.yaml", isDir: false }],
+  };
+
+  function stubDirectory(): Directory {
+    return {
+      list: (_root, relPath) => Promise.resolve(listings[relPath] ?? []),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  function stubFiles(): Files {
+    return {
+      read: () =>
+        Promise.resolve(
+          watch.FileContent.createFrom({
+            content: "kind: Ingress\n",
+            crlf: false,
+            mixedEol: false,
+            readOnly: false,
+            size: 14,
+          }),
+        ),
+      write: () => Promise.resolve(),
+    };
+  }
+
+  /** Opens the nested file, then collapses the chain so nothing shows it. */
+  async function openThenHide() {
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          directory: stubDirectory(),
+          files: stubFiles(),
+          git: stubGit(),
+        }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("treeitem", { name: /manifests/ }));
+    fireEvent.click(await screen.findByRole("treeitem", { name: /prod$/ }));
+    fireEvent.click(await screen.findByRole("treeitem", { name: /ingress\.yaml/ }));
+    await screen.findByRole("navigation", { name: "path of ingress.yaml" });
+
+    fireEvent.click(screen.getByRole("treeitem", { name: /manifests/ }));
+    expect(screen.queryByRole("treeitem", { name: /ingress\.yaml/ })).toBeNull();
+  }
+
+  it("brings the open file back on screen and selects it", async () => {
+    await openThenHide();
+
+    fireEvent.click(screen.getByRole("button", { name: "Locate" }));
+
+    const row = await screen.findByRole("treeitem", { name: /ingress\.yaml/ });
+    expect(row.getAttribute("aria-selected")).toBe("true");
+  });
+
+  // Changed-only mode is a filter over the rows, and a file with nothing
+  // changed has no row in that list to select.
+  it("leaves changed-only mode, which would otherwise have no row to select", async () => {
+    await openThenHide();
+    fireEvent.click(screen.getByRole("button", { name: "Changed only" }));
+    expect(screen.getByText("Nothing has changed in this project.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Locate" }));
+
+    expect(await screen.findByRole("treeitem", { name: /ingress\.yaml/ })).toBeDefined();
+  });
+
+  it("says nothing when no file is open", async () => {
+    await renderWith(["infra"]);
+
+    expect(screen.queryByRole("button", { name: "Locate" })).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import type { FileStatus, Status } from "./git";
 import {
   ADDED,
+  AVAILABLE,
   COPIED,
   DELETED,
   MODIFIED,
@@ -279,6 +280,24 @@ function byTreeOrder(a: TreeEntry, b: TreeEntry): number {
     return -1;
   }
   return x > y ? 1 : 0;
+}
+
+/**
+ * Whether git is tracking a path, which is what decides that the blame toggle
+ * exists for it (#52).
+ *
+ * It needs no call of its own. porcelain v2 emits a record for a path that
+ * differs and nothing for one that does not, so a path git did not mention is
+ * a tracked, unmodified path — and the only records that mean "not tracked"
+ * are the untracked ones. The two unavailable states are false for the reason
+ * they exist: with no git, or outside a repository, there is nothing to ask.
+ */
+export function isTracked(status: Status, path: string): boolean {
+  if (status.availability !== AVAILABLE) {
+    return false;
+  }
+  const entry = status.files.find((file) => file.path === path);
+  return entry === undefined || entry.worktree !== UNTRACKED;
 }
 
 /** How many paths the status bar reports as changed. */

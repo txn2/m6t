@@ -205,7 +205,9 @@ Single window. Top-level tabs are projects; each project tab contains:
   diagnostics for Kubernetes kinds (bundled JSON schemas, validated in the Go
   backend on save/idle — kubeconform-style). Markdown files render to a preview
   with an edit toggle. This is deliberately "light editing": no refactoring, no
-  multi-file operations.
+  multi-file operations. Under the breadcrumb sits a view toolbar carrying the
+  active file's view toggles — the blame column, and the diff — each shown only
+  when the file is one it can answer for.
 - **Cluster panel**: live health (from the watch service + kstatus) for every
   object declared in the project, and a drift indicator when live objects differ
   from the checked-in manifests (server-side dry-run comparison, computed on
@@ -268,6 +270,13 @@ v1 scope mirrors actual daily use, not a git client:
 - Status-driven change markers in the file tree: every changed path tinted and badged where it lives, and a tree-header toggle that filters the tree down to just those paths (deletions included, struck through, since they are in no directory listing). There is no separate changes list — a second list of the same paths cost a fixed share of the sidebar to say what the tree already knew.
 - Pull (rebase per repo config), push, current branch + ahead/behind in the status bar.
 - Diff viewer for working-tree changes and for a file's last commit.
+- A blame column beside the editor, per line: the author's initials and the
+  date of the commit that last touched it, with the commit's subject and short
+  SHA on hover. It reads the file on disk, so its entries are hidden while the
+  buffer holds an unsaved edit — one insertion moves every line number under
+  it, and a shifted blame names the wrong person. This is not history tooling:
+  there is no navigating to a commit from it, which stays with log browsing in
+  v1.x.
 - Branch switching (existing branches). Branch creation, log browsing, stash,
   and history tooling are v1.x (§10).
 

@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { Mock } from "vitest";
 import { describe, expect, it, vi } from "vitest";
 import type { Git } from "./git";
-import { emptyStatus } from "./git";
+import { emptyBlame, emptyStatus } from "./git";
 import { useGitOps } from "./useGitOps";
 
 /** The seam with every member a spy, so a test can both assert on a call and
@@ -20,6 +20,7 @@ type SpiedGit = { [K in keyof Git]: Mock<Git[K]> };
 function fakeGit(overrides: Partial<Git> = {}): SpiedGit {
   const seam: SpiedGit = {
     status: vi.fn(() => Promise.resolve(emptyStatus())),
+    blame: vi.fn(() => Promise.resolve(emptyBlame())),
     pull: vi.fn(() => Promise.resolve()),
     push: vi.fn(() => Promise.resolve()),
     checkout: vi.fn(() => Promise.resolve()),
