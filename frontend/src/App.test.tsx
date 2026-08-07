@@ -10,10 +10,16 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { detachedBuild } from "./lib/build";
-import { project as models, session as sessionModels, watch } from "../wailsjs/go/models";
+import {
+  kubeconfig as kubeModels,
+  project as models,
+  session as sessionModels,
+  watch,
+} from "../wailsjs/go/models";
 import type { Directory } from "./lib/directory";
 import type { Files } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
+import type { Kube } from "./lib/kube";
 import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
 import { MODIFIED, NOT_A_REPOSITORY, UNTRACKED, emptyBlame, emptyStatus } from "./lib/git";
@@ -25,6 +31,33 @@ import { MODIFIED, NOT_A_REPOSITORY, UNTRACKED, emptyBlame, emptyStatus } from "
  * the status line should not fail because a control it never touched has no
  * backend behind it.
  */
+function stubKube(projects: readonly Project[] = [], overrides: Partial<Kube> = {}): Kube {
+  return {
+    contexts: () => Promise.resolve(kubeModels.Config.createFrom({ contexts: [], sources: [] })),
+    // The backend resolves a binding from the registry, so the stub resolves
+    // it from the same list the registry was built with. These fixtures carry
+    // no scopes, which makes every answer the project's own default — the
+    // scope walk itself is covered where it lives, in internal/project.
+    binding: (name) => {
+      const found = projects.find((p) => p.name === name);
+      return Promise.resolve(
+        models.Binding.createFrom({
+          context: found?.kube.context ?? "",
+          namespace: found?.kube.namespace ?? "",
+          protected: found?.kube.protected ?? false,
+          scope: "",
+        }),
+      );
+    },
+    namespaces: () => Promise.resolve(["default", "platform", "dev"]),
+    check: () => Promise.reject(new Error("no cluster in tests")),
+    bindFolder: (name) => Promise.reject(new Error(`no backend for ${name} in tests`)),
+    unbindFolder: (name) => Promise.reject(new Error(`no backend for ${name} in tests`)),
+    tools: () => Promise.resolve([]),
+    ...overrides,
+  };
+}
+
 function stubGit(overrides: Partial<Git> = {}): Git {
   return {
     status: () => Promise.resolve(emptyStatus()),
@@ -75,7 +108,10 @@ function project(
     path,
     displayName: rest.displayName ?? "",
     color: rest.color ?? "",
-    kube: { context, namespace: "", protected: false },
+    // A context without a namespace is not a binding — kubectl would fall
+    // back to the context's own default, which is the implicit targeting
+    // DESIGN.md §4 rules out — so a fixture that binds one binds both.
+    kube: { context, namespace: context === "" ? "" : "default", protected: false },
     helm: { defaultValues: [] },
   });
 }
@@ -128,7 +164,11 @@ function fakeRegistry(initial: Project[] = []): Registry & {
 /** Renders the app over a registry already holding `names`. */
 async function renderWith(names: string[], registry = fakeRegistry(names.map((n) => project(n)))) {
   const view = render(
-    <App load={attached} endpoint={pending} backend={{ registry }} />,
+    <App
+      load={attached}
+      endpoint={pending}
+      backend={{ registry, kube: stubKube(registry.projects) }}
+    />,
   );
   if (names.length > 0) {
     await screen.findByRole("button", { name: names[0] });
@@ -143,12 +183,12 @@ const open = (label: string) => {
 describe("the build identity in the status line", () => {
   it("reports what the backend says", async () => {
     render(
-      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry() }} />,
+      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry(), kube: stubKube() }} />,
     );
 
-    expect((await screen.findByTestId("build-version")).textContent).toBe(
-      "v1.2.0",
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("build-version").textContent).toBe("v1.2.0");
+    });
     expect(screen.getByTestId("build-commit").textContent).toBe("a1b2c3d");
     expect(screen.getByTestId("build-date").textContent).toBe("2026-08-02");
     expect(screen.getByTestId("bridge-status").textContent).toBe(
@@ -161,7 +201,7 @@ describe("the build identity in the status line", () => {
       <App
         load={() => Promise.resolve({ info: detachedBuild, attached: false })}
         endpoint={pending}
-        backend={{ registry: fakeRegistry() }}
+        backend={{ registry: fakeRegistry(), kube: stubKube() }}
       />,
     );
 
@@ -185,7 +225,7 @@ describe("the project strip", () => {
 
   it("says there is nothing open when the registry is empty", async () => {
     render(
-      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry() }} />,
+      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry(), kube: stubKube() }} />,
     );
 
     expect(await screen.findByText(/No project open/)).toBeDefined();
@@ -207,9 +247,15 @@ describe("the project strip", () => {
     const registry = fakeRegistry([project("infra", "/w/infra", "")]);
     await renderWith(["infra"], registry);
 
-    expect(screen.getByTestId("project-status").textContent).toBe(
-      "infra — no context bound",
-    );
+    // Awaited, not asserted straight away: the status bar reads the binding the
+    // backend resolved (#10), so what it shows before that lands is the
+    // unbound default — which is also the answer here, and would let this pass
+    // without the resolution ever having happened.
+    await waitFor(() => {
+      expect(screen.getByTestId("project-status").textContent).toBe(
+        "infra: not bound",
+      );
+    });
   });
 
   it("shows the bound context when there is one", async () => {
@@ -218,9 +264,11 @@ describe("the project strip", () => {
     ]);
     await renderWith(["infra"], registry);
 
-    expect(screen.getByTestId("project-status").textContent).toBe(
-      "infra — prod-us-west",
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("project-status").textContent).toBe(
+        "infra: prod-us-west / default",
+      );
+    });
   });
 
   // A registry that will not load must say so. An empty strip would read as
@@ -231,7 +279,7 @@ describe("the project strip", () => {
       Promise.reject(new Error("parsing projects.yaml: line 3")),
     );
 
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
 
     expect(
       (await screen.findByRole("alert")).textContent,
@@ -269,7 +317,7 @@ describe("adding a project", () => {
   it("prefills the directory name and registers the one typed instead", async () => {
     const registry = fakeRegistry();
     registry.choose = vi.fn(() => Promise.resolve("/w/ops/k8s"));
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
 
     const field = await nameField();
     expect((field as HTMLInputElement).value).toBe("k8s");
@@ -306,7 +354,7 @@ describe("adding a project", () => {
   it("does nothing when the picker is cancelled", async () => {
     const registry = fakeRegistry();
     registry.choose = vi.fn(() => Promise.resolve(""));
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
 
     open("+ Project");
 
@@ -324,7 +372,7 @@ describe("adding a project", () => {
     registry.add = vi.fn(() =>
       Promise.reject(new Error("not a git repository")),
     );
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
 
     fireEvent.keyDown(await nameField(), { key: "Enter" });
 
@@ -338,7 +386,7 @@ describe("adding a project", () => {
     registry.choose = vi.fn(() =>
       Promise.reject(new Error("the application window is not ready")),
     );
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
 
     open("+ Project");
 
@@ -359,7 +407,7 @@ describe("project tab identity (#41)", () => {
     const registry = fakeRegistry([
       project("k8s", "/w/ops/k8s", "", { displayName: "Production infra" }),
     ]);
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
 
     const tab = await screen.findByRole("button", { name: "Production infra" });
     expect(tab.getAttribute("title")).toBe("/w/ops/k8s");
@@ -378,7 +426,7 @@ describe("project tab identity (#41)", () => {
   // rename must not disturb the binding that decides what an apply applies to.
   it("renames from the tab menu and keeps the kube binding", async () => {
     const registry = fakeRegistry([project("k8s", "/w/k8s", "prod-us-west")]);
-    render(<App load={attached} endpoint={pending} backend={{ registry }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
     await screen.findByRole("button", { name: "k8s" });
 
     await menuFor("k8s");
@@ -404,9 +452,11 @@ describe("project tab identity (#41)", () => {
     expect(
       await screen.findByRole("button", { name: "Production" }),
     ).toBeDefined();
-    expect(screen.getByTestId("project-status").textContent).toBe(
-      "Production — prod-us-west",
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("project-status").textContent).toBe(
+        "Production: prod-us-west / default",
+      );
+    });
   });
 
   // The colour is a dot beside the name, not the tab's edge rule: the edge
@@ -441,7 +491,7 @@ describe("project tab identity (#41)", () => {
       project("infra", "/w/infra", "", { color: "chartreuse" }),
     ]);
     const { container } = render(
-      <App load={attached} endpoint={pending} backend={{ registry }} />,
+      <App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />,
     );
     await screen.findByRole("button", { name: "infra" });
 
@@ -524,7 +574,12 @@ describe("a project tab keeping its state (#59)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry, directory: stubDirectory(), git: stubGit() }}
+        backend={{
+          registry,
+          directory: stubDirectory(),
+          git: stubGit(),
+          kube: stubKube(),
+        }}
       />,
     );
     await screen.findByRole("treeitem", { name: /manifests/ });
@@ -596,7 +651,7 @@ describe("the stream endpoint", () => {
       <App
         load={attached}
         endpoint={() => Promise.reject(new Error("stream server is not started"))}
-        backend={{ registry: fakeRegistry([project("infra")]) }}
+        backend={{ registry: fakeRegistry([project("infra")]), kube: stubKube([project("infra")]) }}
       />,
     );
 
@@ -614,7 +669,7 @@ describe("the stream endpoint", () => {
         endpoint={() => {
           throw new TypeError("window.go is undefined");
         }}
-        backend={{ registry: fakeRegistry([project("infra")]) }}
+        backend={{ registry: fakeRegistry([project("infra")]), kube: stubKube([project("infra")]) }}
       />,
     );
 
@@ -820,7 +875,11 @@ describe("the git line in the status bar (#8)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry, git: fakeGit({ "/w/infra": changedOn("main", ["a.yaml", "b.yaml"]) }) }}
+        backend={{
+          registry,
+          git: fakeGit({ "/w/infra": changedOn("main", ["a.yaml", "b.yaml"]) }),
+          kube: stubKube(registry.projects),
+        }}
       />,
     );
 
@@ -848,6 +907,7 @@ describe("the git line in the status bar (#8)", () => {
             "/w/infra": changedOn("main", ["a.yaml"]),
             "/w/apps": changedOn("release", []),
           }),
+          kube: stubKube(registry.projects),
         }}
       />,
     );
@@ -880,6 +940,7 @@ describe("the git line in the status bar (#8)", () => {
               throw new Error("no Wails runtime");
             },
           }),
+          kube: stubKube(registry.projects),
         }}
       />,
     );
@@ -931,7 +992,11 @@ describe("the git operations (#9)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          git: seam,
+          kube: stubKube([project("infra", "/w/infra")]),
+        }}
       />,
     );
 
@@ -964,7 +1029,11 @@ describe("the git operations (#9)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          git: seam,
+          kube: stubKube([project("infra", "/w/infra")]),
+        }}
       />,
     );
 
@@ -991,7 +1060,11 @@ describe("the git operations (#9)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          git: seam,
+          kube: stubKube([project("infra", "/w/infra")]),
+        }}
       />,
     );
 
@@ -1012,7 +1085,11 @@ describe("the git operations (#9)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          git: seam,
+          kube: stubKube([project("infra", "/w/infra")]),
+        }}
       />,
     );
 
@@ -1040,7 +1117,11 @@ describe("the git operations (#9)", () => {
       <App
         load={attached}
         endpoint={pending}
-        backend={{ registry: fakeRegistry([project("infra", "/w/infra")]), git: seam }}
+        backend={{
+          registry: fakeRegistry([project("infra", "/w/infra")]),
+          git: seam,
+          kube: stubKube([project("infra", "/w/infra")]),
+        }}
       />,
     );
 
@@ -1106,6 +1187,7 @@ describe("the breadcrumb above the editor (#43)", () => {
           directory: stubDirectory(),
           files: stubFiles(),
           git: stubGit(),
+          kube: stubKube([project("infra", "/w/infra")]),
         }}
       />,
     );
@@ -1226,6 +1308,7 @@ describe("the blame column above the editor (#52)", () => {
           directory: stubDirectory(),
           files: stubFiles(),
           git,
+          kube: stubKube([project("infra", "/w/infra")]),
         }}
       />,
     );
@@ -1348,6 +1431,7 @@ describe("locating the open file in the tree (#56)", () => {
           directory: stubDirectory(),
           files: stubFiles(),
           git: stubGit(),
+          kube: stubKube([project("infra", "/w/infra")]),
         }}
       />,
     );
@@ -1407,7 +1491,7 @@ describe("the saved session (#58)", () => {
       save: vi.fn(() => Promise.resolve()),
     };
 
-    render(<App load={attached} endpoint={pending} backend={{ registry, session: store }} />);
+    render(<App load={attached} endpoint={pending} backend={{ registry, session: store, kube: stubKube(registry.projects) }} />);
 
     await waitFor(() => {
       expect(
@@ -1433,7 +1517,7 @@ describe("the saved session (#58)", () => {
     };
 
     const { container } = render(
-      <App load={attached} endpoint={pending} backend={{ registry, session: store }} />,
+      <App load={attached} endpoint={pending} backend={{ registry, session: store, kube: stubKube(registry.projects) }} />,
     );
 
     await waitFor(() => {
@@ -1442,4 +1526,270 @@ describe("the saved session (#58)", () => {
       expect(workbench?.getAttribute("style")).toContain("208px");
     });
   });
+});
+
+/**
+ * The cluster binding across the whole window (#10).
+ *
+ * These are the acceptance criteria from the ticket that only hold at the App
+ * level: the accent and the status line have to change together when the
+ * selection or the project changes, and no single component can be asked
+ * whether they did.
+ */
+describe("the Kubernetes binding (#10)", () => {
+  /** A project bound to `context`, protected or not. */
+  function bound(name: string, context: string, guarded = false): Project {
+    return models.Project.createFrom({
+      name,
+      path: `/w/${name}`,
+      displayName: "",
+      color: "",
+      kube: { context, namespace: "default", protected: guarded, scopes: null },
+      helm: { defaultValues: [] },
+    });
+  }
+
+  // "Protected border and status-bar context indicator visibly change when
+  // switching between a protected and unprotected project" — issue #10.
+  it("marks the protected project's tab and only that one", async () => {
+    const projects = [bound("prod", "prod-us-west", true), bound("dev", "dev-cluster")];
+    const registry = fakeRegistry(projects);
+    const { container } = render(
+      <App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(projects) }} />,
+    );
+    await screen.findByRole("button", { name: "prod" });
+
+    const tab = (name: string) => container.querySelector(`[data-project="${name}"]`);
+    expect(tab("prod")?.getAttribute("data-protected")).toBe("true");
+    expect(tab("dev")?.getAttribute("data-protected")).toBeNull();
+  });
+
+  it("changes the status line when the open project changes", async () => {
+    const projects = [bound("prod", "prod-us-west", true), bound("dev", "dev-cluster")];
+    const registry = fakeRegistry(projects);
+    render(
+      <App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(projects) }} />,
+    );
+    await screen.findByRole("button", { name: "prod" });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("project-status").textContent).toContain(
+        "prod-us-west / default",
+      );
+    });
+    expect(
+      screen.getByTestId("project-status").getAttribute("data-protected"),
+    ).toBe("true");
+
+    open("dev");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("project-status").textContent).toContain(
+        "dev-cluster / default",
+      );
+    });
+    expect(
+      screen.getByTestId("project-status").getAttribute("data-protected"),
+    ).toBeNull();
+  });
+
+  /** A directory listing with two environment folders and a file in one. */
+  function envDirectory(): Directory {
+    const listings: Record<string, watch.Entry[]> = {
+      "": [
+        watch.Entry.createFrom({ name: "dev", path: "dev", isDir: true }),
+        watch.Entry.createFrom({ name: "prod", path: "prod", isDir: true }),
+      ],
+      dev: [watch.Entry.createFrom({ name: "app.yaml", path: "dev/app.yaml", isDir: false })],
+      prod: [watch.Entry.createFrom({ name: "app.yaml", path: "prod/app.yaml", isDir: false })],
+    };
+    return {
+      list: (_root, relPath) => Promise.resolve(listings[relPath] ?? []),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  const CONTEXTS = kubeModels.Config.createFrom({
+    contexts: [
+      kubeModels.Context.createFrom({ name: "dev-cluster" }),
+      kubeModels.Context.createFrom({ name: "prod-us-west" }),
+    ],
+    sources: ["/home/u/.kube/config"],
+  });
+
+  /** The workbench over a project with a tree and a live kube seam. */
+  async function panel(projects: Project[], over: Partial<Kube> = {}) {
+    const registry = fakeRegistry(projects);
+    const view = render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          registry,
+          directory: envDirectory(),
+          git: stubGit(),
+          kube: stubKube(projects, { contexts: () => Promise.resolve(CONTEXTS), ...over }),
+        }}
+      />,
+    );
+    await screen.findByRole("treeitem", { name: /dev/ });
+    return { ...view, registry };
+  }
+
+  // The project default is set in the panel and nowhere else: it applies to
+  // the whole checkout, so it belongs to the project rather than to a folder.
+  // There is no save button; choosing a context writes it.
+  it("writes the project default from the panel", async () => {
+    const { registry } = await panel([project("infra", "/w/infra")]);
+
+    const section = screen.getByLabelText("Kubernetes");
+    fireEvent.change(within(section).getByLabelText("project context"), {
+      target: { value: "prod-us-west" },
+    });
+
+    await waitFor(() => {
+      expect(registry.update).toHaveBeenCalledWith(
+        "infra",
+        expect.objectContaining({
+          kube: expect.objectContaining({ context: "prod-us-west" }),
+        }),
+      );
+    });
+  });
+
+  it("has nothing to press in the Kubernetes section", async () => {
+    await panel([bound("infra", "prod-us-west")]);
+
+    expect(
+      within(screen.getByLabelText("Kubernetes")).queryByRole("button", { name: "Save" }),
+    ).toBeNull();
+  });
+
+  it("points at the folder controls from the project root", async () => {
+    await panel([bound("infra", "prod-us-west")]);
+
+    const selection = screen.getByLabelText("Selection");
+    expect(within(selection).getByText(/takes the default above/)).toBeDefined();
+  });
+
+  // The whole point of the redesign: a folder is bound on the folder.
+  it("binds a folder from its own context menu", async () => {
+    const projects = [bound("infra", "prod-us-west")];
+    const bindFolder = vi.fn(() =>
+      Promise.resolve(
+        models.Project.createFrom({
+          ...projects[0],
+          kube: {
+            ...projects[0].kube,
+            scopes: [{ path: "dev", context: "dev-cluster", namespace: "dev", protected: false }],
+          },
+        }),
+      ),
+    );
+    await panel(projects, { bindFolder });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /dev/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("context"), {
+      target: { value: "dev-cluster" },
+    });
+    await within(dialog).findByRole("option", { name: "dev" });
+    fireEvent.change(within(dialog).getByLabelText("namespace"), {
+      target: { value: "dev" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(bindFolder).toHaveBeenCalledWith("infra", "dev", "dev-cluster", "dev", false);
+    });
+  });
+
+  // A binding lives on a subtree, so a file has no override to offer — the
+  // resolution rules have no way to express one.
+  it("offers Kubernetes on a folder and not on a file", async () => {
+    await panel([bound("infra", "prod-us-west")]);
+
+    fireEvent.click(screen.getByRole("treeitem", { name: /dev/ }));
+    fireEvent.contextMenu(await screen.findByRole("treeitem", { name: /app\.yaml/ }));
+
+    expect(screen.queryByRole("menuitem", { name: "Kubernetes" })).toBeNull();
+  });
+
+  it("marks the folder carrying an override and reports it on selection", async () => {
+    const scoped = models.Project.createFrom({
+      ...bound("infra", "prod-us-west"),
+      kube: {
+        context: "prod-us-west",
+        namespace: "default",
+        protected: false,
+        scopes: [{ path: "dev", context: "dev-cluster", namespace: "dev", protected: false }],
+      },
+    });
+    const { container } = await panel([scoped]);
+
+    const row = container.querySelector('[data-bound="true"]');
+    expect(row?.textContent).toContain("dev");
+  });
+
+  it("removes an override from the same dialog", async () => {
+    const scoped = models.Project.createFrom({
+      ...bound("infra", "prod-us-west"),
+      kube: {
+        context: "prod-us-west",
+        namespace: "default",
+        protected: false,
+        scopes: [{ path: "dev", context: "dev-cluster", namespace: "dev", protected: false }],
+      },
+    });
+    const unbindFolder = vi.fn(() => Promise.resolve(scoped));
+    await panel([scoped], { unbindFolder });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /dev/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove override" }));
+
+    await waitFor(() => {
+      expect(unbindFolder).toHaveBeenCalledWith("infra", "dev");
+    });
+  });
+
+  // A folder with no override has nothing to remove, so the action is absent
+  // rather than present and inert.
+  it("offers no removal for a folder that only inherits", async () => {
+    await panel([bound("infra", "prod-us-west")]);
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /prod/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: "Remove override" })).toBeNull();
+  });
+
+  // The registry refuses a path that leaves the repository; the user has to
+  // see that beside the folder they were pointing at.
+  it("shows the registry's refusal without closing the dialog", async () => {
+    const bindFolder = vi.fn(() =>
+      Promise.reject(new Error("binding dev in infra: a scope path must be a relative path inside the repository")),
+    );
+    await panel([bound("infra", "prod-us-west")], { bindFolder });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /dev/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Kubernetes" }));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "a scope path must be a relative path inside the repository",
+    );
+    expect(screen.getByRole("dialog")).toBeDefined();
+  });
+
 });

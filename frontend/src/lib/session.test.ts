@@ -3,6 +3,7 @@ import { session as models } from "../../wailsjs/go/models";
 import { newTab as newEditorTab } from "./editorTabs";
 import type { EditorTab } from "./editorTabs";
 import {
+  CLUSTER_DEFAULT,
   SIDEBAR_DEFAULT,
   SIDEBAR_MIN,
   TERMINAL_DEFAULT,
@@ -41,6 +42,7 @@ function live(over: Partial<LiveSession> = {}): LiveSession {
     fontSize: DEFAULT_FONT_SIZE,
     sidebar: SIDEBAR_DEFAULT,
     terminalHeight: TERMINAL_DEFAULT,
+    cluster: CLUSTER_DEFAULT,
     editors: [],
     activeEditor: null,
     terminals: [],
@@ -82,6 +84,7 @@ describe("reading a saved session", () => {
       fontSize: 15,
       sidebar: 340,
       terminalHeight: 200,
+      clusterWidth: 320,
       changedOnly: true,
     });
 
@@ -90,6 +93,7 @@ describe("reading a saved session", () => {
       fontSize: 15,
       sidebar: 340,
       terminalHeight: 200,
+      cluster: 320,
       changedOnly: true,
     });
   });

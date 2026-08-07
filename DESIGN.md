@@ -151,6 +151,12 @@ projects:
       context: prod-us-west        # required before any kube action is enabled
       namespace: default
       protected: true              # typed confirmation on apply/delete/rollback
+      scopes:                      # per-folder overrides; see below
+        - path: dev
+          context: dev-cluster
+          namespace: dev
+        - path: prod/api
+          namespace: api
     helm:
       defaultValues: [values.yaml, values-prod.yaml]
 ```
@@ -178,7 +184,27 @@ Restoring is per project and lazy. The window-wide settings come back at launch;
 
 The kube context binding is **per project and explicit**. m6t never uses the
 kubeconfig current-context; a project with no bound context shows the cluster
-panel and apply actions disabled with a "bind a context" prompt.
+panel and apply actions disabled with a "bind a context" prompt. A binding needs
+both halves: a context with no namespace is not bound, because kubectl with no
+`--namespace` falls back to the context's own default and an implicit target is
+the thing the binding exists to rule out.
+
+`scopes` is the binding at folder granularity, and it is there because a single
+project-wide context cannot describe the ordinary manifest repository: one
+directory per cluster, one directory per namespace beneath it. A scope names a
+repository-relative path and overrides the fields it sets for that subtree.
+Resolution walks the matching scopes from shallowest to deepest and each field
+is inherited independently, so a folder that sets only a namespace keeps the
+context above it — which is how a repository whose dev and prod live on one
+cluster and differ only in namespace is expressed as one field rather than a
+second binding. `protected` is the exception: it ratchets on and no scope can
+turn it off, because a directory five levels down disarming the confirmation
+dialog from a config file is not a setting anyone should be able to reach.
+
+A scope path that is absolute or climbs out of the repository is refused, and
+the whole settings write is refused with it — a half-stored binding is worse
+than a rejected form, because the user believes the half that vanished is in
+force.
 
 ---
 
@@ -190,11 +216,11 @@ Single window. Top-level tabs are projects; each project tab contains:
 ┌──────────────────────────────────────────────────────────────┐
 │  [ infra-prod ]  [ team-x ]  [ + ]                           │
 ├────────────┬───────────────────────────────┬─────────────────┤
-│ File tree  │  Editor area (tabs)           │ Cluster panel   │
+│ File tree  │  Editor area (tabs)           │ Project panel   │
 │            │   - CodeMirror (YAML)         │                 │
 │  M deploy… │   - Markdown view/edit        │  ⬢ prod-us-west │
 │  A svc.yaml│   - Diff viewer               │  ns: default    │
-│            │   - Helm render view          │                 │
+│  ⬢ prod/   │   - Helm render view          │  ⎈ Kubernetes   │
 │  (git      ├───────────────────────────────┤  Deployment ✓   │
 │  badges)   │  Terminal tabs                │  Service     ✓  │
 │            │   [zsh] [claude] [+]          │  CronJob     ⟳  │
@@ -213,11 +239,25 @@ Single window. Top-level tabs are projects; each project tab contains:
   multi-file operations. Under the breadcrumb sits a view toolbar carrying the
   active file's view toggles — the blame column, and the diff — each shown only
   when the file is one it can answer for.
-- **Cluster panel**: live health (from the watch service + kstatus) for every
-  object declared in the project, and a drift indicator when live objects differ
-  from the checked-in manifests (server-side dry-run comparison, computed on
-  demand — not continuous).
-- **Context visibility**: the bound context/namespace appears in the cluster
+- **Project panel** (right): everything about the open project that is not a
+  file, in sections. The first is **Kubernetes**: what the current selection
+  resolves to, the project's default context and namespace, and the folder
+  overrides the project carries. The namespace field completes from the cluster
+  the chosen context names and stays free text — listing namespaces is a
+  permission many users of a shared cluster do not have, and a dropdown would be
+  empty for exactly them. Below that sits live health (from the watch service +
+  kstatus) for every object declared in the project, and a drift indicator when
+  live objects differ from the checked-in manifests (server-side dry-run
+  comparison, computed on demand — not continuous).
+- **Making a folder override**: on the folder, in the tree. Its context menu
+  carries a Kubernetes entry that opens a dialog to set or remove the folder's
+  context and namespace, and a folder carrying one of its own is marked in the
+  tree. The panel lists the overrides; it does not create them. A repository
+  laid out one directory per cluster is one the user reads as a tree, and the
+  moment they know where a directory belongs is the moment they are looking at
+  it — a form that made them retype that path would ask for the navigation
+  twice.
+- **Context visibility**: the bound context/namespace appears in the project
   panel, the status bar, and — for `protected: true` projects — as a persistent
   colored border/accent on the whole project tab. This is the single most
   important safety feature in the app.

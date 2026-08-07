@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeController } from "../lib/useFileTree";
 import type { TreeState } from "../lib/tree";
@@ -82,9 +82,15 @@ function Harness({
       }}
       status={status}
       onOpenFile={onOpenFile}
+      overridden={NO_OVERRIDES}
+      onBind={vi.fn()}
     />
   );
 }
+
+/** No folder carries a kube override, which is what every test here is about
+ * except the two that say otherwise (#10). */
+const NO_OVERRIDES: ReadonlySet<string> = new Set();
 
 /** The tint the tree drew on a row's name, or null when it drew none. */
 function toneOf(row: HTMLElement): string | null {
@@ -284,11 +290,23 @@ describe("scrolling the selected row (#56)", () => {
    */
   function renderPlain(state: TreeState) {
     const { rerender } = render(
-      <FileTree tree={fakeController(state)} status={emptyStatus()} onOpenFile={vi.fn()} />,
+      <FileTree
+        tree={fakeController(state)}
+        status={emptyStatus()}
+        onOpenFile={vi.fn()}
+        overridden={NO_OVERRIDES}
+        onBind={vi.fn()}
+      />,
     );
     return (next: TreeState) => {
       rerender(
-        <FileTree tree={fakeController(next)} status={emptyStatus()} onOpenFile={vi.fn()} />,
+        <FileTree
+          tree={fakeController(next)}
+          status={emptyStatus()}
+          onOpenFile={vi.fn()}
+          overridden={NO_OVERRIDES}
+          onBind={vi.fn()}
+        />,
       );
     };
   }
@@ -702,6 +720,8 @@ describe("bringing the selected row on screen (#43)", () => {
         tree={fakeController(select(loadedRoot(), "manifests/prod.yaml"))}
         status={emptyStatus()}
         onOpenFile={vi.fn()}
+        overridden={NO_OVERRIDES}
+        onBind={vi.fn()}
       />,
     );
     expect(scrolled).toEqual([]);
@@ -711,6 +731,8 @@ describe("bringing the selected row on screen (#43)", () => {
         tree={fakeController(select(loadedManifests(loadedRoot()), "manifests/prod.yaml"))}
         status={emptyStatus()}
         onOpenFile={vi.fn()}
+        overridden={NO_OVERRIDES}
+        onBind={vi.fn()}
       />,
     );
 
@@ -823,5 +845,76 @@ describe("the changed-only mode (#40)", () => {
 
     expect(screen.getByText("Nothing has changed in this project.")).toBeDefined();
     expect(screen.queryByText("No files in this project.")).toBeNull();
+  });
+});
+
+/**
+ * The row menu (#10, and the placement bug that came with it).
+ *
+ * It used to be `position: fixed` with no coordinates at all, which resolves to
+ * the element's static position: inside a flex row that has already laid out,
+ * that is hundreds of pixels below the pointer, and wrong again the moment the
+ * tree scrolled.
+ */
+describe("the row context menu", () => {
+  it("opens where the pointer was", () => {
+    const tree = fakeController(loadedRoot());
+    renderTree({ tree });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /manifests/ }), {
+      clientX: 240,
+      clientY: 310,
+    });
+
+    const menu = screen.getByRole("menu");
+    expect(menu.style.left).toBe("240px");
+    expect(menu.style.top).toBe("310px");
+  });
+
+  // Without this a right-click near the bottom of a tall tree opens a menu
+  // whose last item is off screen, and the item most likely to be cut off is
+  // Delete.
+  it("holds the menu inside the window", () => {
+    const tree = fakeController(loadedRoot());
+    renderTree({ tree });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /manifests/ }), {
+      clientX: window.innerWidth - 4,
+      clientY: window.innerHeight - 4,
+    });
+
+    const menu = screen.getByRole("menu");
+    expect(Number.parseInt(menu.style.left, 10)).toBeLessThan(window.innerWidth - 4);
+    expect(Number.parseInt(menu.style.top, 10)).toBeLessThan(window.innerHeight - 4);
+  });
+
+  // Kubernetes is the reason to open this menu on a directory; the file
+  // operations below it are the ones every tree has.
+  it("puts Kubernetes first on a directory, with its own mark", () => {
+    const tree = fakeController(loadedRoot());
+    renderTree({ tree });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /manifests/ }));
+
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Kubernetes",
+      "New File",
+      "New Folder",
+      "Rename",
+      "Delete",
+    ]);
+    expect(items[0].querySelector('[data-icon="kubernetes"]')).not.toBeNull();
+  });
+
+  it("offers no Kubernetes entry on a file", () => {
+    const tree = fakeController(loadedRoot());
+    renderTree({ tree });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /deploy\.yaml/ }));
+
+    expect(
+      within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Kubernetes" }),
+    ).toBeNull();
   });
 });

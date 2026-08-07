@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SIDEBAR_DEFAULT, TERMINAL_DEFAULT } from "./panes";
+import { CLUSTER_DEFAULT, SIDEBAR_DEFAULT, TERMINAL_DEFAULT } from "./panes";
 import type { Session, SessionStore } from "./session";
 import {
   emptySession,
@@ -37,6 +37,7 @@ export interface WorkspaceSettings {
   readonly fontSize: number;
   readonly sidebar: number;
   readonly terminalHeight: number;
+  readonly cluster: number;
 }
 
 /**
@@ -66,6 +67,7 @@ const defaults: WorkspaceSettings = {
   fontSize: DEFAULT_FONT_SIZE,
   sidebar: SIDEBAR_DEFAULT,
   terminalHeight: TERMINAL_DEFAULT,
+  cluster: CLUSTER_DEFAULT,
 };
 
 /**
@@ -152,6 +154,7 @@ export function useSession({
         fontSize: restored.fontSize,
         sidebar: restored.sidebar,
         terminalHeight: restored.terminalHeight,
+        cluster: restored.cluster,
       });
       setLoaded(state);
     })();
@@ -235,6 +238,7 @@ export function useSession({
         fontSize: workspace.fontSize,
         sidebar: workspace.sidebar,
         terminalHeight: workspace.terminalHeight,
+        cluster: workspace.cluster,
         editors: editors.visible,
         activeEditor: editors.activeKey,
         terminals: terminals.visible,

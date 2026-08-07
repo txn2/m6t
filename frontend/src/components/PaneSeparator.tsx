@@ -14,6 +14,16 @@ export interface PaneSeparatorProps {
   readonly bounds: Bounds;
   /** What the pane is called, for the separator's accessible name. */
   readonly label: string;
+  /**
+   * Which grid slot this separator occupies, as a modifier class.
+   *
+   * The orientation used to be enough, because there was one of each. With the
+   * cluster panel (#10) there are two vertical separators in the same grid, and
+   * placement is what tells them apart — the stylesheet cannot infer from
+   * "vertical" whether a divider belongs to the left edge of the editor or the
+   * right.
+   */
+  readonly area: string;
   readonly onResize: (size: number) => void;
 }
 
@@ -36,6 +46,7 @@ export function PaneSeparator({
   direction,
   bounds,
   label,
+  area,
   onResize,
 }: PaneSeparatorProps) {
   // Where the drag started, and the size it started from. Deltas are measured
@@ -56,7 +67,7 @@ export function PaneSeparator({
       aria-valuemin={bounds.min}
       aria-valuemax={bounds.total > 0 ? bounds.total - bounds.minOther : undefined}
       tabIndex={0}
-      className={`separator separator--${orientation}`}
+      className={`separator separator--${orientation} separator--${area}`}
       onPointerDown={(event) => {
         // Only the primary button starts a drag; a right-click here should
         // reach whatever context menu the app grows later.

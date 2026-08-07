@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"github.com/txn2/m6t/internal/buildinfo"
+	"github.com/txn2/m6t/internal/kubeexec"
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/pty"
 	"github.com/txn2/m6t/internal/session"
@@ -68,6 +69,13 @@ type App struct {
 	// is the opposite of what projects.yaml does with the same failure.
 	sessions *session.Store
 
+	// kube runs kubectl for the bound project (DESIGN.md §3.2). It holds no
+	// binding of its own: every call is handed the context and namespace the
+	// registry resolved for the path being acted on, and refuses if either is
+	// missing, which is what makes "m6t never targets an implicit cluster" a
+	// property of the code rather than of the caller's discipline.
+	kube *kubeexec.Service
+
 	// trees watches every registered project's worktree (DESIGN.md §3.2) and
 	// backs the tree UI's lazy listing and CRUD (tree.go). Every project is
 	// an open tab from the moment it is registered, so a watcher's lifetime
@@ -110,12 +118,13 @@ func newApp() *App {
 		terminals: terminals,
 		streams:   streams,
 		projects:  project.New(configDir),
+		kube:      kubeexec.New(),
 		sessions:  session.New(configDir),
 
-		// M6T_FS_POLL selects the polling fallback (DESIGN.md §3.2). There
-		// is no per-project settings UI yet (Kube and Helm are in the same
-		// state, DESIGN.md §4), so a global override unblocks a network
-		// mount until one exists.
+		// M6T_FS_POLL selects the polling fallback (DESIGN.md §3.2). The
+		// per-project settings UI that arrived with #10 covers the kube
+		// binding and nothing else, so a global override still unblocks a
+		// network mount until the watcher has a control of its own.
 		trees: watch.New(watchBridge{streams: streams}, watch.Options{Poll: os.Getenv("M6T_FS_POLL") != ""}),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -71,7 +72,7 @@ func TestSaveLoadRoundTripPreservesEveryField(t *testing.T) {
 	if got[0].Name != want[0].Name || got[0].Path != want[0].Path {
 		t.Errorf("identity round-tripped as %+v, want %+v", got[0], want[0])
 	}
-	if got[0].Kube != want[0].Kube {
+	if !reflect.DeepEqual(got[0].Kube, want[0].Kube) {
 		t.Errorf("kube binding round-tripped as %+v, want %+v", got[0].Kube, want[0].Kube)
 	}
 	if strings.Join(got[0].Helm.DefaultValues, ",") != strings.Join(want[0].Helm.DefaultValues, ",") {

@@ -21,6 +21,11 @@ export interface FileTreeProps {
    * this is passed through and dropped, the same way `terminals` is
    * threaded through Workbench today. */
   readonly onOpenFile: (path: string) => void;
+  /** The folders carrying a kube override of their own (#10), so the tree can
+   * mark where a binding actually lives. */
+  readonly overridden: ReadonlySet<string>;
+  /** Opens the Kubernetes binding dialog for a folder (#10). */
+  readonly onBind: (path: string) => void;
 }
 
 /** What is being created, and where. */
@@ -38,7 +43,7 @@ interface Creating {
  * expanded — lazy loading, not virtualization, is what bounds it (see the
  * plan this ticket shipped against).
  */
-export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
+export function FileTree({ tree, status, onOpenFile, overridden, onBind }: FileTreeProps) {
   // Both walk every changed path, and this component re-renders on state that
   // has nothing to do with git — a keystroke in the editor, a terminal going
   // busy. A status object is replaced only when a read lands, so this ties the
@@ -57,7 +62,13 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
   // children), but a failed root is the whole tree having nothing to show.
   const rootError = tree.state.dirs[ROOT]?.status === "error" ? tree.state.dirs[ROOT].error : null;
   const [cursor, setCursor] = useState(0);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
+  // The open row menu: which row, and the point it was summoned from. The
+  // point travels with it because the menu draws there (RowMenu).
+  const [menu, setMenu] = useState<{
+    readonly path: string;
+    readonly x: number;
+    readonly y: number;
+  } | null>(null);
   const [creating, setCreating] = useState<Creating | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -120,7 +131,7 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
   }, [cursor]);
 
   const startCreating = (dir: string, isDir: boolean) => {
-    setMenuFor(null);
+    setMenu(null);
     setActionError(null);
     if (dir !== ROOT && !tree.state.expanded.has(dir)) {
       tree.expand(dir);
@@ -129,13 +140,13 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
   };
 
   const startRenaming = (path: string) => {
-    setMenuFor(null);
+    setMenu(null);
     setActionError(null);
     setRenaming(path);
   };
 
   const startDeleting = (path: string) => {
-    setMenuFor(null);
+    setMenu(null);
     setActionError(null);
     setDeleting(path);
   };
@@ -251,10 +262,11 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
               row={item.row}
               isManifest={tree.state.manifests.get(item.row.path) ?? false}
               badge={badgeAt(badges, item.row.path, item.row.isDir)}
+              overridden={item.row.isDir && overridden.has(item.row.path)}
               focused={rowIndexOf(rendered, index) === cursor}
               selected={tree.state.selected === item.row.path}
               expanded={changedOnly || tree.state.expanded.has(item.row.path)}
-              menuOpen={menuFor === item.row.path}
+              menuAt={menu?.path === item.row.path ? menu : null}
               renaming={renaming === item.row.path}
               deleting={deleting === item.row.path}
               error={actionError}
@@ -271,8 +283,8 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
                 }
                 activate(item.row, activation);
               }}
-              onMenu={() => { setMenuFor(item.row.path); }}
-              onCloseMenu={() => { setMenuFor(null); }}
+              onMenu={(at) => { setMenu({ path: item.row.path, ...at }); }}
+              onCloseMenu={() => { setMenu(null); }}
               onNewFile={() => { startCreating(item.row.isDir ? item.row.path : parentPath(item.row.path), false); }}
               onNewFolder={() => { startCreating(item.row.isDir ? item.row.path : parentPath(item.row.path), true); }}
               onStartRename={() => { startRenaming(item.row.path); }}
@@ -281,6 +293,7 @@ export function FileTree({ tree, status, onOpenFile }: FileTreeProps) {
               onStartDelete={() => { startDeleting(item.row.path); }}
               onConfirmDelete={() => { confirmDelete(item.row.path); }}
               onCancelDelete={() => { setDeleting(null); setActionError(null); }}
+              onBind={() => { setMenu(null); onBind(item.row.path); }}
             />
           ),
         )}

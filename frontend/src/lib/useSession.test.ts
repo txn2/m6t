@@ -135,7 +135,7 @@ describe("restoring a workspace", () => {
 
   it("restores the window-wide settings", async () => {
     const { store } = fakeStore(
-      saved({ fontSize: 17, sidebar: 333, terminalHeight: 222 }),
+      saved({ fontSize: 17, sidebar: 333, terminalHeight: 222, clusterWidth: 321 }),
     );
     const { result } = workbench({ store });
 
@@ -144,6 +144,7 @@ describe("restoring a workspace", () => {
         fontSize: 17,
         sidebar: 333,
         terminalHeight: 222,
+        cluster: 321,
       });
     });
   });

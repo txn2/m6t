@@ -3,6 +3,8 @@ import { session as models } from "../../wailsjs/go/models";
 import type { session } from "../../wailsjs/go/models";
 import type { EditorMode, EditorTab } from "./editorTabs";
 import {
+  CLUSTER_DEFAULT,
+  CLUSTER_MIN,
   EDITOR_MIN_HEIGHT,
   EDITOR_MIN_WIDTH,
   SIDEBAR_DEFAULT,
@@ -80,6 +82,7 @@ export interface RestoredWorkspace {
   readonly fontSize: number;
   readonly sidebar: number;
   readonly terminalHeight: number;
+  readonly cluster: number;
   readonly changedOnly: boolean;
 }
 
@@ -111,6 +114,11 @@ export function restoredWorkspace(state: Session): RestoredWorkspace {
     terminalHeight: clampSplit(recorded(state.terminalHeight, TERMINAL_DEFAULT), {
       min: TERMINAL_MIN,
       minOther: EDITOR_MIN_HEIGHT,
+      total: 0,
+    }),
+    cluster: clampSplit(recorded(state.clusterWidth, CLUSTER_DEFAULT), {
+      min: CLUSTER_MIN,
+      minOther: EDITOR_MIN_WIDTH,
       total: 0,
     }),
     changedOnly: state.changedOnly ?? false,
@@ -223,6 +231,7 @@ export interface LiveSession {
   readonly fontSize: number;
   readonly sidebar: number;
   readonly terminalHeight: number;
+  readonly cluster: number;
   readonly editors: readonly EditorTab[];
   readonly activeEditor: string | null;
   readonly terminals: readonly TerminalTab[];
@@ -264,6 +273,7 @@ export function nextSession(
     fontSize: live.fontSize,
     sidebar: live.sidebar,
     terminalHeight: live.terminalHeight,
+    clusterWidth: live.cluster,
     changedOnly: live.tree.changedOnly,
     projects,
   });

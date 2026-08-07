@@ -58,9 +58,13 @@ type State struct {
 	// FontSize is the terminal's font size in pixels.
 	FontSize int `json:"fontSize" yaml:"fontSize,omitempty"`
 
-	// Sidebar and TerminalHeight are the two pane splits, in pixels.
+	// Sidebar, TerminalHeight and ClusterWidth are the three pane splits, in
+	// pixels. ClusterWidth arrived with the cluster panel (#10); a session
+	// written before it restores the panel's default width, which is what a
+	// zero means for every size here.
 	Sidebar        int `json:"sidebar" yaml:"sidebar,omitempty"`
 	TerminalHeight int `json:"terminalHeight" yaml:"terminalHeight,omitempty"`
+	ClusterWidth   int `json:"clusterWidth" yaml:"clusterWidth,omitempty"`
 
 	// ChangedOnly is the tree's changed-files filter. It is window-wide rather
 	// than per project because the tree treats it that way: the filter is a

@@ -411,6 +411,19 @@ linters:
         linters:
           - gosec
         text: "G302"
+      # G306 (file permissions >0600 on WriteFile) in tests only, and only for
+      # the stub executables that stand in for git, kubectl and helm. A file the
+      # package under test is going to exec has to carry its execute bit, so
+      # there is no mode gosec would accept that leaves the fixture runnable.
+      # The mode is a fixed owner-only constant (0700 — not group- or
+      # world-writable) on a path inside the test's own t.TempDir(). Production
+      # code takes none of this path: it writes only through internal/project's
+      # os.Root (0600/0700) and internal/watch's own 0640/0750, and it never
+      # writes an executable at all.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G306"
       # G204 (subprocess launched with variable) is structurally in conflict
       # with what m6t is. Driving the user's own git, kubectl and helm with
       # arguments built from project paths, branch names and values files is the
@@ -441,7 +454,20 @@ linters:
       # real external-binary caller, so the scope now names the package that
       # actually has one, and the claim above is written against code that is
       # in the tree.
-      - path: (internal/git/|_test\.go)
+      #
+      # #10 adds internal/kubeexec and internal/tools, and each satisfies the
+      # three controls above by construction rather than by review:
+      #   - internal/kubeexec builds its argv in exactly one function
+      #     (Binding.argv), which puts the only user-supplied values — the
+      #     context and the namespace — inside `--context=` and `--namespace=`.
+      #     A value beginning with a dash therefore cannot become a flag, which
+      #     is the operand risk the third control names, and there is a test
+      #     pinning it (TestLeadingDashesStayValues).
+      #   - internal/tools passes no user input at all. Its argv is three
+      #     constant `--version` invocations from a package-level table; the
+      #     only variable is the path exec.LookPath resolved, which is the
+      #     lookup gosec would recommend doing.
+      - path: (internal/git/|internal/kubeexec/|internal/tools/|_test\.go)
         linters:
           - gosec
         text: "G204"

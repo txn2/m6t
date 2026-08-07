@@ -49,7 +49,15 @@ var structuralPins = map[string]packagePin{
 		// bindings, and #52's GitBlame took part of it before this did, so the
 		// number moves rather than the service being squeezed in under it.
 		// 704 is today's actual.
-		loc: 760, exported: 2,
+		//
+		// 760 -> 900 in #10. kube.go is four bindings over three services and
+		// holds no logic of its own: KubeContexts and Tools delegate outright,
+		// KubeBinding is one registry read and one Resolve, and KubeCheck is
+		// the one line that matters — it resolves the target here rather than
+		// accepting one over the bridge, so the cluster a call reaches always
+		// comes from the registry and never from a frontend that may have gone
+		// stale. 796 is today's actual.
+		loc: 900, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/git": {
@@ -70,9 +78,38 @@ var structuralPins = map[string]packagePin{
 		why: "link-time build identity; a dependency root importing nothing first-party",
 	},
 	"internal/project": {
-		// 650 -> 750 in #41. See locCeilingNote.
-		loc: 750, exported: 9,
-		why: "project registry: the persistent list of manifest repositories, their per-project settings and the order the tab strip shows them in",
+		// 650 -> 750 in #41. 750 -> 1150 and 9 -> 12 exported in #10. See
+		// locCeilingNote.
+		loc: 1150, exported: 12,
+		why: "project registry: the persistent list of manifest repositories, their per-project settings, the per-subtree cluster bindings those settings resolve to, and the order the tab strip shows them in",
+	},
+	"internal/kubeconfig": {
+		// Measured: 102 lines in one file. 200 is that plus the follow-up room
+		// every measured package here carries — and it is deliberately small,
+		// because the only thing this package is allowed to grow into is more
+		// ways to READ a kubeconfig. A write path, a client builder or a
+		// current-context selector would each be a different package's job.
+		loc: 200, exported: 3,
+		why: "read-only kubeconfig reader: the contexts a project can be bound to (DESIGN.md §4), listed through client-go's loading rules so m6t's list agrees with kubectl's",
+	},
+	"internal/kubeexec": {
+		// Measured: 214 lines in one file. 500 is that plus room for #11's
+		// diff/apply pipeline, which is the next set of subcommands to go
+		// through this same argv builder. The ceiling refuses a second
+		// responsibility, not more subcommands: everything here is one
+		// function deep behind exec, and the moment it starts parsing what
+		// kubectl printed it has become a different package.
+		loc: 500, exported: 6,
+		why: "kube exec service: kubectl with --context and --namespace stated on every invocation and no code path that omits either (DESIGN.md §3.2, §4)",
+	},
+	"internal/tools": {
+		// Measured: 163 lines in one file. 250 is that plus follow-up room.
+		// The list of binaries m6t drives is fixed by DESIGN.md §2 at three,
+		// so this package has nowhere to grow except into per-tool version
+		// comparison — which belongs to whichever feature needs a minimum
+		// version, not here.
+		loc: 250, exported: 2,
+		why: "external tool detection: whether git, kubectl and helm are installed and at what version, as a state the UI degrades on rather than an error it fails on (DESIGN.md §2)",
 	},
 	"internal/session": {
 		// Measured: #58 landed it at 463 lines across two files — the session
@@ -175,6 +212,49 @@ var structuralPins = map[string]packagePin{
 //
 // 679 is today's actual; 750 is that plus the same proportional follow-up room
 // the rest of this note's measured packages carry.
+//
+// 750 -> 1000 in #10, and the paragraph above is the one this raise has to
+// answer: it says the settings UI is expected to land as its own package rather
+// than inside this ceiling. It did — the editor is React, in
+// frontend/src/components, and none of it is here. What landed here is
+// binding.go: Scope, Binding and Kube.Resolve, the rules that turn a project's
+// stored settings and a repository-relative path into the context and namespace
+// kubectl will be told.
+//
+// That is schema, not UI, and it cannot live anywhere else. Resolve is a method
+// on Kube reading fields Kube owns, and depguard forbids one service importing
+// another — so extracting it would mean either exporting the settings schema to
+// a second package or granting a second dependency-root exception beside
+// internal/buildinfo, both to move sixty lines of resolution away from the type
+// they resolve. The alternative that was actually considered and rejected is
+// worse than either: leaving Kube's fields to be read directly by callers. A
+// caller that reads Kube.Context for a path some scope overrides gets the wrong
+// cluster, which is the exact failure the binding exists to prevent, so the
+// resolution has to sit on the type and the raw fields have to stop being the
+// thing anyone reads.
+//
+// 902 is today's actual, of which roughly a third is code. 1000 is that plus
+// the usual follow-up room.
+//
+// 1000 -> 1150 later in the same PR, when the binding UI moved: the project
+// default is set in the project panel and a folder override is made on the
+// folder, in the tree. That put BindScope and UnbindScope here — the two writes
+// that add and remove one override — and they are in this package for a reason
+// the paragraph above already gives in a different form. They are
+// read-modify-write cycles against projects.yaml, which is editable by hand
+// while m6t runs, so doing them anywhere else means doing them outside the
+// mutex that makes every other write on this file safe. The frontend asks for
+// "bind this folder"; it never reads a scope list, edits it and writes it back.
+//
+// Both live in binding.go beside the model they write rather than in
+// registry.go beside the project-level CRUD, which is the decomposition this
+// ceiling's failure message asks for, done at the only boundary that exists:
+// the package cannot be split, because depguard forbids one service importing
+// another and Kube's fields are what Resolve reads.
+//
+// 1021 is today's actual; 1150 is that plus the usual room. #11's diff/apply
+// consumes a resolved Binding — it does not add to how one is computed or
+// stored — so this should be the last raise the binding asks for.
 //
 // internal/watch is measured: it landed with #6 at 807 lines across five
 // files — os.Root-confined List/Create/Rename/Delete, the fsnotify watcher and

@@ -100,16 +100,40 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// directory — the path is resolved once by the binding layer and handed to
 	// each, which is what keeps a scratch file from being able to reach the
 	// registry that must never be lost.
+	// internal/app -> internal/kubeexec, internal/kubeconfig and internal/tools
+	// are #10's three edges, and the shape they make together is what the
+	// ticket is actually about. None of the three imports another, and in
+	// particular kubeexec does not import project: it declares its own Binding
+	// — a context and a namespace, nothing else — and internal/app is what maps
+	// a project's resolved binding onto it. That seam is why "no kubectl call
+	// can omit its target" is checkable in one small package instead of being a
+	// property of the registry, and it is why kubeexec has no idea what a
+	// project is.
+	//
+	// The absent edges are as deliberate as the present ones. kubeconfig reads
+	// the user's contexts and never learns which one a project chose; tools
+	// reports that kubectl exists and never runs it for anything else; neither
+	// is imported by kubeexec, so a kubectl invocation cannot quietly grow a
+	// fallback to the kubeconfig's current-context — the one thing DESIGN.md §4
+	// forbids outright. Nine services out of the binding layer, still none
+	// between them.
 	want := map[string][]string{
-		rootPackageDir:       {"internal/app"},
-		"internal/app":       {"internal/buildinfo", "internal/git", "internal/project", "internal/pty", "internal/session", "internal/stream", "internal/watch"},
-		"internal/buildinfo": {},
-		"internal/git":       {},
-		"internal/project":   {},
-		"internal/pty":       {},
-		"internal/session":   {},
-		"internal/stream":    {},
-		"internal/watch":     {},
+		rootPackageDir: {"internal/app"},
+		"internal/app": {
+			"internal/buildinfo", "internal/git", "internal/kubeconfig", "internal/kubeexec",
+			"internal/project", "internal/pty", "internal/session", "internal/stream",
+			"internal/tools", "internal/watch",
+		},
+		"internal/buildinfo":  {},
+		"internal/git":        {},
+		"internal/kubeconfig": {},
+		"internal/kubeexec":   {},
+		"internal/project":    {},
+		"internal/pty":        {},
+		"internal/session":    {},
+		"internal/stream":     {},
+		"internal/tools":      {},
+		"internal/watch":      {},
 	}
 
 	graph := firstPartyImports(t)

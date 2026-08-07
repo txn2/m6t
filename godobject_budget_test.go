@@ -69,7 +69,21 @@ const (
 	// same configuration directory rather than a widening of the registry's,
 	// because the two files answer a failed parse in opposite ways and one
 	// service cannot hold both rules (see package_budget_test.go).
-	maxAppFields = 7
+	// 7 -> 8 in #10. The kube exec service arrives as a single
+	// *kubeexec.Service handle: the one-handle-per-service case a sixth time.
+	// It is a stateless runner — it holds no binding, no context and no
+	// namespace of its own, and is handed the target the registry resolved on
+	// every call — so the App gains one field and no cluster state. That is
+	// the point rather than an economy: a binding cached on the coordinator is
+	// a binding that can go stale against a hand-edited projects.yaml, and a
+	// stale binding is an apply aimed at last week's cluster.
+	//
+	// internal/kubeconfig and internal/tools arrive in the same PR and add no
+	// field at all. Both are stateless readers — a kubeconfig listing and three
+	// `--version` probes, neither of which is worth caching against the risk of
+	// answering with a context the user has since deleted — so they are called
+	// as functions rather than held as handles. Three services, one field.
+	maxAppFields = 8
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.
@@ -217,7 +231,42 @@ const (
 	// whole state crosses in one call instead, so a new field is a field in
 	// internal/session and a line in the frontend's snapshot, and this number
 	// does not move again for it.
-	maxAppMethods = 25
+	// 25 -> 29 in #10, and four at once is the largest raise this ceiling has
+	// taken, so it needs the argument rather than the number.
+	//
+	// The four are not four ways to do one thing. KubeContexts reads the user's
+	// kubeconfig, Tools reports which binaries are installed, KubeBinding
+	// resolves what a path is aimed at, and KubeCheck runs the one kubectl
+	// invocation this ticket ships — four different services answering four
+	// different questions, each with a control in the UI that asks it and each
+	// a request with an answer and no throughput, which is the test every
+	// binding on this list has had to pass.
+	//
+	// What the ceiling should refuse here, and does, is the shape this feature
+	// most invites: a setter per binding field. Context, namespace, protected
+	// and every scope row are written through the UpdateProject that already
+	// existed, as one Settings value, so the settings dialog gaining a control
+	// is a field in internal/project and a line in the frontend's form — not a
+	// method here. That is the same trade #58's note made for the session, and
+	// it is why this number does not move again when the binding grows.
+	// 29 -> 32 in #10, when the binding UI moved: the project default is set in
+	// the project panel and a folder override is made on the folder, in the
+	// tree, rather than both in one settings dialog.
+	//
+	// KubeNamespaces is what makes a namespace field completable from the
+	// cluster instead of from memory. BindFolder and UnbindFolder are the pair
+	// that write one override — and the reason they are here rather than a
+	// read-modify-write in the frontend is the same reason Reorder is: the
+	// registry file is editable by hand while m6t runs (DESIGN.md §4), so a UI
+	// that read the scope list, changed one entry and wrote it back would erase
+	// whatever arrived in between. Both go straight to a registry operation
+	// that does the whole cycle under its own mutex.
+	//
+	// Set and clear are two methods rather than one taking an empty value,
+	// because a delete triggered by a blank field is a delete nobody typed.
+	// That is the trade this raise is actually spending: one more method for a
+	// destructive operation the user has to name.
+	maxAppMethods = 32
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"
