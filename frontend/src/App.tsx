@@ -21,6 +21,9 @@ import {
   wailsKube,
   withKube,
 } from "./lib/kube";
+import type { Health } from "./lib/health";
+import { wailsHealth } from "./lib/health";
+import { useHealth } from "./lib/useHealth";
 import { useKube } from "./lib/useKube";
 import { usePipeline } from "./lib/usePipeline";
 import { FolderDialog } from "./components/FolderBinding";
@@ -37,6 +40,7 @@ import type { Appearance } from "./lib/theme";
 import { clampFontSize, preferredAppearance, watchAppearance } from "./lib/theme";
 import { BuildLine, FontSize } from "./components/StatusBar";
 import { NO_BLAME, useBlame } from "./lib/useBlame";
+import type { EditorTab } from "./lib/editorTabs";
 import { useEditorTabs } from "./lib/useEditorTabs";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitOps } from "./lib/useGitOps";
@@ -69,6 +73,7 @@ export interface Backend {
   readonly git: Git;
   readonly session: SessionStore;
   readonly kube: Kube;
+  readonly health: Health;
 }
 
 /** Every seam backed by its generated Wails binding. */
@@ -79,6 +84,7 @@ export const wailsBackend: Backend = {
   git: wailsGit,
   session: wailsSession,
   kube: wailsKube,
+  health: wailsHealth,
 };
 
 export interface AppProps {
@@ -103,7 +109,7 @@ export default function App({
   endpoint = StreamEndpoint,
   backend,
 }: AppProps) {
-  const { registry, directory, files, git, session, kube } = {
+  const { registry, directory, files, git, session, kube, health } = {
     ...wailsBackend,
     ...backend,
   };
@@ -192,13 +198,12 @@ export default function App({
   // one source for what the repository looks like (PROTOCOL.md §5, `git`).
   const gitOps = useGitOps(activePath, gitStatus.refresh, git);
 
-  // The binding follows what is on screen, not what the project defaults to.
-  // The active editor tab's path is already root-relative, and `scopeOf`
-  // reduces it to the folder a scope is written against — a file inherits from
-  // its directory, which is the whole of how a folder binding works.
+  // Everything Kubernetes in the panel follows what is on screen rather than
+  // what the project defaults to. `aim` is what turns the open tab into the two
+  // paths those sections need — see its own comment for why they differ.
   const openTab =
     editors.visible.find((tab) => tab.key === editors.activeKey) ?? null;
-  const selection = openTab === null ? "" : scopeOf(openTab.path);
+  const { file: openFile, folder: selection } = aim(openTab);
   const cluster = useKube(
     { project: projects.activeName, rel: selection },
     kube,
@@ -213,6 +218,13 @@ export default function App({
   useEffect(() => {
     setBindingFolder(null);
   }, [projects.activeName]);
+
+  // Live cluster health for the file on screen (#12).
+  const clusterHealth = useHealth(
+    { project: projects.activeName, root: activePath, file: openFile },
+    stream,
+    health,
+  );
 
   // The diff → apply pipeline (#11). It is declared beside the binding it is
   // aimed with rather than inside the workbench: a run outlives the tree row
@@ -340,6 +352,7 @@ export default function App({
                   );
                 }}
                 runs={pipeline.log}
+                health={clusterHealth}
               />
             }
           />
@@ -543,6 +556,27 @@ function Terminals({
       </div>
     </>
   );
+}
+
+/**
+ * What the panel's Kubernetes sections are aimed at.
+ *
+ * Two paths out of one tab, because the sections ask different questions. The
+ * binding sections ask "where does this go", which a scope answers for a
+ * subtree, so they take the folder — `scopeOf` is the reduction, and a file
+ * inherits from its directory, which is the whole of how a folder binding
+ * works. The health section asks "what is there now", and answers it for the
+ * one file: a subtree's worth of object rows is a list whose interesting row is
+ * off the bottom of a 280px pane.
+ *
+ * The two still agree about the cluster. A scope covers whole path segments, so
+ * a file resolves to exactly what its folder resolves to.
+ */
+function aim(tab: EditorTab | null): { file: string | null; folder: string } {
+  if (tab === null) {
+    return { file: null, folder: "" };
+  }
+  return { file: tab.path, folder: scopeOf(tab.path) };
 }
 
 /** Renders a rejected binding call as a sentence the status line can show. */

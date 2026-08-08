@@ -7,6 +7,8 @@ import {
   project as models,
   tools as toolModels,
 } from "../../wailsjs/go/models";
+import type { HealthController } from "../lib/useHealth";
+import { NO_HEALTH } from "../lib/health";
 import { ProjectPanel } from "./ProjectPanel";
 import { UNBOUND } from "../lib/kube";
 import type { Binding, CheckResult, Kube, Tool } from "../lib/kube";
@@ -81,6 +83,7 @@ function open(over: {
   onOverride?: Write;
   onServerSide?: (serverSide: boolean) => Promise<void>;
   runs?: readonly RunEntry[];
+  health?: Partial<HealthController>;
 } = {}) {
   const onDefault: Write = over.onDefault ?? vi.fn(() => Promise.resolve());
   const onOverride: Write = over.onOverride ?? vi.fn(() => Promise.resolve());
@@ -95,6 +98,7 @@ function open(over: {
       onOverride={onOverride}
       onServerSide={onServerSide}
       runs={over.runs ?? []}
+      health={{ snapshot: NO_HEALTH, file: null, error: null, refresh: vi.fn(), ...over.health }}
     />,
   );
   return { ...view, onDefault, onOverride, onServerSide };

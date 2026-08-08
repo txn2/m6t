@@ -1,5 +1,6 @@
 import type { Endpoint } from "./stream";
 import { subprotocols } from "./stream";
+import type { ServerMessage } from "./protocol";
 import { decodeServerMessage } from "./protocol";
 
 /**
@@ -38,6 +39,7 @@ const defaultSocketFactory: SocketFactory = (url, protocols) =>
 export interface EventHandlers {
   readonly onTree?: (root: string, dirs: string[]) => void;
   readonly onGit?: (root: string) => void;
+  readonly onHealth?: (root: string) => void;
 }
 
 /**
@@ -58,11 +60,35 @@ export function openEventsSocket(
       return;
     }
     const message = decodeServerMessage(event.data);
-    if (message?.type === "tree") {
-      handlers.onTree?.(message.root, message.dirs);
-    } else if (message?.type === "git") {
-      handlers.onGit?.(message.root);
+    if (message !== null) {
+      dispatch(message, handlers);
     }
   };
   return socket;
+}
+
+/**
+ * Hands one decoded message to the handler it belongs to.
+ *
+ * A switch rather than a chain of type tests, so that adding a message type is
+ * one case rather than one more branch in the socket callback — which is where
+ * the third event type took that callback past its complexity budget.
+ */
+function dispatch(message: ServerMessage, handlers: EventHandlers): void {
+  switch (message.type) {
+    case "tree":
+      handlers.onTree?.(message.root, message.dirs);
+      break;
+    case "git":
+      handlers.onGit?.(message.root);
+      break;
+    case "health":
+      handlers.onHealth?.(message.root);
+      break;
+    default:
+      // `exit` and `resync` have their own consumer on the terminal socket
+      // they are published alongside; anything else is a type a later backend
+      // added, which §5 requires be dropped rather than treated as an error.
+      break;
+  }
 }

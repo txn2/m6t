@@ -39,6 +39,11 @@ const (
 	// it carries no status of its own: it names the project and the
 	// consumer asks for the current answer.
 	typeGit = "git"
+
+	// typeHealth reports that a project's live cluster health may have
+	// changed (internal/kubewatch, #12). /events only, and like the two
+	// above it names the project and carries nothing else.
+	typeHealth = "health"
 )
 
 // envelope is the JSON text frame both endpoints speak: a type and its payload.
@@ -75,6 +80,15 @@ type treePayload struct {
 // which is exactly the sibling dependency the service layout forbids. The
 // consumer asks the binding instead, the same way a tree consumer re-lists.
 type gitPayload struct {
+	Root string `json:"root"`
+}
+
+// healthPayload names the project whose cluster health may have changed. It
+// carries no health for gitPayload's reason, and one of its own: a watch event
+// is one object changing, and a payload built per event would make the wire
+// rate the API server's rate. The consumer asks for a snapshot instead, so a
+// burst of events costs one refetch rather than one frame each.
+type healthPayload struct {
 	Root string `json:"root"`
 }
 

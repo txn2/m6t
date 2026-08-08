@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 
+	"github.com/txn2/m6t/internal/kubewatch"
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/stream"
 	"github.com/txn2/m6t/internal/watch"
@@ -15,23 +16,36 @@ import (
 // service in terminals.go.
 type watchBridge struct {
 	streams *stream.Server
+
+	// watches is the cluster health service (#12). A filesystem change is also
+	// how it learns that a checkout may declare something different now, and
+	// this is the only place holding both handles.
+	watches *kubewatch.Service
 }
 
 // PublishTreeChanged forwards a coalesced batch of changed directories onto
-// the /events channel (PROTOCOL.md §5), as two messages.
+// the /events channel (PROTOCOL.md §5), as two messages, and tells the watch
+// service to re-read the checkout.
 //
 // The fan-out is here rather than in either service because this is the only
-// place that knows both exist. One filesystem change means two things to the
-// UI — the tree's listing for a directory may be stale, and the project's git
-// status may be stale — and the watcher is already reporting the changes that
-// drive both: #6 put watches on .git and .git/refs for exactly this, so a
-// branch switch reaches the git consumer without a second watcher.
+// place that knows they all exist. One filesystem change means three things —
+// the tree's listing for a directory may be stale, the project's git status may
+// be stale, and the set of objects the project declares may have changed — and
+// the watcher is already reporting the changes that drive all of them: #6 put
+// watches on .git and .git/refs for exactly this, so a branch switch reaches the
+// git consumer without a second watcher, and reaches the health consumer too,
+// which is right — checking out another branch is the largest change a
+// project's declared objects ever undergo.
 //
 // Neither message carries state, so publishing both costs two small frames
-// on a channel that already drops the oldest under pressure.
+// on a channel that already drops the oldest under pressure. The third call is
+// not a message at all: Refresh is a no-op for a checkout nobody is watching,
+// and for one that is, it costs a re-index and nothing further unless what the
+// checkout declares actually moved.
 func (b watchBridge) PublishTreeChanged(root string, dirs []string) {
 	b.streams.PublishTree(root, dirs)
 	b.streams.PublishGit(root)
+	b.watches.Refresh(root)
 }
 
 // startRegisteredWatchers begins watching every project already in the

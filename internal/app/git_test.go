@@ -256,7 +256,8 @@ func TestAWatcherBatchPublishesBothATreeAndAGitEvent(t *testing.T) {
 	application, endpoint := startApp(t)
 	events := dialEvents(t, endpoint)
 
-	watchBridge{streams: application.streams}.PublishTreeChanged("/repo", []string{".", "manifests"})
+	bridge := watchBridge{streams: application.streams, watches: application.watches}
+	bridge.PublishTreeChanged("/repo", []string{".", "manifests"})
 
 	first := events.awaitFrame()
 	second := events.awaitFrame()

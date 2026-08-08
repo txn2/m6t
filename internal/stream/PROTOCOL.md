@@ -137,6 +137,7 @@ message without the other having to be updated in lockstep.
 | `resync` | `{"droppedBytes": <int>}` | Output was discarded before the frame that follows (§6). |
 | `tree` | `{"root": <string>, "dirs": [<string>, …]}` | One or more directories under a project's worktree (`root`, its absolute path) may have changed — `internal/watch`, coalesced. `dirs` are root-relative, slash-separated, `"."` for the root itself. Published on `/events` only. A consumer re-lists whichever of `dirs` it currently has loaded; a directory it has not loaded needs no action. |
 | `git` | `{"root": <string>}` | A project's git status may be stale — its worktree, `.git/HEAD` or `.git/refs` changed. Published on `/events` only, from the same coalesced watcher batch as `tree`. It carries **no status**: a consumer calls `App.GitStatus(root)` for the current answer. Two consumers of the same root both refetch, so a consumer must treat this as "ask again", not as a delta to apply. |
+| `health` | `{"root": <string>}` | A project's live cluster health may be stale — `internal/kubewatch` observed an object change, a connection change, or a new plan. Published on `/events` only. It carries **no health**: a consumer calls `App.KubeHealth(name)` for the current snapshot. The publisher is rate-limited to one frame per 200 ms per project, so a rolling Deployment does not put the API server's event rate on this socket; a consumer still treats it as "ask again" rather than as a tick to count. |
 
 ## 6. Backpressure
 

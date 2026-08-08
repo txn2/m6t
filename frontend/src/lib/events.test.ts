@@ -64,21 +64,35 @@ describe("opening the event socket", () => {
     expect(onGit).toHaveBeenCalledWith("/repo");
   });
 
-  // The two messages are dispatched independently: a consumer that asked for
-  // one must not be woken by the other, which is the whole reason the tree
-  // and the git status open their own sockets.
-  it("does not invoke a handler the other message type belongs to", () => {
+  it("invokes onHealth for a decoded health message", () => {
+    const socket = {} as WebSocket;
+    const onHealth = vi.fn();
+
+    openEventsSocket(endpoint, { onHealth }, () => socket);
+    socket.onmessage?.({
+      data: '{"type":"health","payload":{"root":"/repo"}}',
+    } as MessageEvent<string>);
+
+    expect(onHealth).toHaveBeenCalledWith("/repo");
+  });
+
+  // The messages are dispatched independently: a consumer that asked for one
+  // must not be woken by another, which is the whole reason the tree, the git
+  // status and the health panel open their own sockets.
+  it("does not invoke a handler another message type belongs to", () => {
     const socket = {} as WebSocket;
     const onTree = vi.fn();
     const onGit = vi.fn();
+    const onHealth = vi.fn();
 
-    openEventsSocket(endpoint, { onTree, onGit }, () => socket);
+    openEventsSocket(endpoint, { onTree, onGit, onHealth }, () => socket);
     socket.onmessage?.({
       data: '{"type":"git","payload":{"root":"/repo"}}',
     } as MessageEvent<string>);
 
     expect(onGit).toHaveBeenCalledOnce();
     expect(onTree).not.toHaveBeenCalled();
+    expect(onHealth).not.toHaveBeenCalled();
   });
 
   // A socket opened with no handler for a type that arrives must not throw:

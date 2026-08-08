@@ -14,6 +14,7 @@ const TYPE_EXIT = "exit";
 const TYPE_RESYNC = "resync";
 const TYPE_TREE = "tree";
 const TYPE_GIT = "git";
+const TYPE_HEALTH = "health";
 
 /**
  * Tells the backend what window size the child should see. Sent whenever the
@@ -37,7 +38,8 @@ export type ServerMessage =
   | { readonly type: "exit"; readonly code: number }
   | { readonly type: "resync"; readonly droppedBytes: number }
   | { readonly type: "tree"; readonly root: string; readonly dirs: string[] }
-  | { readonly type: "git"; readonly root: string };
+  | { readonly type: "git"; readonly root: string }
+  | { readonly type: "health"; readonly root: string };
 
 /**
  * Decodes a text frame, returning null for anything this version does not
@@ -72,6 +74,8 @@ export function decodeServerMessage(raw: string): ServerMessage | null {
       }));
     case TYPE_GIT:
       return withRoot(envelope.payload, (root) => ({ type: "git", root }));
+    case TYPE_HEALTH:
+      return withRoot(envelope.payload, (root) => ({ type: "health", root }));
     default:
       return null;
   }

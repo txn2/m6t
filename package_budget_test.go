@@ -83,7 +83,33 @@ var structuralPins = map[string]packagePin{
 		// carries — deliberately not enough for #14's Helm bridge to move in
 		// under, which arrives as its own set of bindings and will have to
 		// make this argument again on its own terms.
-		loc: 1150, exported: 2,
+		//
+		// 1150 -> 1350 in #12, and the argument is #11's with one thing added.
+		// What landed is one binding (KubeHealth) and two adapters, and the
+		// adapters are the reason the number moves rather than the binding.
+		//
+		// manifestBridge is the largest thing this package has ever had to
+		// hold that is not a delegation, and it is here because it is the only
+		// place that CAN hold it: internal/manifest knows which file declares
+		// what and nothing about clusters, internal/project knows which folder
+		// points where and nothing about manifests, and internal/kubewatch
+		// needs the objects belonging to one binding — the intersection of two
+		// siblings, which depguard makes the binding layer's by construction.
+		// It is twenty lines of that intersection and forty of why the scope
+		// rule is applied here rather than reimplemented inside the watch
+		// service.
+		//
+		// The file count is the part this raise does NOT get to grow: #12's
+		// bindings went into kube.go rather than a health.go, because the
+		// package is at maxFilesPerPackage and that limit is not per-package
+		// and not negotiable. kube.go is now the whole Kubernetes bound
+		// surface — binding, pipeline, health — which is what the file's own
+		// header already said it was.
+		//
+		// 1261 is today's actual. 1350 is that plus the usual slim follow-up
+		// room, and it is now the ceiling that #14's Helm bridge has to argue
+		// past, with the file limit reached and no room to add a file for it.
+		loc: 1350, exported: 2,
 		why: "Wails binding layer: the bound object, the window options, and the adapters that join sibling services",
 	},
 	"internal/git": {
@@ -154,6 +180,45 @@ var structuralPins = map[string]packagePin{
 		loc: 500, exported: 6,
 		why: "kube exec service: kubectl with --context and --namespace stated on every invocation and no code path that omits either (DESIGN.md §3.2, §4)",
 	},
+	"internal/manifest": {
+		// Measured: #12 landed it at 329 lines in one file — the confined walk,
+		// the multi-doc decode, and the classification rule that decides
+		// whether a document with no apiVersion is a values file to ignore or a
+		// manifest to complain about. Roughly a third is code.
+		//
+		// 450 is that plus the usual follow-up room, and it is deliberately
+		// small because there is one direction this package must not grow in.
+		// It reads identity — apiVersion, kind, namespace, name — and retains
+		// no object body. The moment it keeps a spec it has become the thing
+		// that would let a caller compare a manifest against a live object
+		// without going through kubectl, which is #67's job and belongs behind
+		// the server-side dry run rather than in a YAML parser's memory.
+		loc: 450, exported: 4,
+		why: "manifest indexer: which Kubernetes objects a checkout declares, as identity plus the file each came from, with anything unreadable reported as a notice rather than a failure (DESIGN.md §3.2)",
+	},
+	"internal/kubewatch": {
+		// Measured: #12 landed it at 1261 lines across five files — the service
+		// and its types, the per-project session and its retry loop, the plan
+		// that maps kinds onto resources and groups them into connections, the
+		// list-and-watch pump, and the production connector. Roughly a third is
+		// code; the rest is this repository's prose, including the paragraphs
+		// on why a refused group parks instead of failing the session and why a
+		// bookmark advances a resourceVersion without recording anything.
+		//
+		// 1400 is that plus the follow-up room a new service attracts. What it
+		// refuses is a second responsibility, and the two follow-ups already
+		// filed are the test: #67's drift check does NOT belong here — it is a
+		// server-side dry run against kubectl, which is internal/kubeexec's
+		// tool and behind internal/app's confirm gate — while #68's pause is
+		// this package's own lifecycle and does.
+		//
+		// The exported surface is wide for its size and that is the shape of a
+		// state machine, not sprawl: fifteen of the twenty-three names are the
+		// Phase and Health constants, which are wire values the frontend reads
+		// and are worth naming rather than spelling as strings at each site.
+		loc: 1400, exported: 23,
+		why: "kube watch service: read-only client-go watches over the objects a project declares, with kstatus health per object and the connection's own state reported beside them (DESIGN.md §3.2, §5). Read-only by construction — readonly_test.go fails the build on any mutating verb",
+	},
 	"internal/tools": {
 		// Measured: 163 lines in one file. 250 is that plus follow-up room.
 		// The list of binaries m6t drives is fixed by DESIGN.md §2 at three,
@@ -176,7 +241,14 @@ var structuralPins = map[string]packagePin{
 		why: "PTY service: session lifecycle, scrollback and platform termination for the embedded terminal",
 	},
 	"internal/stream": {
-		loc: 900, exported: 5,
+		// 900 -> 950 in #12. locCeilingNote predicted this number would hold
+		// because the services pushing events "plug into the existing envelope
+		// rather than adding endpoints", and that prediction held: what landed
+		// is a third envelope type (`health`), its payload struct and its
+		// Publish method — no endpoint, no handler, no change to auth, framing
+		// or backpressure. 917 is today's actual; 950 is that plus room for one
+		// more event of the same size, which is #14's.
+		loc: 950, exported: 6,
 		why: "loopback stream server: token-authenticated WebSocket transport for PTY I/O and backend-push events",
 	},
 	"internal/watch": {

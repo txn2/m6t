@@ -59,6 +59,17 @@ func (s *Server) PublishGit(root string) {
 	s.publish(envelope{Type: typeGit, Payload: gitPayload{Root: root}})
 }
 
+// PublishHealth announces that a project's live cluster health may be stale
+// (#12, PROTOCOL.md §5).
+//
+// A third message rather than a third consumer of the first two, for the reason
+// PublishGit gives and because the producer is different in kind: tree and git
+// are published from a filesystem batch, and this is published from a watch
+// connection to a cluster, at whatever rate that cluster changes.
+func (s *Server) PublishHealth(root string) {
+	s.publish(envelope{Type: typeHealth, Payload: healthPayload{Root: root}})
+}
+
 // publish sends an event to every subscribed connection.
 //
 // A subscriber too far behind loses events the same way a terminal loses output:

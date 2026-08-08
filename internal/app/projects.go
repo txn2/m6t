@@ -79,6 +79,10 @@ func (a *App) RemoveProject(name string) error {
 		return fmt.Errorf("removing project %s: %w", name, err)
 	}
 	a.trees.Stop(removed.Path)
+	// Its watch connections go with it. A project the user removed is one whose
+	// cluster m6t has no remaining reason to hold a stream open to, and nothing
+	// left in the UI could show what those streams reported.
+	a.watches.Stop(removed.Path)
 	return nil
 }
 
