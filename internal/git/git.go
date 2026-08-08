@@ -3,20 +3,25 @@
 // which are unmerged, and where the current branch sits relative to its
 // upstream.
 //
-// It is a reader. Nothing here mutates a repository — no add, no commit, no
-// checkout — so every invocation is safe to run on a filesystem event, which
-// is exactly how the workbench keeps its badges current. The mutating half of
-// DESIGN.md §7 lands with #9 and belongs behind the same runner this package
-// already uses.
+// It is mostly a reader: status and blame mutate nothing, so every invocation
+// of them is safe to run on a filesystem event, which is how the workbench
+// keeps its badges current. ops.go is the other half of DESIGN.md §7 — pull,
+// push and branch switch — and it goes through the same runner rather than a
+// second one of its own.
 //
-// git is invoked directly with an argv slice and never through a shell
-// (CLAUDE.md, .semgrep/go-security.yml), so a repository path holding shell
-// metacharacters is inert. When git is missing, or the path is no longer a
-// repository, that is reported as a state on Status rather than as an error:
-// both are things a user can see and fix, and neither is a failure of the
-// call. Anything else — a corrupt index, a permission error — is an error
-// carrying git's own stderr verbatim, because the user knows how to read a
-// git error and a translation would only lose detail (DESIGN.md §7).
+// That runner is internal/gitexec, which is where the process is actually
+// started: it pins the locale the not-a-repository match depends on, keeps a
+// read from rewriting .git/index, bounds the call, and carries git's stderr out
+// verbatim. This package parses what comes back and knows nothing else about
+// how it got there. The split exists so a second git reader can be written
+// without duplicating any of that (#53); the parsers here are not it.
+//
+// When git is missing, or the path is no longer a repository, that is reported
+// as a state on Status rather than as an error: both are things a user can see
+// and fix, and neither is a failure of the call. Anything else — a corrupt
+// index, a permission error — is an error carrying git's own stderr verbatim,
+// because the user knows how to read a git error and a translation would only
+// lose detail (DESIGN.md §7).
 //
 // The package knows nothing about projects, the Wails bridge or the stream
 // transport. It takes a worktree path and returns a value; internal/app is

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/txn2/m6t/internal/gitexec"
 )
 
 // The daily git loop (DESIGN.md §7): pull, push and branch switch. status.go
@@ -18,10 +20,18 @@ import (
 // pull and push move refs, and a checkout is gated behind a dirty-worktree
 // rule the UI computes from the status it already holds.
 //
-// Every operation here is one invocation of the system git with an argv slice.
-// Nothing is composed out of several calls behind the user's back, because a
-// half-applied sequence is a state neither the user nor the status reader can
-// explain — if `git pull` stops in a conflict, m6t stops with it.
+// Every operation here is one invocation of the system git, through
+// internal/gitexec — the same runner status.go and blame.go read with, so a
+// write is bounded, logged and reported on the same terms a read is. Nothing is
+// composed out of several calls behind the user's back, because a half-applied
+// sequence is a state neither the user nor the status reader can explain — if
+// `git pull` stops in a conflict, m6t stops with it.
+//
+// Each of them returns the runner's error unwrapped, which is deliberate rather
+// than a missed wrapcheck (the linter is configured for it): that error already
+// names the argv that failed and carries git's own stderr, and internal/app
+// puts the operation's name in front of the whole thing the way GitStatus
+// already does. A wrap here would add "pull" to a message beginning "git pull".
 //
 // Nothing here serializes against a concurrent call. git's own index.lock is
 // the real mutual exclusion, and it has to be: the user's terminal is running
@@ -54,7 +64,7 @@ const rejectedFormat = "resolving %s: %w"
 // Load, which is the one place the working tree's state is read, so the UI
 // never has two sources for the same fact.
 func Pull(root string) error {
-	return mutate(root, invocation{network: true}, "pull")
+	return gitexec.WriteRemote(root, "pull")
 }
 
 // Push publishes the current branch.
@@ -67,12 +77,12 @@ func Pull(root string) error {
 // already answered the question.
 func Push(root, remote string, setUpstream bool) error {
 	if !setUpstream {
-		return mutate(root, invocation{network: true}, "push")
+		return gitexec.WriteRemote(root, "push")
 	}
 	if err := validateRef(remote); err != nil {
 		return err
 	}
-	return mutate(root, invocation{network: true}, "push", "--set-upstream", remote, "HEAD")
+	return gitexec.WriteRemote(root, "push", "--set-upstream", remote, "HEAD")
 }
 
 // Checkout switches to an existing local branch.
@@ -88,7 +98,7 @@ func Checkout(root, branch string) error {
 	if err := validateRef(branch); err != nil {
 		return err
 	}
-	return mutate(root, invocation{}, "checkout", branch, "--")
+	return gitexec.Write(root, "checkout", branch, "--")
 }
 
 // Branches lists local branches, for the switcher's dropdown.
@@ -99,7 +109,7 @@ func Checkout(root, branch string) error {
 // there does not need to be: git refuses to create a ref containing a control
 // character, so one name per line is unambiguous.
 func Branches(root string) ([]string, error) {
-	out, err := runGit(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	out, err := gitexec.Read(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
 	if err != nil {
 		return nil, err
 	}
@@ -109,23 +119,11 @@ func Branches(root string) ([]string, error) {
 // Remotes lists configured remotes, so the push prompt can offer the real ones
 // instead of assuming a repository has an "origin".
 func Remotes(root string) ([]string, error) {
-	out, err := runGit(root, "remote")
+	out, err := gitexec.Read(root, "remote")
 	if err != nil {
 		return nil, err
 	}
 	return lines(out), nil
-}
-
-// mutate runs one writing invocation and discards its stdout.
-//
-// The error comes back exactly as classify built it — naming the argv that
-// failed and carrying git's own stderr — with nothing added. There is no
-// context left for this layer to supply: the argv already contains the
-// repository, and internal/app puts the operation's name in front of the whole
-// thing the way GitStatus already does.
-func mutate(root string, call invocation, args ...string) error {
-	_, err := runWith(root, call, args...)
-	return err
 }
 
 // lines splits command output into non-empty trimmed lines.

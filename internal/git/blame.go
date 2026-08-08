@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/txn2/m6t/internal/gitexec"
 )
 
 // Per-line attribution (#52): who last touched each line of one file, and
@@ -110,7 +112,7 @@ func LoadBlame(root, path string) (Blame, error) {
 	// The `--` is what makes the argument a path rather than a revision. It is
 	// also why a file whose name begins with a dash needs no rejection below:
 	// after the separator, `-f.yaml` is a file.
-	out, err := runGit(root, "blame", "--porcelain", "--", path)
+	out, err := gitexec.Read(root, "blame", "--porcelain", "--", path)
 	if err != nil {
 		return Blame{}, err
 	}

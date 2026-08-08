@@ -168,6 +168,9 @@ func (w *fsWatcher) run() {
 // handle updates watch bookkeeping for one fsnotify event and marks its
 // directory pending.
 func (w *fsWatcher) handle(ev fsnotify.Event) {
+	if attributeOnly(ev) {
+		return
+	}
 	if ev.Has(fsnotify.Create) {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			// A directory was created, or moved in from elsewhere with
@@ -188,6 +191,35 @@ func (w *fsWatcher) handle(ev fsnotify.Event) {
 		return
 	}
 	w.markPending(dirOf(rel))
+}
+
+// attributeOnly reports fsnotify's Chmod with no other bit set — an event that
+// says nothing except "this path's metadata was touched".
+//
+// It is dropped because on macOS it does not mean what it says (#61). kqueue
+// reports an access-time bump as NOTE_ATTRIB and fsnotify surfaces that as
+// Chmod, so *reading* a watched file publishes a change for it. That closed a
+// loop around every reader m6t has: a git status read opens .git/index, the
+// resulting batch tells the frontend its status is stale, the frontend reads
+// again — one subprocess per interval, forever, on a repository nobody is
+// touching. --no-optional-locks already stopped the read from *writing* the
+// index; nothing can stop the kernel reporting the read. Linux never had the
+// problem: an inotify read is IN_ACCESS, which fsnotify does not subscribe to.
+//
+// What this gives up: `chmod +x` on a tracked file, with nothing else
+// happening, no longer refreshes the badges — git reports a mode change, and
+// that badge now waits for the next real event. Everything that edits, adds,
+// moves or removes still arrives as Write, Create, Rename or Remove, and a
+// checkout that changes a mode writes .git/HEAD, which is watched.
+//
+// The precise alternative — stat on each attribute event, compare against the
+// last-known mode — needs a metadata table that grows with every path touched,
+// and the field that actually separates a chmod from a read is ctime, which Go
+// exposes only through platform-specific syscall types (DESIGN.md targets
+// Windows too). Suppressing events around a read is timing-dependent and would
+// swallow a real concurrent change, which nothing later corrects.
+func attributeOnly(ev fsnotify.Event) bool {
+	return ev.Op == fsnotify.Chmod
 }
 
 // markPending records dir as changed since the last flush.
