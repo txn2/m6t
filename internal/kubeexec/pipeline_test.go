@@ -28,42 +28,28 @@ func TestPipelineArgv(t *testing.T) {
 		{
 			name: "validate is a server dry run of the apply",
 			call: func(s *Service) (Result, error) {
-				return s.Validate(context.Background(), bound(), manifest, false, false)
+				return s.Validate(context.Background(), bound(), manifest, false)
 			},
 			want: []string{"apply", "--dry-run=server", "--filename=" + manifest},
 		},
 		{
-			name: "validate carries server-side apply",
-			call: func(s *Service) (Result, error) {
-				return s.Validate(context.Background(), bound(), manifest, false, true)
-			},
-			want: []string{"apply", "--server-side", "--dry-run=server", "--filename=" + manifest},
-		},
-		{
 			name: "diff",
 			call: func(s *Service) (Result, error) {
-				return s.Diff(context.Background(), bound(), manifest, false, false)
+				return s.Diff(context.Background(), bound(), manifest, false)
 			},
 			want: []string{"diff", "--filename=" + manifest},
 		},
 		{
-			name: "diff carries server-side apply",
-			call: func(s *Service) (Result, error) {
-				return s.Diff(context.Background(), bound(), manifest, false, true)
-			},
-			want: []string{"diff", "--server-side", "--filename=" + manifest},
-		},
-		{
 			name: "apply",
 			call: func(s *Service) (Result, error) {
-				return s.Apply(context.Background(), bound(), manifest, false, false)
+				return s.Apply(context.Background(), bound(), manifest, false)
 			},
 			want: []string{"apply", "--filename=" + manifest},
 		},
 		{
 			name: "apply a directory recurses",
 			call: func(s *Service) (Result, error) {
-				return s.Apply(context.Background(), bound(), "/repo/prod", true, false)
+				return s.Apply(context.Background(), bound(), "/repo/prod", true)
 			},
 			want: []string{"apply", "--filename=/repo/prod", "--recursive"},
 		},
@@ -109,26 +95,52 @@ func TestPipelineArgv(t *testing.T) {
 func TestValidateIsApplyPlusTheDryRun(t *testing.T) {
 	t.Parallel()
 
-	for _, serverSide := range []bool{false, true} {
-		validating := &recorder{}
-		if _, err := serviceWith(validating).Validate(
-			context.Background(), bound(), manifest, true, serverSide); err != nil {
-			t.Fatalf("Validate: %v", err)
-		}
-		applying := &recorder{}
-		if _, err := serviceWith(applying).Apply(
-			context.Background(), bound(), manifest, true, serverSide); err != nil {
-			t.Fatalf("Apply: %v", err)
-		}
+	validating := &recorder{}
+	if _, err := serviceWith(validating).Validate(
+		context.Background(), bound(), manifest, true); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	applying := &recorder{}
+	if _, err := serviceWith(applying).Apply(
+		context.Background(), bound(), manifest, true); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
 
-		stripped := without(validating.calls[0], "--dry-run=server")
-		if !reflect.DeepEqual(stripped, applying.calls[0]) {
-			t.Errorf("server-side=%v: validate without its dry run = %v, want the apply %v",
-				serverSide, stripped, applying.calls[0])
+	stripped := without(validating.calls[0], "--dry-run=server")
+	if !reflect.DeepEqual(stripped, applying.calls[0]) {
+		t.Errorf("validate without its dry run = %v, want the apply %v",
+			stripped, applying.calls[0])
+	}
+	if len(stripped) == len(validating.calls[0]) {
+		t.Errorf("validate argv %v carries no dry run at all", validating.calls[0])
+	}
+}
+
+// Nothing in the pipeline reaches for server-side apply (#69). It is not a
+// setting that happens to be off — the flag has no way in at all, and this is
+// what keeps it from returning as a default nobody chose.
+func TestNoInvocationAsksForServerSideApply(t *testing.T) {
+	t.Parallel()
+
+	calls := &recorder{}
+	service := serviceWith(calls)
+	for _, run := range []func() (Result, error){
+		func() (Result, error) { return service.Validate(context.Background(), bound(), manifest, false) },
+		func() (Result, error) { return service.Diff(context.Background(), bound(), manifest, false) },
+		func() (Result, error) { return service.Apply(context.Background(), bound(), manifest, false) },
+		func() (Result, error) { return service.DeletePreview(context.Background(), bound(), manifest, false) },
+		func() (Result, error) { return service.Delete(context.Background(), bound(), manifest, false) },
+	} {
+		if _, err := run(); err != nil {
+			t.Fatalf("running a pipeline step: %v", err)
 		}
-		if len(stripped) == len(validating.calls[0]) {
-			t.Errorf("server-side=%v: validate argv %v carries no dry run at all",
-				serverSide, validating.calls[0])
+	}
+
+	for _, argv := range calls.calls {
+		for _, arg := range argv {
+			if strings.HasPrefix(arg, "--server-side") {
+				t.Errorf("argv %v asks for server-side apply", argv)
+			}
 		}
 	}
 }
@@ -220,13 +232,13 @@ func TestPipelineRefusesAnEmptyTarget(t *testing.T) {
 func everyPipelineCall() map[string]func(*Service, Binding, string) (Result, error) {
 	return map[string]func(*Service, Binding, string) (Result, error){
 		"validate": func(s *Service, b Binding, target string) (Result, error) {
-			return s.Validate(context.Background(), b, target, false, false)
+			return s.Validate(context.Background(), b, target, false)
 		},
 		"diff": func(s *Service, b Binding, target string) (Result, error) {
-			return s.Diff(context.Background(), b, target, false, false)
+			return s.Diff(context.Background(), b, target, false)
 		},
 		"apply": func(s *Service, b Binding, target string) (Result, error) {
-			return s.Apply(context.Background(), b, target, false, false)
+			return s.Apply(context.Background(), b, target, false)
 		},
 		"delete preview": func(s *Service, b Binding, target string) (Result, error) {
 			return s.DeletePreview(context.Background(), b, target, false)
@@ -257,7 +269,7 @@ func TestDiffCarriesItsExitCodeAndOutput(t *testing.T) {
 			t.Parallel()
 
 			rec := &recorder{result: test.result}
-			got, err := serviceWith(rec).Diff(context.Background(), bound(), manifest, false, false)
+			got, err := serviceWith(rec).Diff(context.Background(), bound(), manifest, false)
 			if err != nil {
 				t.Fatalf("Diff: %v", err)
 			}
@@ -279,7 +291,7 @@ func TestAMetacharacterPathIsOneArgument(t *testing.T) {
 
 	hostile := "/repo/we;rm -rf $HOME/`id`.yaml"
 	rec := &recorder{}
-	if _, err := serviceWith(rec).Apply(context.Background(), bound(), hostile, false, false); err != nil {
+	if _, err := serviceWith(rec).Apply(context.Background(), bound(), hostile, false); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 

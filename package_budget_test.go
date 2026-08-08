@@ -132,7 +132,13 @@ var structuralPins = map[string]packagePin{
 	"internal/project": {
 		// 650 -> 750 in #41. 750 -> 1150 and 9 -> 12 exported in #10. See
 		// locCeilingNote.
-		loc: 1150, exported: 12,
+		//
+		// 1150 -> 1100 in #69. Kube.ServerSide and Binding.ServerSide are gone
+		// with the setting they carried, and this ratchets down rather than
+		// standing still for internal/git's reason: a ceiling left where a
+		// package used to be is room for the next thing to move in unnoticed.
+		// 1044 is today's actual.
+		loc: 1100, exported: 12,
 		why: "project registry: the persistent list of manifest repositories, their per-project settings, the per-subtree cluster bindings those settings resolve to, and the order the tab strip shows them in",
 	},
 	"internal/kubeconfig": {
