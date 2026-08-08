@@ -246,9 +246,18 @@ Single window. Top-level tabs are projects; each project tab contains:
   the chosen context names and stays free text — listing namespaces is a
   permission many users of a shared cluster do not have, and a dropdown would be
   empty for exactly them. Below that sits live health (from the watch service +
-  kstatus) for every object declared in the project, and a drift indicator when
-  live objects differ from the checked-in manifests (server-side dry-run
+  kstatus) for the objects **the open manifest declares** — one line per object,
+  a second line only where there is something to read — and a drift indicator
+  when live objects differ from the checked-in manifests (server-side dry-run
   comparison, computed on demand — not continuous).
+
+  The health list is scoped to the file rather than to the project, which is a
+  change from this document's first draft. A project-wide list is one nobody
+  reads: this pane is 280px wide and already carries three sections above it, so
+  in any real repository the row that matters is off the bottom. The watch
+  itself is still project-wide — the backend keeps one session per bound cluster
+  and namespace — so moving between files is a filter in the panel rather than a
+  reconnection.
 - **Making a folder override**: on the folder, in the tree. Its context menu
   carries a Kubernetes entry that opens a dialog to set or remove the folder's
   context and namespace, and a folder carrying one of its own is marked in the

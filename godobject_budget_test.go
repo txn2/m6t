@@ -83,7 +83,21 @@ const (
 	// `--version` probes, neither of which is worth caching against the risk of
 	// answering with a context the user has since deleted — so they are called
 	// as functions rather than held as handles. Three services, one field.
-	maxAppFields = 8
+	// 8 -> 9 in #12. The kube watch service arrives as a single
+	// *kubewatch.Service handle: the one-handle-per-service case again. Every
+	// session, its connection, its retry loop and its state live in
+	// internal/kubewatch, and the App holds the handle only to ask it for a
+	// snapshot, tell it a checkout changed, and stop it.
+	//
+	// It is a SECOND Kubernetes handle beside `kube`, which is the part worth
+	// arguing rather than counting. The two are not one service split in half:
+	// internal/kubeexec runs kubectl and is the only path that can change a
+	// cluster, and internal/kubewatch holds client-go watches and cannot, by
+	// construction. Merging them would put a mutating client and a read-only
+	// one behind one field and make the read-only guarantee a matter of which
+	// method a caller picked. Two fields is what keeps it a property of the
+	// type system.
+	maxAppFields = 9
 
 	// maxAppMethods caps methods with an App receiver, counting value and
 	// pointer receivers alike. Pinned at today's actual with zero slack.
@@ -300,7 +314,18 @@ const (
 	// written through the UpdateProject that already existed, not a setter
 	// here, which is the trade #10's note made for the binding and #58's for
 	// the session.
-	maxAppMethods = 37
+	// 37 -> 38 in #12. One binding, KubeHealth: it resolves a project's root
+	// and the binding at the selected path, and hands both to the watch
+	// service. There is deliberately no second binding to start or stop a
+	// watch — asking for a project's health is what puts it under watch, the
+	// same idempotence internal/watch's Start already has, and a start call the
+	// caller had to remember to skip would be a state machine on the frontend
+	// protecting a map lookup on the backend.
+	//
+	// The two adapters #12 added (manifestBridge, healthBridge) are types of
+	// their own rather than methods here, which is why one service cost one
+	// method: the same shape watchBridge and terminalBridge already take.
+	maxAppMethods = 38
 
 	// appCoordinatorType is the struct these ceilings bound.
 	appCoordinatorType = "App"

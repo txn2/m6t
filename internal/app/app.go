@@ -16,6 +16,7 @@ import (
 
 	"github.com/txn2/m6t/internal/buildinfo"
 	"github.com/txn2/m6t/internal/kubeexec"
+	"github.com/txn2/m6t/internal/kubewatch"
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/pty"
 	"github.com/txn2/m6t/internal/session"
@@ -76,6 +77,14 @@ type App struct {
 	// property of the code rather than of the caller's discipline.
 	kube *kubeexec.Service
 
+	// watches is the live cluster health service (#12, DESIGN.md §3.2): the
+	// read-only client-go watches behind the project panel's object list. It is
+	// a second Kubernetes handle beside kube rather than part of it, and that
+	// separation is the point — internal/kubewatch cannot mutate a cluster by
+	// construction, so nothing reachable through this field can bypass the
+	// confirm gate the mutation path goes through (DESIGN.md §6.1).
+	watches *kubewatch.Service
+
 	// trees watches every registered project's worktree (DESIGN.md §3.2) and
 	// backs the tree UI's lazy listing and CRUD (tree.go). Every project is
 	// an open tab from the moment it is registered, so a watcher's lifetime
@@ -113,19 +122,26 @@ func newApp() *App {
 		configDir = ""
 	}
 
+	projects := project.New(configDir)
+	watches := kubewatch.New(
+		manifestBridge{projects: projects}, kubewatch.Connect, healthBridge{streams: streams})
+
 	return &App{
 		info:      buildinfo.Get(),
 		terminals: terminals,
 		streams:   streams,
-		projects:  project.New(configDir),
+		projects:  projects,
 		kube:      kubeexec.New(),
 		sessions:  session.New(configDir),
+		watches:   watches,
 
 		// M6T_FS_POLL selects the polling fallback (DESIGN.md §3.2). The
 		// per-project settings UI that arrived with #10 covers the kube
 		// binding and nothing else, so a global override still unblocks a
 		// network mount until the watcher has a control of its own.
-		trees: watch.New(watchBridge{streams: streams}, watch.Options{Poll: os.Getenv("M6T_FS_POLL") != ""}),
+		trees: watch.New(
+			watchBridge{streams: streams, watches: watches},
+			watch.Options{Poll: os.Getenv("M6T_FS_POLL") != ""}),
 	}
 }
 
@@ -211,6 +227,11 @@ func Options(assets embed.FS) *options.App {
 		// killed underneath it would otherwise report an exit nobody is left to
 		// receive.
 		OnShutdown: func(context.Context) {
+			// The cluster watches go first: they are the only shutdown here
+			// that reaches off the machine, and a watch connection the API
+			// server has to age out itself is the one thing on this list that
+			// outlives the process if it is not waited for.
+			application.watches.Shutdown()
 			application.streams.Shutdown()
 			application.terminals.Shutdown()
 			application.trees.Shutdown()

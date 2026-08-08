@@ -5,6 +5,11 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  CircleAlert,
+  CircleCheck,
+  CircleDashed,
+  CircleHelp,
+  CircleMinus,
   Crosshair,
   EllipsisVertical,
   Eye,
@@ -13,6 +18,7 @@ import {
   History,
   Layers,
   ListFilter,
+  LoaderCircle,
   Lock,
   Pencil,
   Plus,
@@ -138,6 +144,16 @@ const UI_LUCIDE = {
   cluster: Hexagon,
   lock: Lock,
   settings: Settings,
+  // The live-health set (#12). One shape per kstatus state, all of them the
+  // same circle so a column of them reads as one scale rather than as six
+  // unrelated pictures — the state is carried by the glyph inside the ring and
+  // by the colour, and the ring is what makes the column scannable.
+  "health-current": CircleCheck,
+  "health-progress": LoaderCircle,
+  "health-failed": CircleAlert,
+  "health-absent": CircleDashed,
+  "health-terminating": CircleMinus,
+  "health-unknown": CircleHelp,
 } as const satisfies Readonly<Record<string, LucideIcon>>;
 
 export type UiIconName = keyof typeof UI_LUCIDE;

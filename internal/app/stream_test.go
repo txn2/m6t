@@ -209,6 +209,7 @@ func startApp(t *testing.T) (*App, stream.Endpoint) {
 		t.Fatalf("starting the stream server: %v", err)
 	}
 	t.Cleanup(func() {
+		application.watches.Shutdown()
 		application.streams.Shutdown()
 		application.terminals.Shutdown()
 	})

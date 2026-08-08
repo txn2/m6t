@@ -5,6 +5,8 @@ import type { Project } from "../lib/projects";
 import { projectLabel } from "../lib/projects";
 import type { RunEntry } from "../lib/pipeline";
 import type { KubeController } from "../lib/useKube";
+import type { HealthController } from "../lib/useHealth";
+import { ClusterHealth } from "./ClusterHealth";
 import { RunLog } from "./RunLog";
 import { ContextField, NamespaceField } from "./NamespaceField";
 import { UiIcon } from "./Icon";
@@ -29,6 +31,8 @@ export interface ProjectPanelProps {
   onServerSide: (serverSide: boolean) => Promise<void>;
   /** What this project's pipeline has done this session (#11). */
   readonly runs: readonly RunEntry[];
+  /** Live cluster health for the current selection (#12). */
+  readonly health: HealthController;
 }
 
 /**
@@ -38,20 +42,22 @@ export interface ProjectPanelProps {
  *
  * Attributes first, because a panel that opens with a cluster name and never
  * says which project it belongs to reads the same for every tab. Kubernetes
- * second, holding the one binding that covers the whole checkout. The
- * selection's binding last, because it is the only part that changes as the
- * user moves around, and a section that redrew at the top would push the two
- * stable ones down the panel every time.
+ * second, holding the one binding that covers the whole checkout. Then the
+ * selection, which is the first part that changes as the user moves around —
+ * everything above it is stable, and a section that redrew at the top would
+ * push those two down the panel every time.
  *
  * Nothing here has a save button. Every control writes when it changes, and
  * what it shows afterwards is what the registry answered with rather than what
  * was picked in it — which is also what makes a refused write visible instead
  * of sitting pending behind a button nobody pressed.
  *
- * The bottom holds what the pipeline has done this session (#11), and is
- * otherwise left to grow into: live object health for the open file is the
- * watch service's (#12), and it lands here because it answers about the same
- * target the section above it names.
+ * Live status sits under the selection because it answers about the same
+ * target that section names — where does this go, and what is there now — and
+ * above the run log because the log is history and the status is the present.
+ * The log is last for the reason it was always last: it is the only part of
+ * this panel that grows, so anything below it would be pushed down every time
+ * a run finished.
  */
 export function ProjectPanel({
   project,
@@ -62,6 +68,7 @@ export function ProjectPanel({
   onOverride,
   onServerSide,
   runs,
+  health,
 }: ProjectPanelProps) {
   return (
     <div className="panel" data-protected={kube.binding.protected || undefined}>
@@ -87,10 +94,12 @@ export function ProjectPanel({
         onOverride={onOverride}
       />
 
-      {/* Below the selection, because it is a history of what has been done to
-          the thing the section above names — and because it is the only part of
-          this panel that grows, so anything that redrew above it would push the
-          stable sections down (#11). */}
+      <ClusterHealth health={health} />
+
+      {/* Last, because it is a history of what has been done to the thing the
+          sections above name — and because it is the only part of this panel
+          that grows, so anything that redrew above it would push the stable
+          sections down (#11). */}
       <RunLog entries={runs} />
 
       <ToolStates tools={kube.tools} onRefresh={kube.refresh} />

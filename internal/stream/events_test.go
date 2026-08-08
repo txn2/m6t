@@ -89,6 +89,34 @@ func TestPublishGitIsPublishedToEveryEventSubscriber(t *testing.T) {
 	}
 }
 
+// The health event is the third non-terminal producer (#12). Like the git
+// event it carries the project and nothing else — the objects and their states
+// belong to internal/kubewatch, and a consumer asks the binding for a snapshot
+// rather than reassembling one from a stream of frames.
+func TestPublishHealthIsPublishedToEveryEventSubscriber(t *testing.T) {
+	terminals := newFakeTerminals()
+	server, endpoint := startTestServer(t, terminals)
+
+	first := dial(t, endpoint, "/events")
+	second := dial(t, endpoint, "/events")
+
+	server.PublishHealth("/repo")
+
+	for name, subscriber := range map[string]*client{"first": first, "second": second} {
+		frame := subscriber.readEnvelope()
+		if frame.Type != typeHealth {
+			t.Errorf("%s subscriber received type %q, want %q", name, frame.Type, typeHealth)
+		}
+		if frame.Payload.Root != "/repo" {
+			t.Errorf("%s subscriber received root %q, want %q", name, frame.Payload.Root, "/repo")
+		}
+		if len(frame.Payload.Dirs) != 0 {
+			t.Errorf("%s subscriber received dirs %v; a health event carries no directories",
+				name, frame.Payload.Dirs)
+		}
+	}
+}
+
 // A terminal connection is not registered for events (the same guarantee
 // TestPublishingWithNoSubscribersIsHarmless covers for exit), so a tree
 // change must never arrive on one.
