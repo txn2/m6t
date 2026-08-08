@@ -81,13 +81,11 @@ function open(over: {
   scope?: string;
   onDefault?: Write;
   onOverride?: Write;
-  onServerSide?: (serverSide: boolean) => Promise<void>;
   runs?: readonly RunEntry[];
   health?: Partial<HealthController>;
 } = {}) {
   const onDefault: Write = over.onDefault ?? vi.fn(() => Promise.resolve());
   const onOverride: Write = over.onOverride ?? vi.fn(() => Promise.resolve());
-  const onServerSide = over.onServerSide ?? vi.fn(() => Promise.resolve());
   const view = render(
     <ProjectPanel
       project={over.project ?? project()}
@@ -96,12 +94,11 @@ function open(over: {
       scope={over.scope ?? ""}
       onDefault={onDefault}
       onOverride={onOverride}
-      onServerSide={onServerSide}
       runs={over.runs ?? []}
       health={{ snapshot: NO_HEALTH, file: null, error: null, refresh: vi.fn(), ...over.health }}
     />,
   );
-  return { ...view, onDefault, onOverride, onServerSide };
+  return { ...view, onDefault, onOverride };
 }
 
 type Write = Mock<(context: string, namespace: string, guarded: boolean) => Promise<void>>;
@@ -594,45 +591,20 @@ function tool(over: Partial<Tool> = {}): Tool {
 }
 
 /**
- * Server-side apply (#11, DESIGN.md §6.1).
+ * Server-side apply is gone (#69).
  *
- * It sits in the project section beside Protected because it is the same kind
- * of setting — one switch that changes how every invocation in the repository
- * is made — and it has no per-folder counterpart, which is what the Selection
- * section below it is for.
+ * m6t applies the way the rest of a team applies, and the rest of a team runs
+ * `kubectl apply`. The toggle offered a mode that conflicts with every object
+ * anyone had already applied normally, and could not be made to coexist with
+ * colleagues who keep using kubectl — so the control is removed rather than
+ * explained. This asserts the absence, because a setting nobody can use is one
+ * that comes back as a "small addition" otherwise.
  */
 describe("server-side apply", () => {
-  it("shows what the project has stored", () => {
-    open({ project: project({ context: "prod", serverSide: true }) });
+  it("is offered nowhere in the panel", () => {
+    open({ project: project({ context: "prod" }) });
 
-    const toggle = within(kubeSection()).getByRole("checkbox", {
-      name: "Server-side apply",
-    }) as HTMLInputElement;
-    expect(toggle.checked).toBe(true);
-  });
-
-  it("writes the change without a save button, the way every control here does", async () => {
-    const { onServerSide } = open({ project: project({ context: "prod" }) });
-
-    fireEvent.click(
-      within(kubeSection()).getByRole("checkbox", { name: "Server-side apply" }),
-    );
-
-    await waitFor(() => {
-      expect(onServerSide).toHaveBeenCalledWith(true);
-    });
-  });
-
-  // A repository whose `dev/` tree applied one way and whose `prod/` tree
-  // applied the other would carry two field-manager histories for the same
-  // objects, so there is deliberately no folder-level control for it.
-  it("is offered nowhere but the project", () => {
-    open({ project: project({ context: "prod" }), scope: "prod/api" });
-
-    expect(
-      within(screen.getByLabelText("Selection")).queryByRole("checkbox", {
-        name: "Server-side apply",
-      }),
-    ).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Server-side apply" })).toBeNull();
+    expect(screen.getByLabelText("Kubernetes").textContent).not.toContain("server-side");
   });
 });

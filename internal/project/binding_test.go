@@ -2,6 +2,7 @@ package project
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -281,31 +282,31 @@ func TestValidateScopesRefusesDuplicates(t *testing.T) {
 	}
 }
 
-// Server-side apply is the project's answer for the whole repository. A scope
-// that set it would give one repository two field-manager histories for the
-// same objects, so Resolve carries it through unchanged from the project no
-// matter how deep the matching scope is.
-func TestResolveCarriesServerSideFromTheProjectAlone(t *testing.T) {
+// A projects.yaml written by a build that still had server-side apply carries a
+// `serverSide:` key this one no longer knows (#69). It has to load anyway —
+// refusing it would lock a user out of every project they had, over a setting
+// that no longer does anything.
+func TestAProjectsFileWithARetiredSettingStillLoads(t *testing.T) {
 	t.Parallel()
 
-	kube := Kube{
-		Context:    "dev",
-		Namespace:  "default",
-		ServerSide: true,
-		Scopes: []Scope{
-			{Path: "prod", Context: "prod-us-west", Namespace: "platform", Protected: true},
-		},
+	dir := t.TempDir()
+	body := `projects:
+    - name: infra
+      path: /w/infra
+      kube:
+        context: prod-us-west
+        namespace: platform
+        serverSide: true
+`
+	if err := os.WriteFile(registryFile(dir), []byte(body), configPerm); err != nil {
+		t.Fatalf("seeding the registry: %v", err)
 	}
 
-	for _, rel := range []string{"", "prod", "prod/api/deploy.yaml"} {
-		if got := kube.Resolve(rel); !got.ServerSide {
-			t.Errorf("Resolve(%q).ServerSide = false, want the project's own true", rel)
-		}
+	projects, err := New(dir).List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
 	}
-
-	off := kube
-	off.ServerSide = false
-	if got := off.Resolve("prod/api"); got.ServerSide {
-		t.Error("Resolve().ServerSide = true for a project that has it off")
+	if len(projects) != 1 || projects[0].Kube.Context != "prod-us-west" {
+		t.Fatalf("projects = %+v, want the one the file names", projects)
 	}
 }

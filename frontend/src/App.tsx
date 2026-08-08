@@ -345,12 +345,6 @@ export default function App({
                   // form's.
                   cluster.refresh();
                 }}
-                onServerSide={async (serverSide) => {
-                  await projects.rebind(
-                    active.name,
-                    settingsWithKube(active, withKube(active, { serverSide })),
-                  );
-                }}
                 runs={pipeline.log}
                 health={clusterHealth}
               />

@@ -206,8 +206,7 @@ func (a *App) KubeValidate(name, target string) (kubeexec.Result, error) {
 	if err != nil {
 		return kubeexec.Result{}, err
 	}
-	result, err := a.kube.Validate(
-		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	result, err := a.kube.Validate(context.Background(), at.where(), at.path, at.dir)
 	if err != nil {
 		return kubeexec.Result{}, fmt.Errorf("validating %s in %s: %w", target, name, err)
 	}
@@ -224,8 +223,7 @@ func (a *App) KubeDiff(name, target string) (kubeexec.Result, error) {
 	if err != nil {
 		return kubeexec.Result{}, err
 	}
-	result, err := a.kube.Diff(
-		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	result, err := a.kube.Diff(context.Background(), at.where(), at.path, at.dir)
 	if err != nil {
 		return kubeexec.Result{}, fmt.Errorf("diffing %s in %s: %w", target, name, err)
 	}
@@ -251,8 +249,7 @@ func (a *App) KubeApply(name, target, typed string) (kubeexec.Result, error) {
 	if err := confirm(at.binding, typed); err != nil {
 		return kubeexec.Result{}, fmt.Errorf("applying %s in %s: %w", target, name, err)
 	}
-	result, err := a.kube.Apply(
-		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	result, err := a.kube.Apply(context.Background(), at.where(), at.path, at.dir)
 	if err != nil {
 		return kubeexec.Result{}, fmt.Errorf("applying %s in %s: %w", target, name, err)
 	}

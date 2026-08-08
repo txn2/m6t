@@ -37,15 +37,15 @@ var errNoManifest = errors.New("no manifest path to act on")
 // version dropped, an RBAC rule that denies the write. A client dry run would
 // pass all four and let the apply be the thing that discovers them.
 //
-// It mirrors Apply's own flags rather than running a simplified command.
-// Validating a server-side apply with client-side semantics would miss exactly
-// the class of failure server-side apply introduces — a field manager conflict
-// — which would make this step say yes to an apply that is about to say no.
+// It mirrors Apply's own flags rather than running a simplified command. A
+// validation performed under different semantics from the apply is a validation
+// of a different operation, and would say yes to an apply that is about to say
+// no.
 //
 // A non-zero exit is a Result carrying kubectl's stderr, which is what the UI
 // blocks on and shows. See the package comment for why that is not an error.
-func (s *Service) Validate(ctx context.Context, b Binding, target string, recursive, serverSide bool) (Result, error) {
-	args, err := applyArgs(target, recursive, serverSide, true)
+func (s *Service) Validate(ctx context.Context, b Binding, target string, recursive bool) (Result, error) {
+	args, err := applyArgs(target, recursive, true)
 	if err != nil {
 		return Result{}, err
 	}
@@ -60,11 +60,8 @@ func (s *Service) Validate(ctx context.Context, b Binding, target string, recurs
 // which is the first-class result DESIGN.md §6.1 asks for rather than an empty
 // screen. Distinguishing the three is the caller's, because this package
 // returns what kubectl said and does not interpret it.
-//
-// It carries serverSide for Validate's reason: a diff computed under different
-// apply semantics than the apply is a diff of a different operation.
-func (s *Service) Diff(ctx context.Context, b Binding, target string, recursive, serverSide bool) (Result, error) {
-	args, err := diffArgs(target, recursive, serverSide)
+func (s *Service) Diff(ctx context.Context, b Binding, target string, recursive bool) (Result, error) {
+	args, err := diffArgs(target, recursive)
 	if err != nil {
 		return Result{}, err
 	}
@@ -81,8 +78,8 @@ func (s *Service) Diff(ctx context.Context, b Binding, target string, recursive,
 // Confirmation is not enforced here and cannot be. This package sees an argv and
 // a binding, not a dialog — internal/app is where a protected binding refuses an
 // apply that arrives without the context name typed, before this is ever called.
-func (s *Service) Apply(ctx context.Context, b Binding, target string, recursive, serverSide bool) (Result, error) {
-	args, err := applyArgs(target, recursive, serverSide, false)
+func (s *Service) Apply(ctx context.Context, b Binding, target string, recursive bool) (Result, error) {
+	args, err := applyArgs(target, recursive, false)
 	if err != nil {
 		return Result{}, err
 	}
@@ -120,11 +117,20 @@ func (s *Service) Delete(ctx context.Context, b Binding, target string, recursiv
 // Validate and Apply share it rather than each writing their own, which is what
 // makes "the preview is the operation" a property of the code instead of a
 // promise in two doc comments that can drift apart.
-func applyArgs(target string, recursive, serverSide, dryRun bool) ([]string, error) {
+//
+// There is no --server-side here, and its absence is a decision rather than an
+// omission (#69). m6t applies the way the rest of a team applies, and the rest
+// of a team runs `kubectl apply`. Server-side apply records per-field ownership,
+// so an object whose fields are owned by `kubectl-client-side-apply` — which is
+// every object anyone has ever applied normally — refuses a server-side apply
+// from a different manager. That is a one-time migration only if nothing else
+// ever writes to the cluster again; where colleagues and CI keep running plain
+// `kubectl apply`, ownership returns to them and the next apply conflicts
+// again. Forcing past it every time is server-side apply with the only property
+// it buys switched off, which is worse than not using it. It comes back when
+// there is a reason for a whole team to move at once, not as a checkbox.
+func applyArgs(target string, recursive, dryRun bool) ([]string, error) {
 	args := []string{"apply"}
-	if serverSide {
-		args = append(args, "--server-side")
-	}
 	if dryRun {
 		args = append(args, "--dry-run=server")
 	}
@@ -132,12 +138,8 @@ func applyArgs(target string, recursive, serverSide, dryRun bool) ([]string, err
 }
 
 // diffArgs builds the argument list for `kubectl diff`.
-func diffArgs(target string, recursive, serverSide bool) ([]string, error) {
-	args := []string{"diff"}
-	if serverSide {
-		args = append(args, "--server-side")
-	}
-	return withSource(args, target, recursive)
+func diffArgs(target string, recursive bool) ([]string, error) {
+	return withSource([]string{"diff"}, target, recursive)
 }
 
 // deleteArgs builds the argument list for `kubectl delete`, dry run or not.

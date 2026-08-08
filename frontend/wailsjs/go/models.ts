@@ -318,7 +318,6 @@ export namespace project {
 	    context: string;
 	    namespace: string;
 	    protected: boolean;
-	    serverSide: boolean;
 	    scope: string;
 	
 	    static createFrom(source: any = {}) {
@@ -330,7 +329,6 @@ export namespace project {
 	        this.context = source["context"];
 	        this.namespace = source["namespace"];
 	        this.protected = source["protected"];
-	        this.serverSide = source["serverSide"];
 	        this.scope = source["scope"];
 	    }
 	}
@@ -368,7 +366,6 @@ export namespace project {
 	    context: string;
 	    namespace: string;
 	    protected: boolean;
-	    serverSide: boolean;
 	    scopes: Scope[];
 	
 	    static createFrom(source: any = {}) {
@@ -380,7 +377,6 @@ export namespace project {
 	        this.context = source["context"];
 	        this.namespace = source["namespace"];
 	        this.protected = source["protected"];
-	        this.serverSide = source["serverSide"];
 	        this.scopes = this.convertValues(source["scopes"], Scope);
 	    }
 	

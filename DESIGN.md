@@ -53,7 +53,7 @@ Targets: macOS, Linux, Windows.
 | Terminal | **xterm.js + real PTY** (WebGL renderer) | The proven embedded-terminal stack (VS Code's). Cross-platform today, MIT, and fast enough for full-screen `claude` and `vim` (§8). |
 | Editor | **CodeMirror 6** | Lighter than Monaco, better touch/perf profile, MIT. "Light yaml editing" does not need Monaco's weight. |
 | Git | **Shell out to system `git`**, parse porcelain output | Inherits SSH agent, credential helpers, signing config, and every edge case for free. Rejected: go-git (auth and worktree edge-case parity is a permanent tax). |
-| Kube mutations | **Shell out to `kubectl`** (`diff`, `apply`, `delete`) | Inherits kubeconfig, exec auth plugins (OIDC / EKS / GKE / AKS), server-side apply semantics. |
+| Kube mutations | **Shell out to `kubectl`** (`diff`, `apply`, `delete`) | Inherits kubeconfig, exec auth plugins (OIDC / EKS / GKE / AKS), and the same apply semantics the user's colleagues and CI already get. |
 | Kube reads | **client-go, read-only** | Live status and drift views without polling through kubectl. Watch/list only; the client-go path never mutates. |
 | Helm | **Both modes**: render→apply and real releases | `helm template` output feeds the same diff/apply pipeline as plain YAML; a separate release mode wraps `upgrade --install` / `history` / `rollback` for charts genuinely managed as releases. Shell out to `helm`. |
 | Manifest formats | Plain YAML directories + Helm charts | Kustomize deferred. |
@@ -290,8 +290,20 @@ or a Helm render:
    "No changes" is a first-class result, not an empty screen.
 3. **Confirm** — the confirm dialog restates target context + namespace.
    Protected projects require typing the context name.
-4. **Apply** — `kubectl apply` (server-side apply configurable per project),
-   streamed output, followed by the cluster panel reflecting new live status.
+4. **Apply** — `kubectl apply`, streamed output, followed by the cluster panel
+   reflecting new live status.
+
+Applies are **client-side**, and there is no setting for it (#69). Server-side
+apply was offered per project and removed: it records per-field ownership, so a
+server-side apply from m6t is refused on every object whose fields are owned by
+`kubectl-client-side-apply` — which is every object anyone has ever applied
+normally. That is a one-time migration only if nothing else writes to the
+cluster again, and m6t is a workbench used alongside colleagues and CI who keep
+running plain `kubectl apply`; each of those hands ownership back, and the next
+apply conflicts again. Forcing past a conflict on every apply is server-side
+apply with the only property it buys switched off. m6t applies the way the rest
+of the team applies. It comes back if there is ever a reason for a whole team to
+move at once, which is a v1.x question and not a checkbox.
 
 Delete follows the same shape (`--dry-run=server`, listing what will be
 removed, protected-confirm, `kubectl delete`).
