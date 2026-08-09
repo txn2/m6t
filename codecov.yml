@@ -1,6 +1,13 @@
 # Codecov targets. These figures are the same ones the Makefile enforces
 # locally (COVERAGE_MIN / PATCH_COVERAGE_MIN) and CI enforces in the test job;
 # TestGateFiguresAgree fails the build when any copy drifts.
+#
+# The patch target below is computed as hits / (hits + misses + partials), so a
+# line covered by one block that ran and one that did not counts against it.
+# scripts/coverage-lines.awk applies the same rule locally rather than the
+# any-block-ran view `go tool cover` implies, which is what makes the local
+# gate's figure the same number as this one instead of a few points above it
+# (#29).
 coverage:
   status:
     project:

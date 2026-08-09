@@ -381,6 +381,71 @@ func (c *client) expectNormalClosure() {
 	}
 }
 
+// newTestConn builds a connection with an outbound queue and no socket.
+//
+// send and the queue behind it never touch the websocket, so a test that cares
+// where publish routed a frame can read the queue directly instead of standing
+// up a peer to receive it — which is what turns the registration race into a
+// decided question rather than a timing one.
+func newTestConn() *conn {
+	return &conn{
+		frames: make(chan frame, outboundQueue),
+		done:   make(chan struct{}),
+	}
+}
+
+// queued takes the connection's next outbound frame without waiting, reporting
+// whether there was one.
+func (c *conn) queued() (frame, bool) {
+	select {
+	case f := <-c.frames:
+		return f, true
+	default:
+		return frame{}, false
+	}
+}
+
+// subscriberCount reports how many registered connections want events.
+//
+// It exists for awaitSubscribers, and it is test-only because production has no
+// caller: publish reads the same registry directly, under the same lock.
+func (s *Server) subscriberCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, wantsEvents := range s.conns {
+		if wantsEvents {
+			count++
+		}
+	}
+	return count
+}
+
+// awaitSubscribers blocks until the server has registered want /events
+// subscribers.
+//
+// A returned dial does not mean the connection is a subscriber yet. gorilla
+// writes the 101 inside Upgrade, which is what unblocks the client, and the
+// handler reaches register only after that. publish snapshots the registry, so
+// a test that dials and publishes is publishing to whoever happened to be
+// registered by then — on a loaded machine that is nobody, and the frame is
+// never repeated (#71).
+//
+// The failure is fatal rather than an error: a test that goes on to read a
+// frame nobody was sent reports itself as a lost frame ten seconds later, which
+// names the wrong defect.
+func awaitSubscribers(t *testing.T, server *Server, want int) {
+	t.Helper()
+
+	eventually(t, fmt.Sprintf("%d event subscribers to be registered", want), func() bool {
+		return server.subscriberCount() == want
+	})
+	if got := server.subscriberCount(); got != want {
+		t.Fatalf("%d event subscribers registered, want %d", got, want)
+	}
+}
+
 // eventually retries until condition holds or the deadline passes. It is for the
 // handful of assertions about state a background goroutine reaches — a detach
 // recorded after the socket closed, a connection removed from the registry —

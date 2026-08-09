@@ -99,41 +99,13 @@ if [ ! -s "$TMPDIR_PC/changed.txt" ]; then
 fi
 
 # Step 2: coverage.out -> "file line status" triples (1 = covered).
-# A line inside several blocks counts as covered if ANY block ran.
-awk -v module="$MODULE" '
-    /^mode:/ { next }
-    {
-        # module/path/file.go:startLine.startCol,endLine.endCol numStmts count
-        split($0, parts, ":")
-        full_path = parts[1]
-        rest = parts[2]
-
-        sub("^" module "/", "", full_path)
-
-        split(rest, a, ",")
-        split(a[1], sl, ".")
-        start_line = sl[1] + 0
-
-        split(a[2], b, " ")
-        split(b[1], el, ".")
-        end_line = el[1] + 0
-        count = b[3] + 0
-
-        status = (count > 0) ? 1 : 0
-        for (ln = start_line; ln <= end_line; ln++) {
-            key = full_path SUBSEP ln
-            if (status == 1 || !(key in seen)) {
-                seen[key] = status
-            }
-        }
-    }
-    END {
-        for (key in seen) {
-            split(key, kp, SUBSEP)
-            print kp[1], kp[2], seen[key]
-        }
-    }
-' "$COVERAGE_FILE" | sort > "$TMPDIR_PC/coverage.txt"
+#
+# A line inside several blocks counts as covered only if EVERY block ran, which
+# is what makes this figure equal codecov/patch's rather than approximate it —
+# see the merge rule in coverage-lines.awk for why that is the direction to
+# round in.
+awk -v module="$MODULE" -f "$(dirname "$0")/coverage-lines.awk" \
+    "$COVERAGE_FILE" | sort > "$TMPDIR_PC/coverage.txt"
 
 # Step 3: join changed lines against the coverage map. Lines the compiler does
 # not treat as statements (declarations, comments) are absent from the profile
