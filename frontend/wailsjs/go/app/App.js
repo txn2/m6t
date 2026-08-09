@@ -78,6 +78,10 @@ export function KubeDiff(arg1, arg2) {
   return window['go']['app']['App']['KubeDiff'](arg1, arg2);
 }
 
+export function KubeHealth(arg1, arg2) {
+  return window['go']['app']['App']['KubeHealth'](arg1, arg2);
+}
+
 export function KubeNamespaces(arg1) {
   return window['go']['app']['App']['KubeNamespaces'](arg1);
 }

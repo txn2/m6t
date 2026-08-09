@@ -39,7 +39,11 @@ build):
 
 - Total coverage must be at least **80%**.
 - Coverage of the lines your change touches must be at least **85%** — new
-  code is held above the total floor so the total only ratchets upward.
+  code is held above the total floor so the total only ratchets upward. A line
+  sitting inside one block that ran and one that did not is *not* covered, on
+  both sides of the gate: that is what Codecov calls a partial, and counting it
+  as covered locally is how `make patch-coverage` used to report a few points
+  above `codecov/patch` on the same diff.
 - Cyclomatic complexity ≤ **10** and cognitive complexity ≤ **15** per
   function. The frontend carries the same two numbers as eslint `complexity`
   and `sonarjs/cognitive-complexity`, so one budget governs both languages.

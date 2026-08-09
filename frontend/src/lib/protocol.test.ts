@@ -52,6 +52,13 @@ describe("frames received from the server", () => {
     ).toEqual({ type: "tree", root: "/repo", dirs: [] });
   });
 
+  it("reads a health change, which names only its project", () => {
+    expect(decodeServerMessage('{"type":"health","payload":{"root":"/repo"}}')).toEqual({
+      type: "health",
+      root: "/repo",
+    });
+  });
+
   it("reads a git change, which names only its project", () => {
     expect(decodeServerMessage('{"type":"git","payload":{"root":"/repo"}}')).toEqual({
       type: "git",
@@ -76,6 +83,8 @@ describe("frames received from the server", () => {
     ["a tree change with no dirs", '{"type":"tree","payload":{"root":"/repo"}}'],
     ["a tree change whose dirs is not an array", '{"type":"tree","payload":{"root":"/repo","dirs":"."}}'],
     ["a tree change whose dirs holds a non-string", '{"type":"tree","payload":{"root":"/repo","dirs":[1]}}'],
+    ["a health change with no payload", '{"type":"health"}'],
+    ["a health change whose root is not a string", '{"type":"health","payload":{"root":7}}'],
     ["a git change with no payload", '{"type":"git"}'],
     ["a git change with no root", '{"type":"git","payload":{}}'],
     ["a git change whose root is not a string", '{"type":"git","payload":{"root":7}}'],

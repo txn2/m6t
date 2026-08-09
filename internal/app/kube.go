@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 
 	"github.com/txn2/m6t/internal/kubeconfig"
 	"github.com/txn2/m6t/internal/kubeexec"
+	"github.com/txn2/m6t/internal/kubewatch"
+	"github.com/txn2/m6t/internal/manifest"
 	"github.com/txn2/m6t/internal/project"
+	"github.com/txn2/m6t/internal/stream"
 	"github.com/txn2/m6t/internal/tools"
 	"github.com/txn2/m6t/internal/watch"
 )
@@ -202,8 +206,7 @@ func (a *App) KubeValidate(name, target string) (kubeexec.Result, error) {
 	if err != nil {
 		return kubeexec.Result{}, err
 	}
-	result, err := a.kube.Validate(
-		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	result, err := a.kube.Validate(context.Background(), at.where(), at.path, at.dir)
 	if err != nil {
 		return kubeexec.Result{}, fmt.Errorf("validating %s in %s: %w", target, name, err)
 	}
@@ -220,8 +223,7 @@ func (a *App) KubeDiff(name, target string) (kubeexec.Result, error) {
 	if err != nil {
 		return kubeexec.Result{}, err
 	}
-	result, err := a.kube.Diff(
-		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	result, err := a.kube.Diff(context.Background(), at.where(), at.path, at.dir)
 	if err != nil {
 		return kubeexec.Result{}, fmt.Errorf("diffing %s in %s: %w", target, name, err)
 	}
@@ -247,8 +249,7 @@ func (a *App) KubeApply(name, target, typed string) (kubeexec.Result, error) {
 	if err := confirm(at.binding, typed); err != nil {
 		return kubeexec.Result{}, fmt.Errorf("applying %s in %s: %w", target, name, err)
 	}
-	result, err := a.kube.Apply(
-		context.Background(), at.where(), at.path, at.dir, at.binding.ServerSide)
+	result, err := a.kube.Apply(context.Background(), at.where(), at.path, at.dir)
 	if err != nil {
 		return kubeexec.Result{}, fmt.Errorf("applying %s in %s: %w", target, name, err)
 	}
@@ -370,4 +371,136 @@ func projectPath(registry *project.Registry, name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("finding %s: %w", name, project.ErrNotFound)
+}
+
+// KubeHealth reports the live state of the objects that go to whatever rel
+// resolves to, putting them under watch if they are not already (#12,
+// DESIGN.md §5).
+//
+// rel is repository-relative and may be "" for the project as a whole, exactly
+// as KubeBinding's is — the panel asks both questions about the same selection,
+// and a health section aimed at a different place from the binding section
+// above it would be a panel disagreeing with itself.
+//
+// What it answers for is every object in the checkout that resolves to THAT
+// binding, not every object under that directory. The two differ in the layout
+// folder overrides exist for: at the root of a repository whose `prod/` tree
+// points elsewhere, the root's answer covers everything except `prod/`, and
+// selecting `prod/` covers `prod/`. Between them they partition the project with
+// nothing counted twice and nothing left out, and neither is ever a row shown
+// against a cluster it does not live in.
+//
+// Asking is what starts the watch. There is no separate start binding, for the
+// reason internal/watch's Start is idempotent: the frontend's two questions are
+// "show me this project" and "something changed, ask again", and a start call
+// the second one had to skip would be a state machine on the frontend to
+// protect a map lookup on the backend.
+func (a *App) KubeHealth(name, rel string) (kubewatch.Snapshot, error) {
+	root, err := projectPath(a.projects, name)
+	if err != nil {
+		return kubewatch.Snapshot{}, err
+	}
+
+	binding, err := resolveBinding(a.projects, name, rel)
+	if err != nil {
+		return kubewatch.Snapshot{}, err
+	}
+
+	return a.watches.Watch(root, binding.Context, binding.Namespace), nil
+}
+
+// manifestBridge presents the manifest indexer and the project registry
+// together through the seam internal/kubewatch declares.
+//
+// The two are joined here because this is the only layer that knows both exist,
+// which is the same argument watchBridge makes. The indexer knows which file
+// declares what and nothing about clusters; the registry knows which folder
+// points where and nothing about manifests; the watch service needs the objects
+// belonging to one binding, and that is the intersection.
+type manifestBridge struct {
+	projects *project.Registry
+}
+
+// Declared indexes a checkout and keeps the objects that resolve to the given
+// binding.
+//
+// Filtering here rather than in internal/kubewatch is what keeps the scope
+// rules in one place. A manifest under a folder carrying an override belongs to
+// that folder's cluster, and `project.Kube.Resolve` is the function that decides
+// so — for the panel, for the status bar, and for every kubectl invocation the
+// pipeline makes. A second implementation of that rule inside the watch service
+// would be a second answer to "where does this go", which is the one question
+// this application cannot afford two answers to.
+func (b manifestBridge) Declared(root, target, namespace string) ([]kubewatch.Object, []kubewatch.Notice, error) {
+	binding, err := b.bindingAt(root)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	index, err := manifest.Scan(root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("indexing %s: %w", root, err)
+	}
+
+	objects := make([]kubewatch.Object, 0, len(index.Objects))
+	for _, declared := range index.Objects {
+		// The folder the manifest sits in, which is what a scope is written
+		// against — a file inherits from its directory, the same reduction the
+		// panel's selection makes.
+		at := binding.Resolve(path.Dir(declared.File))
+		if at.Context != target || at.Namespace != namespace {
+			continue
+		}
+		objects = append(objects, kubewatch.Object{
+			APIVersion: declared.APIVersion,
+			Kind:       declared.Kind,
+			Namespace:  declared.Namespace,
+			Name:       declared.Name,
+			File:       declared.File,
+		})
+	}
+
+	return objects, notices(index.Notices), nil
+}
+
+// bindingAt finds the kube settings of the project checked out at root.
+//
+// By path rather than by name because that is what a watch session is keyed on:
+// the session outlives the call that started it, and a project renamed in the
+// meantime would otherwise take its own health down.
+func (b manifestBridge) bindingAt(root string) (project.Kube, error) {
+	projects, err := b.projects.List()
+	if err != nil {
+		return project.Kube{}, fmt.Errorf("finding the project at %s: %w", root, err)
+	}
+	for _, p := range projects {
+		if p.Path == root {
+			return p.Kube, nil
+		}
+	}
+	return project.Kube{}, fmt.Errorf("finding the project at %s: %w", root, project.ErrNotFound)
+}
+
+// notices maps the indexer's notices onto the watch service's own type. The two
+// are separate because the services are siblings (DESIGN.md §3.2), and this is
+// the one place that imports both.
+func notices(from []manifest.Notice) []kubewatch.Notice {
+	out := make([]kubewatch.Notice, 0, len(from))
+	for _, n := range from {
+		out = append(out, kubewatch.Notice{File: n.File, Reason: n.Reason})
+	}
+	return out
+}
+
+// healthBridge presents the loopback stream server through the seam
+// internal/kubewatch declares, the shape watchBridge and terminalBridge already
+// take for their services.
+type healthBridge struct {
+	streams *stream.Server
+}
+
+// PublishHealthChanged forwards a session's announcement onto the /events
+// channel (PROTOCOL.md §5).
+func (b healthBridge) PublishHealthChanged(root string) {
+	b.streams.PublishHealth(root)
 }

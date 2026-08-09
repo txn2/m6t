@@ -111,7 +111,6 @@ export const UNBOUND: Binding = {
   context: "",
   namespace: "",
   protected: false,
-  serverSide: false,
   scope: "",
 };
 
@@ -183,7 +182,7 @@ export function settingsWithKube(project: Project, kube: project.Kube): Settings
 export function withKube(
   project: Project,
   patch: Partial<
-    Pick<project.Kube, "context" | "namespace" | "protected" | "serverSide" | "scopes">
+    Pick<project.Kube, "context" | "namespace" | "protected" | "scopes">
   >,
 ): project.Kube {
   const current = project.kube;
@@ -191,7 +190,6 @@ export function withKube(
     context: patch.context ?? current.context,
     namespace: patch.namespace ?? current.namespace,
     protected: patch.protected ?? current.protected,
-    serverSide: patch.serverSide ?? current.serverSide,
     scopes: patch.scopes ?? current.scopes ?? [],
   });
 }

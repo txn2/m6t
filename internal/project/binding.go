@@ -81,13 +81,6 @@ type Binding struct {
 	// Protected requires typed confirmation on apply, delete and rollback.
 	Protected bool `json:"protected"`
 
-	// ServerSide selects server-side apply. It is carried on the resolved
-	// binding rather than read from Kube directly for the reason every field
-	// here is: a caller that reached into the settings for one field would be
-	// a second place that decides what an invocation looks like, and there is
-	// exactly one — this type.
-	ServerSide bool `json:"serverSide"`
-
 	// Scope is the path of the deepest scope that applied, or "" when the
 	// answer is the project's own default. The UI shows it so a user reading
 	// "prod-us-west / api" can see it came from `prod/api` and not from a
@@ -143,13 +136,10 @@ func (k Kube) Resolve(rel string) Binding {
 		return len(a.path) - len(b.path)
 	})
 
-	// ServerSide is seeded from the project and never touched by the loop
-	// below: it is the one field no scope overrides (see Kube.ServerSide).
 	resolved := Binding{
-		Context:    k.Context,
-		Namespace:  k.Namespace,
-		Protected:  k.Protected,
-		ServerSide: k.ServerSide,
+		Context:   k.Context,
+		Namespace: k.Namespace,
+		Protected: k.Protected,
 	}
 	for _, applies := range applicable {
 		if applies.scope.Context != "" {

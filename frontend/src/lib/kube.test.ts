@@ -190,7 +190,7 @@ describe("whether a project is pointed at a cluster at all", () => {
       path: "/w/infra",
       displayName: "",
       color: "",
-      kube: { context: "", namespace: "", protected: false, serverSide: false, scopes: null, ...kube },
+      kube: { context: "", namespace: "", protected: false, scopes: null, ...kube },
       helm: { defaultValues: [] },
     });
 

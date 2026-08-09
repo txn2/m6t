@@ -4,6 +4,7 @@ import {project} from '../models';
 import {git} from '../models';
 import {kubeexec} from '../models';
 import {kubeconfig} from '../models';
+import {kubewatch} from '../models';
 import {watch} from '../models';
 import {session} from '../models';
 import {stream} from '../models';
@@ -47,6 +48,8 @@ export function KubeDelete(arg1:string,arg2:string,arg3:string):Promise<kubeexec
 export function KubeDeletePreview(arg1:string,arg2:string):Promise<kubeexec.Result>;
 
 export function KubeDiff(arg1:string,arg2:string):Promise<kubeexec.Result>;
+
+export function KubeHealth(arg1:string,arg2:string):Promise<kubewatch.Snapshot>;
 
 export function KubeNamespaces(arg1:string):Promise<Array<string>>;
 

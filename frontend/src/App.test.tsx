@@ -13,6 +13,7 @@ import { detachedBuild } from "./lib/build";
 import {
   kubeconfig as kubeModels,
   kubeexec as execModels,
+  kubewatch as kube,
   project as models,
   session as sessionModels,
   watch,
@@ -21,6 +22,9 @@ import type { Directory } from "./lib/directory";
 import type { Files } from "./lib/files";
 import type { Project, Registry } from "./lib/projects";
 import type { CheckResult, Kube } from "./lib/kube";
+import type { Health } from "./lib/health";
+import type { HealthSnapshot } from "./lib/health";
+import { NO_HEALTH } from "./lib/health";
 import type { Endpoint } from "./lib/stream";
 import type { Git, Status } from "./lib/git";
 import { MODIFIED, NOT_A_REPOSITORY, UNTRACKED, emptyBlame, emptyStatus } from "./lib/git";
@@ -32,6 +36,17 @@ import { MODIFIED, NOT_A_REPOSITORY, UNTRACKED, emptyBlame, emptyStatus } from "
  * the status line should not fail because a control it never touched has no
  * backend behind it.
  */
+/**
+ * A health seam that answers with nothing observed.
+ *
+ * App's own tests are about the workbench, not about the cluster, and the
+ * default seam is the generated binding — which throws synchronously without a
+ * Wails runtime and would put a bridge error in the panel of every test here.
+ */
+function stubHealth(): Health {
+  return { snapshot: () => Promise.resolve(NO_HEALTH) };
+}
+
 function stubKube(projects: readonly Project[] = [], overrides: Partial<Kube> = {}): Kube {
   return {
     contexts: () => Promise.resolve(kubeModels.Config.createFrom({ contexts: [], sources: [] })),
@@ -176,7 +191,7 @@ async function renderWith(names: string[], registry = fakeRegistry(names.map((n)
     <App
       load={attached}
       endpoint={pending}
-      backend={{ registry, kube: stubKube(registry.projects) }}
+      backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }}
     />,
   );
   if (names.length > 0) {
@@ -192,7 +207,7 @@ const open = (label: string) => {
 describe("the build identity in the status line", () => {
   it("reports what the backend says", async () => {
     render(
-      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry(), kube: stubKube() }} />,
+      <App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry: fakeRegistry(), kube: stubKube() }} />,
     );
 
     await waitFor(() => {
@@ -210,7 +225,7 @@ describe("the build identity in the status line", () => {
       <App
         load={() => Promise.resolve({ info: detachedBuild, attached: false })}
         endpoint={pending}
-        backend={{ registry: fakeRegistry(), kube: stubKube() }}
+        backend={{ health: stubHealth(), registry: fakeRegistry(), kube: stubKube() }}
       />,
     );
 
@@ -234,7 +249,7 @@ describe("the project strip", () => {
 
   it("says there is nothing open when the registry is empty", async () => {
     render(
-      <App load={attached} endpoint={pending} backend={{ registry: fakeRegistry(), kube: stubKube() }} />,
+      <App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry: fakeRegistry(), kube: stubKube() }} />,
     );
 
     expect(await screen.findByText(/No project open/)).toBeDefined();
@@ -288,7 +303,7 @@ describe("the project strip", () => {
       Promise.reject(new Error("parsing projects.yaml: line 3")),
     );
 
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
 
     expect(
       (await screen.findByRole("alert")).textContent,
@@ -326,7 +341,7 @@ describe("adding a project", () => {
   it("prefills the directory name and registers the one typed instead", async () => {
     const registry = fakeRegistry();
     registry.choose = vi.fn(() => Promise.resolve("/w/ops/k8s"));
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
 
     const field = await nameField();
     expect((field as HTMLInputElement).value).toBe("k8s");
@@ -363,7 +378,7 @@ describe("adding a project", () => {
   it("does nothing when the picker is cancelled", async () => {
     const registry = fakeRegistry();
     registry.choose = vi.fn(() => Promise.resolve(""));
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
 
     open("+ Project");
 
@@ -381,7 +396,7 @@ describe("adding a project", () => {
     registry.add = vi.fn(() =>
       Promise.reject(new Error("not a git repository")),
     );
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
 
     fireEvent.keyDown(await nameField(), { key: "Enter" });
 
@@ -395,7 +410,7 @@ describe("adding a project", () => {
     registry.choose = vi.fn(() =>
       Promise.reject(new Error("the application window is not ready")),
     );
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
 
     open("+ Project");
 
@@ -416,7 +431,7 @@ describe("project tab identity (#41)", () => {
     const registry = fakeRegistry([
       project("k8s", "/w/ops/k8s", "", { displayName: "Production infra" }),
     ]);
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
 
     const tab = await screen.findByRole("button", { name: "Production infra" });
     expect(tab.getAttribute("title")).toBe("/w/ops/k8s");
@@ -435,7 +450,7 @@ describe("project tab identity (#41)", () => {
   // rename must not disturb the binding that decides what an apply applies to.
   it("renames from the tab menu and keeps the kube binding", async () => {
     const registry = fakeRegistry([project("k8s", "/w/k8s", "prod-us-west")]);
-    render(<App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />);
     await screen.findByRole("button", { name: "k8s" });
 
     await menuFor("k8s");
@@ -500,7 +515,7 @@ describe("project tab identity (#41)", () => {
       project("infra", "/w/infra", "", { color: "chartreuse" }),
     ]);
     const { container } = render(
-      <App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(registry.projects) }} />,
+      <App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(registry.projects) }} />,
     );
     await screen.findByRole("button", { name: "infra" });
 
@@ -584,6 +599,7 @@ describe("a project tab keeping its state (#59)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry,
           directory: stubDirectory(),
           git: stubGit(),
@@ -660,7 +676,7 @@ describe("the stream endpoint", () => {
       <App
         load={attached}
         endpoint={() => Promise.reject(new Error("stream server is not started"))}
-        backend={{ registry: fakeRegistry([project("infra")]), kube: stubKube([project("infra")]) }}
+        backend={{ health: stubHealth(), registry: fakeRegistry([project("infra")]), kube: stubKube([project("infra")]) }}
       />,
     );
 
@@ -678,7 +694,7 @@ describe("the stream endpoint", () => {
         endpoint={() => {
           throw new TypeError("window.go is undefined");
         }}
-        backend={{ registry: fakeRegistry([project("infra")]), kube: stubKube([project("infra")]) }}
+        backend={{ health: stubHealth(), registry: fakeRegistry([project("infra")]), kube: stubKube([project("infra")]) }}
       />,
     );
 
@@ -885,6 +901,7 @@ describe("the git line in the status bar (#8)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry,
           git: fakeGit({ "/w/infra": changedOn("main", ["a.yaml", "b.yaml"]) }),
           kube: stubKube(registry.projects),
@@ -911,6 +928,7 @@ describe("the git line in the status bar (#8)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry,
           git: fakeGit({
             "/w/infra": changedOn("main", ["a.yaml"]),
@@ -943,6 +961,7 @@ describe("the git line in the status bar (#8)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry,
           git: stubGit({
             status: () => {
@@ -1002,6 +1021,7 @@ describe("the git operations (#9)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           git: seam,
           kube: stubKube([project("infra", "/w/infra")]),
@@ -1039,6 +1059,7 @@ describe("the git operations (#9)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           git: seam,
           kube: stubKube([project("infra", "/w/infra")]),
@@ -1070,6 +1091,7 @@ describe("the git operations (#9)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           git: seam,
           kube: stubKube([project("infra", "/w/infra")]),
@@ -1095,6 +1117,7 @@ describe("the git operations (#9)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           git: seam,
           kube: stubKube([project("infra", "/w/infra")]),
@@ -1127,6 +1150,7 @@ describe("the git operations (#9)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           git: seam,
           kube: stubKube([project("infra", "/w/infra")]),
@@ -1192,6 +1216,7 @@ describe("the breadcrumb above the editor (#43)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           directory: stubDirectory(),
           files: stubFiles(),
@@ -1313,6 +1338,7 @@ describe("the blame column above the editor (#52)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           directory: stubDirectory(),
           files: stubFiles(),
@@ -1454,6 +1480,7 @@ describe("locating the open file in the tree (#56)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry([project("infra", "/w/infra")]),
           directory: stubDirectory(),
           files: stubFiles(),
@@ -1518,7 +1545,7 @@ describe("the saved session (#58)", () => {
       save: vi.fn(() => Promise.resolve()),
     };
 
-    render(<App load={attached} endpoint={pending} backend={{ registry, session: store, kube: stubKube(registry.projects) }} />);
+    render(<App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, session: store, kube: stubKube(registry.projects) }} />);
 
     await waitFor(() => {
       expect(
@@ -1544,7 +1571,7 @@ describe("the saved session (#58)", () => {
     };
 
     const { container } = render(
-      <App load={attached} endpoint={pending} backend={{ registry, session: store, kube: stubKube(registry.projects) }} />,
+      <App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, session: store, kube: stubKube(registry.projects) }} />,
     );
 
     await waitFor(() => {
@@ -1582,7 +1609,7 @@ describe("the Kubernetes binding (#10)", () => {
     const projects = [bound("prod", "prod-us-west", true), bound("dev", "dev-cluster")];
     const registry = fakeRegistry(projects);
     const { container } = render(
-      <App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(projects) }} />,
+      <App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(projects) }} />,
     );
     await screen.findByRole("button", { name: "prod" });
 
@@ -1595,7 +1622,7 @@ describe("the Kubernetes binding (#10)", () => {
     const projects = [bound("prod", "prod-us-west", true), bound("dev", "dev-cluster")];
     const registry = fakeRegistry(projects);
     render(
-      <App load={attached} endpoint={pending} backend={{ registry, kube: stubKube(projects) }} />,
+      <App load={attached} endpoint={pending} backend={{ health: stubHealth(), registry, kube: stubKube(projects) }} />,
     );
     await screen.findByRole("button", { name: "prod" });
 
@@ -1655,6 +1682,7 @@ describe("the Kubernetes binding (#10)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry,
           directory: envDirectory(),
           git: stubGit(),
@@ -1877,6 +1905,7 @@ describe("the diff to apply pipeline (#11)", () => {
         load={attached}
         endpoint={pending}
         backend={{
+          health: stubHealth(),
           registry: fakeRegistry(projects),
           directory: tree(),
           git: stubGit(),
@@ -1978,5 +2007,154 @@ describe("the diff to apply pipeline (#11)", () => {
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /app\.yaml/ }));
 
     expect(screen.queryByRole("menuitem", { name: "Apply to cluster…" })).toBeNull();
+  });
+});
+
+describe("live cluster health (#12)", () => {
+  /** A project bound to a context, so its panel has a health section to fill. */
+  function bound(name: string): Project {
+    return models.Project.createFrom({
+      name,
+      path: `/w/${name}`,
+      displayName: "",
+      color: "",
+      kube: { context: "prod-us-west", namespace: "shop", protected: false, scopes: null },
+      helm: { defaultValues: [] },
+    });
+  }
+
+  /** A tree holding one manifest, so a file can be opened to look at. */
+  function healthDirectory(): Directory {
+    const listings: Record<string, watch.Entry[]> = {
+      "": [watch.Entry.createFrom({ name: "deploy.yaml", isDir: false })],
+    };
+    return {
+      list: (_root, relPath) => Promise.resolve(listings[relPath] ?? []),
+      create: () => Promise.resolve(),
+      rename: () => Promise.resolve(),
+      remove: () => Promise.resolve(),
+      prefixes: () => Promise.resolve({}),
+    };
+  }
+
+  function healthFiles(): Files {
+    return {
+      read: () =>
+        Promise.resolve(
+          watch.FileContent.createFrom({
+            content: "kind: Deployment\n",
+            crlf: false,
+            mixedEol: false,
+            readOnly: false,
+            size: 17,
+          }),
+        ),
+      write: () => Promise.resolve(),
+    };
+  }
+
+  /** A snapshot covering the whole binding — which is what the backend answers
+   * with; the panel is what narrows it to the open file. */
+  function watching(
+    objects: { name: string; kind: string; health: string; file: string }[],
+  ): HealthSnapshot {
+    return kube.Snapshot.createFrom({
+      phase: "watching",
+      reason: "",
+      notices: [],
+      objects: objects.map((o) => ({
+        apiVersion: "apps/v1",
+        kind: o.kind,
+        namespace: "shop",
+        name: o.name,
+        file: o.file,
+        health: o.health,
+        message: "",
+      })),
+    });
+  }
+
+  function workbenchWith(health: Health, projects: Project[]) {
+    render(
+      <App
+        load={attached}
+        endpoint={pending}
+        backend={{
+          health,
+          registry: fakeRegistry(projects),
+          directory: healthDirectory(),
+          files: healthFiles(),
+          git: stubGit(),
+          kube: stubKube(projects),
+        }}
+      />,
+    );
+  }
+
+  function panel() {
+    return screen.getByRole("region", { name: "Cluster health" });
+  }
+
+  // The section answers about the file on screen. With none open there is
+  // nothing to answer about — and nothing worth connecting to a cluster for.
+  it("asks for nothing until a manifest is open", async () => {
+    const health: Health = { snapshot: vi.fn(() => Promise.resolve(NO_HEALTH)) };
+    workbenchWith(health, [bound("infra")]);
+
+    await screen.findByRole("region", { name: "Cluster health" });
+    expect(panel().textContent).toContain("Open a manifest to see what it declares.");
+    expect(health.snapshot).not.toHaveBeenCalled();
+  });
+
+  it("shows the open file's objects, and not the rest of the project's", async () => {
+    const health: Health = {
+      snapshot: vi.fn(() =>
+        Promise.resolve(
+          watching([
+            { name: "web", kind: "Deployment", health: "Current", file: "deploy.yaml" },
+            { name: "api", kind: "Service", health: "NotFound", file: "deploy.yaml" },
+            { name: "elsewhere", kind: "Deployment", health: "Current", file: "other.yaml" },
+          ]),
+        ),
+      ),
+    };
+    workbenchWith(health, [bound("infra")]);
+
+    fireEvent.click(await screen.findByRole("treeitem", { name: /deploy\.yaml/ }));
+
+    await within(panel()).findByText("web");
+    expect(within(panel()).getByText("api")).toBeTruthy();
+    expect(within(panel()).queryByText("elsewhere")).toBeNull();
+    expect(panel().textContent).toContain("not in the cluster");
+    // Aimed at the file, which resolves to the same binding its folder does.
+    expect(health.snapshot).toHaveBeenCalledWith("infra", "deploy.yaml");
+  });
+
+  // The health section and the binding section describe one target. A switch
+  // that left the last project's objects under the new project's name is the
+  // reading this panel exists to prevent.
+  it("drops the last project's objects when the tab changes", async () => {
+    const health: Health = {
+      snapshot: vi.fn((name: string) =>
+        Promise.resolve(
+          watching([
+            { name: `${name}-thing`, kind: "Deployment", health: "Current", file: "deploy.yaml" },
+          ]),
+        ),
+      ),
+    };
+    workbenchWith(health, [bound("infra"), bound("other")]);
+
+    fireEvent.click(await screen.findByRole("treeitem", { name: /deploy\.yaml/ }));
+    await within(panel()).findByText("infra-thing");
+
+    fireEvent.click(screen.getByRole("button", { name: "other" }));
+
+    // The new project has no file open yet, so the section goes back to asking
+    // for one rather than keeping the old project's rows on screen.
+    await waitFor(() => {
+      expect(panel().textContent).toContain("Open a manifest to see what it declares.");
+    });
+    expect(within(panel()).queryByText("infra-thing")).toBeNull();
   });
 });

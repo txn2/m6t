@@ -9,21 +9,48 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/client-go/dynamic"
+
+	"github.com/txn2/m6t/internal/kubewatch"
 	"github.com/txn2/m6t/internal/project"
 	"github.com/txn2/m6t/internal/watch"
 )
 
 // testApp builds the binding over a registry in a fresh temp directory, with
-// a watch service so AddProject/RemoveProject's watcher wiring is exercised
-// rather than nil-panicking.
+// the file watcher and the cluster watch service wired so that
+// AddProject/RemoveProject's lifecycle calls are exercised rather than
+// nil-panicking.
 func testApp(t *testing.T) *App {
 	t.Helper()
+
+	projects := project.New(t.TempDir())
 	a := &App{
-		projects: project.New(t.TempDir()),
+		projects: projects,
 		trees:    watch.New(discardEvents{}, watch.Options{}),
+		watches:  testWatches(t, projects),
 	}
 	t.Cleanup(a.trees.Shutdown)
 	return a
+}
+
+// testWatches builds the cluster watch service the binding layer's tests run
+// with, stopped on cleanup.
+func testWatches(t *testing.T, projects *project.Registry) *kubewatch.Service {
+	t.Helper()
+
+	watches := kubewatch.New(
+		manifestBridge{projects: projects}, unreachableCluster, discardEvents{})
+	t.Cleanup(watches.Shutdown)
+	return watches
+}
+
+// unreachableCluster is the Connector these tests run with. Nothing in the
+// binding layer's own tests should reach a cluster, and a connector that
+// refuses is how that is stated rather than assumed: a test that started a
+// watch by accident fails here instead of hanging on a dial.
+func unreachableCluster(string) (dynamic.Interface, meta.RESTMapper, error) {
+	return nil, nil, errors.New("no cluster in the binding layer's tests")
 }
 
 // discardEvents is a watch.Events that does nothing — the binding-layer
@@ -33,6 +60,7 @@ func testApp(t *testing.T) *App {
 type discardEvents struct{}
 
 func (discardEvents) PublishTreeChanged(string, []string) {}
+func (discardEvents) PublishHealthChanged(string)         {}
 
 // repoDir creates a directory the registry will accept as a worktree.
 func repoDir(t *testing.T, name string) string {

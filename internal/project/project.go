@@ -37,17 +37,6 @@ type Kube struct {
 	// Protected requires typed confirmation on apply, delete and rollback.
 	Protected bool `yaml:"protected,omitempty" json:"protected"`
 
-	// ServerSide selects server-side apply for this project (DESIGN.md §6.1).
-	//
-	// It is a project-wide setting with no per-scope override, unlike the three
-	// fields above, and that asymmetry is deliberate: context and namespace say
-	// WHERE a manifest goes and differ per subtree by design, while this says
-	// HOW every apply in the repository is performed. A repository whose `dev/`
-	// tree applied client-side and whose `prod/` tree applied server-side would
-	// have two field-manager histories for the same objects, which is a
-	// conflict the user gets to discover during a production apply.
-	ServerSide bool `yaml:"serverSide,omitempty" json:"serverSide"`
-
 	// Scopes are per-subtree overrides, deepest match winning per field.
 	Scopes []Scope `yaml:"scopes,omitempty" json:"scopes"`
 }

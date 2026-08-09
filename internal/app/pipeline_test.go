@@ -249,25 +249,21 @@ func TestDeletePreviewIsADryRun(t *testing.T) {
 	}
 }
 
-// Server-side apply is the project's setting, so it reaches kubectl on the
-// preview steps too — a diff computed under different apply semantics than the
-// apply is a preview of a different operation.
-func TestServerSideApplyFollowsTheProjectSetting(t *testing.T) {
+// Nothing the pipeline runs asks for server-side apply (#69).
+//
+// It is asserted at the binding layer as well as inside internal/kubeexec,
+// because this is the path a setting would come back down: the flag was removed
+// by deleting the project field that carried it, and a future field wired
+// through `aim` would reach kubectl without the package's own test noticing.
+func TestNoPipelineStepAsksForServerSideApply(t *testing.T) {
 	a, name, _ := pipelineApp(t)
 
-	settings, err := a.projects.Settings(name)
-	if err != nil {
-		t.Fatalf("Settings: %v", err)
-	}
-	settings.Kube.ServerSide = true
-	if _, err := a.UpdateProject(name, settings); err != nil {
-		t.Fatalf("UpdateProject: %v", err)
-	}
-
 	steps := map[string]func() (kubeexec.Result, error){
-		"validate": func() (kubeexec.Result, error) { return a.KubeValidate(name, "dev/api/deploy.yaml") },
-		"diff":     func() (kubeexec.Result, error) { return a.KubeDiff(name, "dev/api/deploy.yaml") },
-		"apply":    func() (kubeexec.Result, error) { return a.KubeApply(name, "dev/api/deploy.yaml", "") },
+		"validate":       func() (kubeexec.Result, error) { return a.KubeValidate(name, "dev/api/deploy.yaml") },
+		"diff":           func() (kubeexec.Result, error) { return a.KubeDiff(name, "dev/api/deploy.yaml") },
+		"apply":          func() (kubeexec.Result, error) { return a.KubeApply(name, "dev/api/deploy.yaml", "") },
+		"delete preview": func() (kubeexec.Result, error) { return a.KubeDeletePreview(name, "dev/api/deploy.yaml") },
+		"delete":         func() (kubeexec.Result, error) { return a.KubeDelete(name, "dev/api/deploy.yaml", "") },
 	}
 	for step, run := range steps {
 		t.Run(step, func(t *testing.T) {
@@ -275,8 +271,13 @@ func TestServerSideApplyFollowsTheProjectSetting(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", step, err)
 			}
-			if !strings.Contains(result.Stdout, "--server-side") {
-				t.Errorf("kubectl received %q, want --server-side", result.Stdout)
+			// The fake kubectl echoes its argv, so an empty Stdout would make
+			// the check below pass without having looked at anything.
+			if !strings.Contains(result.Stdout, "--context=") {
+				t.Fatalf("stdout = %q, want the argv the fake kubectl echoes", result.Stdout)
+			}
+			if strings.Contains(result.Stdout, "--server-side") {
+				t.Errorf("kubectl received %q, which asks for server-side apply", result.Stdout)
 			}
 		})
 	}

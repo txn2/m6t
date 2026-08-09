@@ -47,6 +47,14 @@ WAILS_VERSION := v2.13.0
 # PATCH_COVERAGE_MIN holds NEW code above it so the total can only ratchet up.
 # Both figures are mirrored in ci.yml, codecov.yml and CONTRIBUTING.md, and
 # TestGateFiguresAgree fails when any copy disagrees.
+#
+# PATCH_COVERAGE_MIN is enforced twice — here and by codecov/patch — so the
+# figure agreeing is only half of the agreement. The other half is what a line
+# is worth: an overlapping block makes a line partially covered, Codecov counts
+# that against the ratio, and `go tool cover` has no such category. Both sides
+# now take the pessimistic view; the rule and the reason live in
+# scripts/coverage-lines.awk, and TestCoverageLinesAgreesWithCodecov fails if
+# the two arithmetics part company again (#29).
 COVERAGE_MIN := 80
 PATCH_COVERAGE_MIN := 85
 

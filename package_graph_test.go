@@ -129,18 +129,44 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// internal/app does not import it, and should not: the binding layer talks
 	// to the git service, not to the binary. An app -> gitexec edge appearing
 	// here would mean it had started running git itself.
+	//
+	// internal/app -> internal/manifest and internal/kubewatch are #12's two
+	// edges, and the absent edge between THEM is the one worth defending.
+	//
+	// The obvious import is kubewatch -> manifest: the watch service needs to
+	// know what a checkout declares, and the indexer is what knows. It is
+	// absent because the answer kubewatch actually needs is not the one the
+	// indexer produces. A session watches the objects belonging to ONE binding,
+	// and deciding which manifest belongs to which binding is
+	// project.Kube.Resolve's job — a folder override sends a subtree to another
+	// cluster, and only the registry knows the override exists. So the seam is
+	// Manifests.Declared(root, context, namespace), and internal/app is where
+	// the indexer and the registry are joined to answer it. Had kubewatch
+	// imported manifest directly, it would also have had to import project to
+	// use the result, and the scope rules would then have had two
+	// implementations — which is the one question this application cannot
+	// afford two answers to.
+	//
+	// kubewatch imports neither kubeexec nor kubeconfig, and that is the
+	// read-only guarantee expressed as a missing edge. It builds its own
+	// client-go access (Connect) rather than reaching through the package that
+	// runs kubectl, so there is no path from the watch service to a mutation —
+	// see internal/kubewatch/readonly_test.go, which enforces the same property
+	// from the inside.
 	want := map[string][]string{
 		rootPackageDir: {"internal/app"},
 		"internal/app": {
 			"internal/buildinfo", "internal/git", "internal/kubeconfig", "internal/kubeexec",
-			"internal/project", "internal/pty", "internal/session", "internal/stream",
-			"internal/tools", "internal/watch",
+			"internal/kubewatch", "internal/manifest", "internal/project", "internal/pty",
+			"internal/session", "internal/stream", "internal/tools", "internal/watch",
 		},
 		"internal/buildinfo":  {},
 		"internal/git":        {"internal/gitexec"},
 		"internal/gitexec":    {},
 		"internal/kubeconfig": {},
 		"internal/kubeexec":   {},
+		"internal/kubewatch":  {},
+		"internal/manifest":   {},
 		"internal/project":    {},
 		"internal/pty":        {},
 		"internal/session":    {},

@@ -1727,6 +1727,202 @@ button:hover {
   margin-top: auto;
 }
 
+/* Live cluster health (#12, DESIGN.md §5).
+
+   The pane is 280px wide and this section sits under three others, so its whole
+   design is a budget. One line per object — a mark and a name — and a second
+   line only where there is something to read. The verdict is carried by the
+   glyph inside the ring and by that second line, never by colour alone. */
+.health__kinds,
+.health__objects,
+.health__notices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health__kinds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--m6t-space-3);
+}
+
+/* Tiny and dim: the kind groups the rows, it is not what the reader is looking
+   for. The name below it is. */
+.health__kind-name {
+  margin: 0 0 var(--m6t-space-1);
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.health__object {
+  display: flex;
+  flex-direction: column;
+}
+
+.health__row {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  min-height: var(--m6t-row);
+  min-width: 0;
+}
+
+.health__mark {
+  width: var(--m6t-icon);
+  height: var(--m6t-icon);
+  flex: none;
+  color: var(--m6t-muted);
+}
+
+/* A name too long for the pane is truncated at the end rather than wrapped:
+   the rows are a column to scan down, and one that reflows to three lines
+   breaks the scan for every row after it. The full name is on the row's title
+   and in its accessible name. */
+.health__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The second line, indented under the name it belongs to — the mark's width
+   plus the gap, so the two align rather than the note starting at the margin
+   and reading as a new item. It wraps, because unlike a name it is a sentence
+   and the end of it is the part that matters. */
+.health__note {
+  padding-left: calc(var(--m6t-icon) + var(--m6t-space-2));
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.health__object[data-health="Current"] .health__mark {
+  color: var(--m6t-ok);
+}
+
+.health__object[data-health="InProgress"] .health__mark {
+  color: var(--m6t-project-amber);
+  animation: m6t-spin 1.6s linear infinite;
+}
+
+.health__object[data-health="Failed"] .health__mark {
+  color: var(--m6t-danger);
+}
+
+/* Declared but absent is the answer this panel is most often opened for, so it
+   is called out rather than left grey — but in the accent rather than in the
+   danger colour, because a manifest nobody has applied yet is a state, not a
+   fault. */
+.health__object[data-health="NotFound"] .health__mark,
+.health__object[data-health="NotFound"] .health__note {
+  color: var(--m6t-accent);
+}
+
+.health__object[data-health="Failed"] .health__note {
+  color: var(--m6t-danger);
+}
+
+@keyframes m6t-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* A spinner is decoration on top of a verdict the row already states in words,
+   so it is the first thing to go. */
+@media (prefers-reduced-motion: reduce) {
+  .health__object[data-health="InProgress"] .health__mark {
+    animation: none;
+  }
+}
+
+/* A list that is no longer being kept current is dimmed rather than hidden: the
+   last thing anyone knew is still worth showing, and it must not be shown as
+   though it were now. The line above says which. */
+.health__kinds[data-stale="true"] {
+  opacity: 0.55;
+}
+
+.health__connection {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--m6t-space-1);
+  min-width: 0;
+  align-self: stretch;
+}
+
+/* The file this section is about. Its own name only — the path is in the
+   breadcrumb above the editor and on this element's title. */
+.health__source {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--m6t-fg);
+}
+
+.health__phase {
+  display: flex;
+  align-items: center;
+  gap: var(--m6t-space-2);
+  margin: 0;
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+}
+
+/* The connection as a dot rather than a word in a colour: at this size a
+   coloured word is hard to read, and a dot beside a grey word is not. */
+.health__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--m6t-radius-round);
+  background: var(--m6t-muted);
+}
+
+.health__connection[data-phase="watching"] .health__dot {
+  background: var(--m6t-ok);
+}
+
+.health__connection[data-failing] .health__dot {
+  background: var(--m6t-danger);
+}
+
+.health__connection[data-failing] .health__phase {
+  color: var(--m6t-danger);
+}
+
+/* The backend's own words, wrapped rather than clipped — the same treatment
+   kubectl's stderr gets, for the same reason. */
+.health__reason {
+  margin: var(--m6t-space-1) 0 0;
+  padding: var(--m6t-space-1);
+  border-radius: var(--m6t-radius);
+  background: var(--m6t-bg);
+  color: var(--m6t-muted);
+  font-size: var(--m6t-font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  align-self: stretch;
+}
+
+/* What this file could not be indexed for. One line per reason, in the warning
+   colour, with no heading — at this width a heading would cost more room than
+   the notices it introduces, and a notice under a list of objects reads as
+   being about that list already. */
+.health__notice {
+  color: var(--m6t-project-amber);
+  font-size: var(--m6t-font-size-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 /* A folder carrying its own kube override (#10).
    The mark is the primary signal and the tint is secondary, the same order the
    git badges use (#40): a colour alone would be the only thing saying "this

@@ -140,9 +140,11 @@ func TestStartRegisteredWatchersToleratesAnUnreadableRegistry(_ *testing.T) {
 // app still reaches for a project's worktree afterward.
 func TestAddProjectStartsAWatcherAndRemoveProjectStopsIt(t *testing.T) {
 	rec := newRecordingEvents()
+	projects := project.New(t.TempDir())
 	a := &App{
-		projects: project.New(t.TempDir()),
+		projects: projects,
 		trees:    watch.New(rec, watch.Options{}),
+		watches:  testWatches(t, projects),
 	}
 	t.Cleanup(a.trees.Shutdown)
 
@@ -182,7 +184,11 @@ func TestAddProjectStartsAWatcherAndRemoveProjectStopsIt(t *testing.T) {
 func TestStartWatchingRegisteredProjectsCoversEveryExistingProject(t *testing.T) {
 	rec := newRecordingEvents()
 	registry := project.New(t.TempDir())
-	a := &App{projects: registry, trees: watch.New(rec, watch.Options{})}
+	a := &App{
+		projects: registry,
+		trees:    watch.New(rec, watch.Options{}),
+		watches:  testWatches(t, registry),
+	}
 	t.Cleanup(a.trees.Shutdown)
 
 	dirA := repoDir(t, "a")

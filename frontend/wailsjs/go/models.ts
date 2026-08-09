@@ -233,13 +233,91 @@ export namespace kubeexec {
 
 }
 
+export namespace kubewatch {
+	
+	export class Notice {
+	    file: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Notice(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file = source["file"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class Status {
+	    apiVersion: string;
+	    kind: string;
+	    namespace: string;
+	    name: string;
+	    file: string;
+	    health: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.apiVersion = source["apiVersion"];
+	        this.kind = source["kind"];
+	        this.namespace = source["namespace"];
+	        this.name = source["name"];
+	        this.file = source["file"];
+	        this.health = source["health"];
+	        this.message = source["message"];
+	    }
+	}
+	export class Snapshot {
+	    phase: string;
+	    reason: string;
+	    objects: Status[];
+	    notices: Notice[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Snapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.phase = source["phase"];
+	        this.reason = source["reason"];
+	        this.objects = this.convertValues(source["objects"], Status);
+	        this.notices = this.convertValues(source["notices"], Notice);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace project {
 	
 	export class Binding {
 	    context: string;
 	    namespace: string;
 	    protected: boolean;
-	    serverSide: boolean;
 	    scope: string;
 	
 	    static createFrom(source: any = {}) {
@@ -251,7 +329,6 @@ export namespace project {
 	        this.context = source["context"];
 	        this.namespace = source["namespace"];
 	        this.protected = source["protected"];
-	        this.serverSide = source["serverSide"];
 	        this.scope = source["scope"];
 	    }
 	}
@@ -289,7 +366,6 @@ export namespace project {
 	    context: string;
 	    namespace: string;
 	    protected: boolean;
-	    serverSide: boolean;
 	    scopes: Scope[];
 	
 	    static createFrom(source: any = {}) {
@@ -301,7 +377,6 @@ export namespace project {
 	        this.context = source["context"];
 	        this.namespace = source["namespace"];
 	        this.protected = source["protected"];
-	        this.serverSide = source["serverSide"];
 	        this.scopes = this.convertValues(source["scopes"], Scope);
 	    }
 	

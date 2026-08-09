@@ -1,8 +1,11 @@
 package stream
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
+
+	"github.com/gorilla/websocket"
 )
 
 // A PTY exit goes to the event channel as well as to the terminal socket: a tab
@@ -10,11 +13,15 @@ import (
 // attached to it.
 func TestSessionExitIsPublishedToEveryEventSubscriber(t *testing.T) {
 	terminals := newFakeTerminals()
-	_, endpoint := startTestServer(t, terminals)
+	server, endpoint := startTestServer(t, terminals)
 
 	first := dial(t, endpoint, "/events")
 	second := dial(t, endpoint, "/events")
 	terminal := dial(t, endpoint, "/pty/"+fakeSessionID)
+
+	// Both subscribers have to be registered before the exit is published, or
+	// the one that has not reached register is not in publish's snapshot (#71).
+	awaitSubscribers(t, server, 2)
 
 	// The terminal socket has to be attached before the session ends, or there is
 	// no forwarder to publish the exit.
@@ -45,6 +52,7 @@ func TestPublishTreeIsPublishedToEveryEventSubscriber(t *testing.T) {
 
 	first := dial(t, endpoint, "/events")
 	second := dial(t, endpoint, "/events")
+	awaitSubscribers(t, server, 2)
 
 	server.PublishTree("/repo", []string{".", "manifests"})
 
@@ -71,6 +79,7 @@ func TestPublishGitIsPublishedToEveryEventSubscriber(t *testing.T) {
 
 	first := dial(t, endpoint, "/events")
 	second := dial(t, endpoint, "/events")
+	awaitSubscribers(t, server, 2)
 
 	server.PublishGit("/repo")
 
@@ -84,6 +93,96 @@ func TestPublishGitIsPublishedToEveryEventSubscriber(t *testing.T) {
 		}
 		if len(frame.Payload.Dirs) != 0 {
 			t.Errorf("%s subscriber received dirs %v; a git event carries no directories",
+				name, frame.Payload.Dirs)
+		}
+	}
+}
+
+// publish delivers to the connections the registry says are subscribed at the
+// moment it is called, and to nothing else.
+//
+// The second half is what the awaitSubscribers calls above exist for. A dial
+// returns when the client reads the 101, which Upgrade writes before the
+// handler reaches register, so a connection can be open and not yet a
+// subscriber — and to publish, a connection it has not been told about is a
+// connection that does not exist. It is skipped in silence and the event is
+// never repeated, which is how a test that publishes too early loses a frame it
+// then blames on the transport (#71).
+//
+// Registering after the publish is how that state is reached on purpose here.
+// Over a socket the same skip is a race that shows up on a loaded CI runner and
+// nowhere else; driving the registry directly makes it a decided question.
+func TestPublishReachesRegisteredSubscribersAndNoOneElse(t *testing.T) {
+	server := New(newFakeTerminals())
+
+	subscriber := newTestConn()
+	terminal := newTestConn()
+	late := newTestConn()
+
+	server.register(subscriber, true)
+	server.register(terminal, false)
+
+	server.PublishGit("/repo")
+
+	// Registering after the publish is the state a dialed connection is in when
+	// its handler has not reached register yet. It gets nothing, because publish
+	// reads the registry once and does not revisit it — which is also what makes
+	// "retry the publish" the wrong fix for the flake: it would turn a delivery
+	// test into a test of the retry.
+	server.register(late, true)
+
+	delivered, ok := subscriber.queued()
+	if !ok {
+		t.Fatal("the registered subscriber received nothing, want the git event")
+	}
+	if delivered.kind != websocket.TextMessage {
+		t.Errorf("frame kind = %d, want a text frame", delivered.kind)
+	}
+	var got serverFrame
+	if err := json.Unmarshal(delivered.data, &got); err != nil {
+		t.Fatalf("decoding %q: %v", delivered.data, err)
+	}
+	if got.Type != typeGit {
+		t.Errorf("delivered type = %q, want %q", got.Type, typeGit)
+	}
+	if got.Payload.Root != "/repo" {
+		t.Errorf("delivered root = %q, want %q", got.Payload.Root, "/repo")
+	}
+
+	if frame, ok := terminal.queued(); ok {
+		t.Errorf("a connection registered with wantsEvents=false received %q", frame.data)
+	}
+	if frame, ok := late.queued(); ok {
+		t.Errorf("a subscriber registered after the publish received %q; an "+
+			"event reaches whoever was registered when it was published, and "+
+			"is never repeated", frame.data)
+	}
+}
+
+// The health event is the third non-terminal producer (#12). Like the git
+// event it carries the project and nothing else — the objects and their states
+// belong to internal/kubewatch, and a consumer asks the binding for a snapshot
+// rather than reassembling one from a stream of frames.
+func TestPublishHealthIsPublishedToEveryEventSubscriber(t *testing.T) {
+	terminals := newFakeTerminals()
+	server, endpoint := startTestServer(t, terminals)
+
+	first := dial(t, endpoint, "/events")
+	second := dial(t, endpoint, "/events")
+	awaitSubscribers(t, server, 2)
+
+	server.PublishHealth("/repo")
+
+	for name, subscriber := range map[string]*client{"first": first, "second": second} {
+		frame := subscriber.readEnvelope()
+		if frame.Type != typeHealth {
+			t.Errorf("%s subscriber received type %q, want %q", name, frame.Type, typeHealth)
+		}
+		if frame.Payload.Root != "/repo" {
+			t.Errorf("%s subscriber received root %q, want %q", name, frame.Payload.Root, "/repo")
+		}
+		if len(frame.Payload.Dirs) != 0 {
+			t.Errorf("%s subscriber received dirs %v; a health event carries no directories",
 				name, frame.Payload.Dirs)
 		}
 	}
@@ -112,9 +211,10 @@ func TestPublishTreeDoesNotReachTerminalConnections(t *testing.T) {
 // disconnect is not the right answer to one that does.
 func TestTheEventChannelDiscardsClientInput(t *testing.T) {
 	terminals := newFakeTerminals()
-	_, endpoint := startTestServer(t, terminals)
+	server, endpoint := startTestServer(t, terminals)
 
 	events := dial(t, endpoint, "/events")
+	awaitSubscribers(t, server, 1)
 	events.sendControl(`{"type":"close"}`)
 	events.sendBinary([]byte("nonsense"))
 
