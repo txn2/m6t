@@ -117,6 +117,18 @@ func TestImportGraphIsPinned(t *testing.T) {
 	// fallback to the kubeconfig's current-context — the one thing DESIGN.md §4
 	// forbids outright. Nine services out of the binding layer, still none
 	// between them.
+	//
+	// internal/git -> internal/gitexec is #53's edge, and it is the first in
+	// this table that is not "the binding layer composes a service". It runs
+	// downward into a dependency root: gitexec imports nothing first-party,
+	// exactly as buildinfo does not, and it is the only place a git process is
+	// started. The edge exists so the next git reader (#35's diff viewer) can
+	// have the same runner instead of a sibling import or a second copy of its
+	// flags — which is what a runner with no package below it forced.
+	//
+	// internal/app does not import it, and should not: the binding layer talks
+	// to the git service, not to the binary. An app -> gitexec edge appearing
+	// here would mean it had started running git itself.
 	want := map[string][]string{
 		rootPackageDir: {"internal/app"},
 		"internal/app": {
@@ -125,7 +137,8 @@ func TestImportGraphIsPinned(t *testing.T) {
 			"internal/tools", "internal/watch",
 		},
 		"internal/buildinfo":  {},
-		"internal/git":        {},
+		"internal/git":        {"internal/gitexec"},
+		"internal/gitexec":    {},
 		"internal/kubeconfig": {},
 		"internal/kubeexec":   {},
 		"internal/project":    {},

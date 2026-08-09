@@ -96,8 +96,34 @@ var structuralPins = map[string]packagePin{
 		// standing still, because a ceiling left where a package used to be
 		// is room for the next thing to move in unnoticed.
 		// 900 -> 1100 and 21 -> 25 in #52. See locCeilingNote.
-		loc: 1100, exported: 25,
+		//
+		// 1100 -> 950 in #53. run.go left for internal/gitexec, taking 207
+		// lines with it and the eleven of `mutate` besides. 882 is today's
+		// actual and 950 is the same slim follow-up room the rest of this table
+		// carries — a ceiling left at 1100 is 218 lines of room for the next
+		// thing to move in unnoticed, which is what this table exists to stop.
+		//
+		// The surface does not move: run.go exported nothing. Its two sentinels
+		// became gitexec.ErrNoGit and gitexec.ErrNotARepository, and this
+		// package still turns them into Availability values rather than
+		// re-exporting them.
+		loc: 950, exported: 25,
 		why: "git service: DESIGN.md §7 over the system git — porcelain v2 status with its two degraded states reported as values rather than errors, porcelain blame for the editor's per-line attribution, and the writes the terminal is a bad place for (pull, push, branch switch)",
+	},
+	"internal/gitexec": {
+		// Measured: 278 lines in one file, of which the runner itself is about
+		// eighty and the rest is why each of its decisions is the one that has
+		// to hold — see locCeilingNote for what those are. 320 is that plus the
+		// same slim follow-up room the rest of this table carries.
+		//
+		// It is deliberately the smallest allowance here. This package has one
+		// job and no second one available to it: a parser belongs to whichever
+		// reader needs that format, and a git operation belongs to the service
+		// that offers it. What would fit under a larger ceiling is exactly what
+		// must not arrive — the moment this package knows what `status` prints,
+		// every git reader in the repository is coupled to that.
+		loc: 320, exported: 5,
+		why: "git runner: the one place a git process is started, and the conditions every git call runs under — locale, lock discipline, deadlines, git's stderr passed out unedited. A dependency root importing nothing first-party (#53)",
 	},
 	"internal/buildinfo": {
 		loc: 150, exported: 2,
@@ -179,6 +205,14 @@ var structuralPins = map[string]packagePin{
 		// runtime check is exactly the half fs.ValidPath cannot do.
 		//
 		// 1256 is today's actual; 1300 is that plus the usual follow-up room.
+		//
+		// #61 spent most of that room: 1288 now, for one predicate and the
+		// paragraph explaining which filesystem event this watcher deliberately
+		// ignores and what that costs. The ceiling does not move for it — the
+		// next thing to arrive here has twelve lines, and should be a
+		// decomposition rather than a raise. fsnotify.go and poll.go are two
+		// change-detection strategies behind one Events seam and are the split
+		// that exists if one is needed.
 		loc: 1300, exported: 23,
 		why: "file tree and watcher: os.Root-confined lazy directory listing and CRUD, file content read/write for the editor (#7), bounded prefix reads for content-based file classification (#38), plus fsnotify/polling change detection for the workbench tree (DESIGN.md §3.2)",
 	},
@@ -366,6 +400,17 @@ var structuralPins = map[string]packagePin{
 // binary, so it is expected to land as its own package rather than inside this
 // ceiling.
 //
+// That last sentence is struck in #53, and the paragraph it belongs to had the
+// answer in it the whole time. It called "a third package for the runner, and a
+// second dependency-root exception" the cost of the split, and treated that cost
+// as the argument against — while naming the parser as the seam that did exist.
+// Both halves were backwards. The runner is what has more than one consumer and
+// what nothing else can safely duplicate; the parsers have exactly one consumer
+// each. #52 hit the same wall from the other side and deferred rather than
+// resolving it. The third package is internal/gitexec, the second exception is
+// in .golangci.yml, and they cost 278 lines and one reviewed config change —
+// less than either ceiling raise that was taken instead of paying it.
+//
 // The exported surface goes to 27 with zero slack, as this table requires: the
 // original 15 plus eight operations (Stage, Unstage, Commit, Pull, Push,
 // Checkout, Branches, Remotes) and the four argument-rejection sentinels
@@ -403,6 +448,29 @@ var structuralPins = map[string]packagePin{
 // surface goes to 25 with the usual zero slack: Blame and BlameCommit cross
 // the bridge, LoadBlame is the operation, and ErrInvalidPath is a refusal a
 // caller matches with errors.Is, the same reason ErrInvalidRef is exported.
+//
+// internal/gitexec is #53, and it is the extraction the two paragraphs above
+// kept arriving at and declining. It is measured at 278 lines in one file:
+// Read, Write and WriteRemote, the invocation they build, the environment, and
+// classify. Nothing was rewritten in the move except one message — see below.
+//
+// What makes it a package rather than a file is that its consumers cannot be in
+// one. internal/git reads and writes through it today; #35's diff viewer is the
+// second reader, and a sibling import is exactly what depguard forbids. The
+// alternative every prior ticket took instead — duplicate the runner — is worse
+// than it looks, because each of the four things it pins fails silently when
+// copied wrong: a missing LC_ALL turns the not-a-repository check into a match
+// against a translated string, a missing --no-optional-locks turns a status read
+// into a watcher event that triggers another status read (#61), a missing
+// deadline turns an unreachable mount into badges that never update again, and a
+// summarized stderr turns a git error the user could act on into "exit status
+// 1". None of the four has a test that would fail in the copy.
+//
+// The one behavior that changed: a timed-out call now names the deadline that
+// actually expired. classify read the local constant regardless of the
+// invocation, so a push cut off at ten minutes reported "timed out after 30s".
+// It is a method on the invocation now, which is why the fix is structural
+// rather than a corrected constant.
 //
 // 620 -> 700 in #9. git.go gains the mutating half of the git service: eight
 // delegating bindings, each four lines because each names its own operation
@@ -469,7 +537,7 @@ var structuralPins = map[string]packagePin{
 // replaced by defaults without a word. Putting both behind one package would
 // mean one package with two contradictory contracts, and the day someone
 // applied the wrong one, the registry is what would be lost.
-const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project, internal/session, internal/watch and internal/git are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
+const locCeilingNote = "internal/pty, internal/stream, internal/app, internal/project, internal/session, internal/watch, internal/git and internal/gitexec are measured; buildinfo and the root are policy-seeded (see locCeilingNote)"
 
 // maxFilesPerPackage stops a package from escaping its LOC budget by fanning
 // the same code across many small files.

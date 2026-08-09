@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+
+	"github.com/txn2/m6t/internal/gitexec"
 )
 
 // The porcelain v2 record kinds this package reads, as the leading token of a
@@ -61,11 +63,11 @@ func Load(root string) (Status, error) {
 	// spaces, quotes or non-UTF-8 bytes arrive as themselves instead of
 	// through an escaping scheme this package would have to reverse
 	// correctly on every platform.
-	out, err := runGit(root, "status", "--porcelain=v2", "--branch", "-z")
+	out, err := gitexec.Read(root, "status", "--porcelain=v2", "--branch", "-z")
 	switch {
-	case errors.Is(err, errNoGit):
+	case errors.Is(err, gitexec.ErrNoGit):
 		return statusFor(NoGit), nil
-	case errors.Is(err, errNotARepository):
+	case errors.Is(err, gitexec.ErrNotARepository):
 		return statusFor(NotARepository), nil
 	case err != nil:
 		return Status{}, err

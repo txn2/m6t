@@ -2,11 +2,46 @@ package watch
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
+
+// gitRepo makes a real repository with one committed file.
+//
+// The tests below that use it are about what a real git invocation does to a
+// real watched directory, so a fixture that only looks like a repository (the
+// tree helper's .git) would not exercise the thing they exist to pin.
+func gitRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	runGitInTest(t, root, "init", "-q", "-b", "main")
+	runGitInTest(t, root, "config", "user.email", "test@example.invalid")
+	runGitInTest(t, root, "config", "user.name", "m6t tests")
+	if err := os.WriteFile(filepath.Join(root, "a.yaml"), []byte("one\n"), 0o640); err != nil {
+		t.Fatalf("writing a.yaml: %v", err)
+	}
+	runGitInTest(t, root, "add", "-A")
+	runGitInTest(t, root, "commit", "-qm", "first")
+	return root
+}
+
+// runGitInTest runs one git command, failing the test if it does not succeed.
+// git is a hard requirement of contributing to this repository, so a machine
+// without it fails here rather than skipping.
+func runGitInTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 // testInterval is the coalescing cadence tests run at — short enough that a
 // test finishes quickly, long enough that a handful of rapid writes land in
@@ -195,6 +230,103 @@ func TestFsWatcherPublishesNothingWhenNothingChanges(t *testing.T) {
 	time.Sleep(testInterval * 10)
 	if n := rec.count(); n != 0 {
 		t.Errorf("published %d batches for an unchanged tree, want 0", n)
+	}
+}
+
+// The regression test for #61, and the one that had to talk to real git.
+//
+// The loop it pins was invisible to every other test here: a `git status` read
+// opens .git/index, macOS reports the access-time bump as NOTE_ATTRIB, fsnotify
+// surfaces that as Chmod, and the resulting batch told the frontend its status
+// was stale — so it read again. An idle window ran four `git status`
+// subprocesses a second, forever.
+//
+// A fake cannot catch it. The event only exists because a real read touched a
+// real file and a real kernel reported it, so the assertion has to be made
+// against those. On Linux the read produces no event at all and this passes for
+// a different reason, which is fine — it is the platform where the bug does not
+// exist.
+func TestAStatusReadDoesNotFeedTheWatcher(t *testing.T) {
+	root := gitRepo(t)
+	rec := &recordingEvents{}
+
+	w, err := startFsWatcherWithInterval(root, rec, testInterval)
+	if err != nil {
+		t.Fatalf("startFsWatcherWithInterval: %v", err)
+	}
+	t.Cleanup(w.stop)
+
+	// Let anything left over from building the fixture settle and clear it, so
+	// what is counted below is only what the reads produced.
+	time.Sleep(testInterval * 5)
+	rec.mu.Lock()
+	rec.batches = nil
+	rec.mu.Unlock()
+
+	// The read m6t actually makes, flags included: --no-optional-locks is what
+	// already stops the read from writing the index, and it is deliberately
+	// still not enough on its own.
+	for range 5 {
+		runGitInTest(t, root, "--no-optional-locks", "-C", root, "status", "--porcelain=v2", "--branch", "-z")
+	}
+
+	time.Sleep(testInterval * 5)
+	if n := rec.count(); n != 0 {
+		t.Errorf("published %d batches for five status reads of an unchanged repository, want 0", n)
+	}
+}
+
+// The other half: the fix must not have bought silence by going deaf. A change
+// made outside the app still has to reach the badges.
+func TestAWriteToTheIndexStillPublishes(t *testing.T) {
+	root := gitRepo(t)
+	rec := &recordingEvents{}
+
+	w, err := startFsWatcherWithInterval(root, rec, testInterval)
+	if err != nil {
+		t.Fatalf("startFsWatcherWithInterval: %v", err)
+	}
+	t.Cleanup(w.stop)
+
+	if err := os.WriteFile(filepath.Join(root, "a.yaml"), []byte("changed\n"), 0o640); err != nil {
+		t.Fatalf("writing a.yaml: %v", err)
+	}
+	runGitInTest(t, root, "add", "-A")
+
+	eventually(t, "a batch after git add", func() bool {
+		return rec.count() > 0
+	})
+}
+
+// The unit under the two above: an event carrying nothing but Chmod marks
+// nothing pending, and one carrying Chmod alongside a real operation still
+// does. kqueue combines bits, so a fix written as "has the Chmod bit" instead
+// of "is only the Chmod bit" would drop real writes and no other test here
+// would notice — every one of them produces a plain Write.
+//
+// The watcher here is built by hand rather than started, so the only events it
+// ever sees are the two below. A running watcher would be reading a real
+// directory at the same time, and a stray event from it would make the "nothing
+// is pending" assertion depend on what the filesystem happened to be doing.
+func TestAttributeOnlyEventsAreDroppedAndCombinedOnesAreNot(t *testing.T) {
+	root := t.TempDir()
+	w := &fsWatcher{
+		root:    root,
+		events:  &recordingEvents{},
+		watched: map[string]bool{},
+		pending: map[string]bool{},
+		done:    make(chan struct{}),
+	}
+	path := filepath.Join(root, "a.yaml")
+
+	w.handle(fsnotify.Event{Name: path, Op: fsnotify.Chmod})
+	if len(w.pending) != 0 {
+		t.Errorf("a Chmod-only event marked %d directories pending, want 0", len(w.pending))
+	}
+
+	w.handle(fsnotify.Event{Name: path, Op: fsnotify.Write | fsnotify.Chmod})
+	if !w.pending["."] {
+		t.Errorf("a Write|Chmod event marked %v pending, want the file's directory", w.pending)
 	}
 }
 

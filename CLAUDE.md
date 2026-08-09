@@ -36,6 +36,11 @@ internal/app/             the Wails binding layer — the object bound to the
                           services below it; they never import it.
 internal/buildinfo/       link-time build identity. A dependency root: it
                           imports nothing first-party.
+internal/gitexec/         the only place a git process is started, and the
+                          conditions every git call runs under. The second
+                          dependency root: it imports nothing first-party, so
+                          every git reader can share one runner without a
+                          sibling import.
 internal/project/         project registry: the persistent list of manifest
                           repositories (projects.yaml, DESIGN.md §4), their
                           per-project settings, and clone-by-URL. Imports
@@ -59,6 +64,13 @@ service that needs another's behavior takes an interface in its constructor
 and lets `internal/app` wire the two together. `depguard` enforces this; it is
 not a style preference, it is what keeps the service graph from becoming a
 ball of mud.
+
+There are two exceptions and they are both dependency roots, not shortcuts
+through the rule. `internal/buildinfo` and `internal/gitexec` import nothing
+first-party, so any layer may import either without creating a cycle or a
+hidden layer. A third one is a design change, argued in the PR that wants it —
+the bar is that the package holds a condition several services must run under
+rather than behavior one of them owns.
 
 There is no `pkg/`. m6t exposes no public Go API.
 

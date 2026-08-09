@@ -118,18 +118,30 @@ linters:
         # Backend services (git, pty, kube, helm, …) are siblings. Sibling
         # imports are how a service graph becomes a ball of mud; a service that
         # needs another's behaviour takes an interface from its constructor and
-        # lets internal/app wire the two together. buildinfo is the one
-        # exception: it is a pinned leaf, so depending on it cannot create a
-        # cycle or a hidden layer.
+        # lets internal/app wire the two together. buildinfo and gitexec are the
+        # exceptions: both are pinned leaves, so depending on either cannot
+        # create a cycle or a hidden layer.
+        #
+        # gitexec was made one in #53. It is the only place a git process is
+        # started, and what it holds is not a service's behavior but the
+        # conditions every git call must run under — the locale the
+        # not-a-repository match depends on, the flag that stops a read
+        # rewriting .git/index, the deadlines, git's stderr passed out
+        # unedited. A second git reader that imported a sibling to get those
+        # would be the ball of mud this rule prevents; one that reimplemented
+        # them would be worse, because a wrong answer to any of them fails
+        # silently. So the runner sits below every service instead.
         services-do-not-import-each-other:
           list-mode: lax
           files:
             - "**/internal/**"
             - "!**/internal/app/**"
             - "!**/internal/buildinfo/**"
+            - "!**/internal/gitexec/**"
             - "!**/*_test.go"
           allow:
             - github.com/txn2/m6t/internal/buildinfo
+            - github.com/txn2/m6t/internal/gitexec
           deny:
             - pkg: github.com/txn2/m6t/internal
               desc: "backend services must not import each other; accept an interface and let internal/app wire it (see CONTRIBUTING.md)."
@@ -144,6 +156,20 @@ linters:
           deny:
             - pkg: github.com/txn2/m6t
               desc: "internal/buildinfo is a leaf with no first-party imports so any layer can use it; keep it that way (see CONTRIBUTING.md)."
+        # gitexec is the second dependency root, and it earns the exception for
+        # the same reason: a leaf that any layer may use is only safe while it
+        # stays a leaf. One import of a project type or a watcher seam and the
+        # runner would be pulling half the service graph in behind every git
+        # call — including into whatever reads git next, which is the thing #53
+        # existed to make possible.
+        gitexec-is-a-dependency-root:
+          list-mode: lax
+          files:
+            - "**/internal/gitexec/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/txn2/m6t
+              desc: "internal/gitexec is a leaf with no first-party imports so any git reader can use it; keep it that way (see CONTRIBUTING.md)."
 
     gocritic:
       enabled-tags:
@@ -333,6 +359,19 @@ linters:
         G306: "0644"
 
     wrapcheck:
+      # internal/gitexec's errors are already the finished message: they name
+      # the argv that ran — which contains the repository, since git is invoked
+      # with -C — and carry git's own stderr verbatim, which DESIGN.md §7
+      # requires. internal/git returning one unwrapped is the intended
+      # behavior, not a missed wrap; internal/app is what puts the operation's
+      # name in front of it, once. Wrapping again in between would turn
+      # "pulling in /repo: git -C /repo pull: …" into "pulling in /repo: pull:
+      # git -C /repo pull: …".
+      #
+      # Scoped to that one package. Every other cross-package error still has
+      # to be wrapped, which is the rule this exception is measured against.
+      ignore-package-globs:
+        - github.com/txn2/m6t/internal/gitexec
       ignore-sigs:
         - .Errorf(
         - errors.New(
@@ -467,7 +506,15 @@ linters:
       #     constant `--version` invocations from a package-level table; the
       #     only variable is the path exec.LookPath resolved, which is the
       #     lookup gosec would recommend doing.
-      - path: (internal/git/|internal/kubeexec/|internal/tools/|_test\.go)
+      #
+      # #53 replaces internal/git in this list with internal/gitexec, and that
+      # is a narrowing rather than a move. It is the same exec call, still
+      # building a fixed argv with the worktree path after `-C` — but it is now
+      # the only one, and internal/git starts no process at all, so the
+      # exclusion no longer covers a package that does not need it. The git
+      # fixture builders that do exec are in _test.go files, which this rule
+      # already names.
+      - path: (internal/gitexec/|internal/kubeexec/|internal/tools/|_test\.go)
         linters:
           - gosec
         text: "G204"
